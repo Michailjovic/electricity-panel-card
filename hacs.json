@@ -1,4 +1,5 @@
 {
   "name": "Electricity Panel Card",
-  "render_readme": true
+  "render_readme": true,
+  "filename": "electricity-panel-card.js"
 }
