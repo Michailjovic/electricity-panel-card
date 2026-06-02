@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.6.0] - 2026-06-03
+
+### Added
+- Schedule shows active slot when collapsed — the current NT/VT row (with time range, progress bar and "Now" badge) is always visible even when the schedule is collapsed. No need to expand just to see where you are.
+- Channel group sum — the header of a multi-channel device group (e.g. Shelly 4PM "Power strip PC Table") now shows the total watts and amperes summed across all channels that have measurement entities.
+
+---
+
 ## [2.5.0] - 2026-06-03
 
 ### Added

@@ -1455,6 +1455,7 @@ let ElectricityPanelCard = class extends i {
     const remaining = showing ? null : this._ntRemainingMins(day.starts, day.offsets);
     const totalNT = day.offsets.reduce((a2, b2) => a2 + b2, 0);
     const exp = this._scheduleExpanded;
+    const currentSlot = slots.find((s2) => s2.isCurrent);
     return b`
       <div class="schedule-block">
         <div class="schedule-title" @click=${() => {
@@ -1475,8 +1476,16 @@ let ElectricityPanelCard = class extends i {
             <ha-icon icon="${exp ? "mdi:chevron-up" : "mdi:chevron-down"}" class="schedule-chevron"></ha-icon>
           </div>
         </div>
+        ${!exp && currentSlot ? b`
+          <div class="schedule-current-row srow active ${currentSlot.type}">
+            <span class="stariff ${currentSlot.type}">${currentSlot.type.toUpperCase()}</span>
+            <span class="srow-time">${currentSlot.label}</span>
+            <div class="srow-track"><div class="srow-fill ${currentSlot.type}" style="width:${currentSlot.pct.toFixed(1)}%"></div></div>
+            <span class="snow ${currentSlot.type}">Now</span>
+          </div>
+        ` : A}
+        ${this._renderTimeline(slots)}
         ${exp ? b`
-          ${this._renderTimeline(slots)}
           <div class="schedule-rows">
             ${slots.map((sl) => b`
               <div class="srow ${sl.isPast ? "past" : sl.isCurrent ? "active" : "future"} ${sl.type}">
@@ -1613,9 +1622,15 @@ let ElectricityPanelCard = class extends i {
       `;
     }
     if ((((_a2 = d2.channels) == null ? void 0 : _a2.length) ?? 0) > 0) {
+      const chTotalW = d2.channels.reduce((s2, ch) => s2 + this._watts(ch.power), 0);
+      const chTotalA = d2.channels.reduce((s2, ch) => s2 + this._num(ch.current), 0);
+      const hasChMetrics = d2.channels.some((ch) => ch.power || ch.current);
       return b`
         <div class="device-group">
-          <div class="device-group-label">${d2.name}</div>
+          <div class="device-group-label">
+            <span>${d2.name}</span>
+            ${hasChMetrics ? b`<span class="ch-sum">${this._fmtW(chTotalW)} · ${chTotalA.toFixed(1)} A</span>` : A}
+          </div>
           ${d2.channels.map((ch) => this._renderChannel(ch))}
         </div>
       `;
@@ -2241,6 +2256,32 @@ ElectricityPanelCard.styles = i$3`
     .note-row { opacity: 0.7; }
     .note-icon { --mdc-icon-size: 13px; color: var(--disabled-text-color); flex-shrink: 0; }
     .note-row .device-name { font-style: italic; }
+
+    /* channel sum in device group header */
+    .device-group-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--disabled-text-color);
+      margin-bottom: 4px;
+      padding-left: 16px;
+    }
+    .tp-device-col .device-group-label { padding-left: 0; }
+    .ch-sum {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--secondary-text-color);
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    /* schedule current row shown when collapsed */
+    .schedule-current-row {
+      margin-top: 6px;
+    }
   `;
 __decorateClass([
   n2({ attribute: false })
