@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.3] - 2026-06-02
+
+### Added
+- GitHub Actions workflow (`.github/workflows/release.yml`) — pushing a tag now automatically builds the card and creates a full GitHub release with the JS file attached as a release asset
+
+### Fixed
+- Power and energy sensors are now unit-aware: values in kW, MW, Wh, or MWh are automatically converted for display. No configuration needed — the card reads `unit_of_measurement` from the entity attribute. Tuya breakers reporting in kW now show correct values.
+
+---
+
+## [2.0.2] - 2026-06-02
+
+### Fixed
+- Visual editor failing with "Cannot read properties of undefined (reading 'bind')"
+- Editor now uses standard `@property()` + `shouldUpdate()` lifecycle, preventing unnecessary re-renders on every hass state update
+
+---
+
 ## [2.0.1] - 2026-06-02
 
 ### Fixed

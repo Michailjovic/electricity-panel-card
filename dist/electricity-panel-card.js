@@ -1127,6 +1127,32 @@ let ElectricityPanelCard = class extends i {
     if (pct > 55) return "var(--warning-color, #f57c00)";
     return "var(--success-color, #43a047)";
   }
+  /** Return power in W, auto-converting from kW/MW if needed */
+  _watts(entityId) {
+    var _a2;
+    if (!entityId) return 0;
+    const entity = (_a2 = this.hass) == null ? void 0 : _a2.states[entityId];
+    if (!entity) return 0;
+    const val = parseFloat(entity.state);
+    if (isNaN(val)) return 0;
+    const unit = entity.attributes["unit_of_measurement"] ?? "";
+    if (unit === "kW") return val * 1e3;
+    if (unit === "MW") return val * 1e6;
+    return val;
+  }
+  /** Return energy in kWh, auto-converting from Wh/MWh if needed */
+  _kwh(entityId) {
+    var _a2;
+    if (!entityId) return 0;
+    const entity = (_a2 = this.hass) == null ? void 0 : _a2.states[entityId];
+    if (!entity) return 0;
+    const val = parseFloat(entity.state);
+    if (isNaN(val)) return 0;
+    const unit = entity.attributes["unit_of_measurement"] ?? "";
+    if (unit === "Wh") return val / 1e3;
+    if (unit === "MWh") return val * 1e3;
+    return val;
+  }
   // ── HDO helpers ────────────────────────────────────────────────────────────
   _hdoCountdown() {
     const hdo = this._config.hdo;
@@ -1158,7 +1184,7 @@ let ElectricityPanelCard = class extends i {
   _renderMainMeter() {
     const m2 = this._config.main_meter;
     if (!m2) return A;
-    const totalW = this._num(m2.power_l1) + this._num(m2.power_l2) + this._num(m2.power_l3);
+    const totalW = this._watts(m2.power_l1) + this._watts(m2.power_l2) + this._watts(m2.power_l3);
     const phases = [
       { label: "L1", power: m2.power_l1, current: m2.current_l1 },
       { label: "L2", power: m2.power_l2, current: m2.current_l2 },
@@ -1172,14 +1198,14 @@ let ElectricityPanelCard = class extends i {
           <span class="badge badge-info">3φ</span>
           <div class="meter-total">
             <span class="metric-primary">${(totalW / 1e3).toFixed(2)} kW</span>
-            ${m2.energy_today ? b`<span class="metric-small">${this._num(m2.energy_today).toFixed(1)} kWh today</span>` : A}
+            ${m2.energy_today ? b`<span class="metric-small">${this._kwh(m2.energy_today).toFixed(1)} kWh today</span>` : A}
           </div>
         </div>
         <div class="phases-grid">
           ${phases.map((p2) => b`
             <div class="phase-cell">
               <div class="phase-label">${p2.label}</div>
-              <div class="phase-power">${(this._num(p2.power) / 1e3).toFixed(2)} kW</div>
+              <div class="phase-power">${(this._watts(p2.power) / 1e3).toFixed(2)} kW</div>
               <div class="phase-detail">${this._num(p2.current).toFixed(1)} A</div>
             </div>
           `)}
@@ -1190,9 +1216,9 @@ let ElectricityPanelCard = class extends i {
   _renderCircuit(c2) {
     var _a2;
     const isOn = this._isOn(c2.switch);
-    const power = this._num(c2.power);
+    const power = this._watts(c2.power);
     const current = this._num(c2.current);
-    const energy = this._num(c2.energy);
+    const energy = this._kwh(c2.energy);
     const maxA = c2.max_current ?? (c2.phases === 3 ? 63 : 16);
     const loadPct = Math.min(100, current > 0 ? current / maxA * 100 : power / (maxA * 230) * 100);
     const barColor = this._loadColor(loadPct);
