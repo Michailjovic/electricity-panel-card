@@ -16,6 +16,7 @@ export class ElectricityPanelCard extends LitElement {
   @property({ attribute: false }) hass!: HomeAssistant;
   @state() private _config!: ElectricityPanelConfig;
   @state() private _expanded = new Set<string>();
+  @state() private _showTomorrow = false;
 
   private _timer?: number;
 
@@ -144,42 +145,85 @@ export class ElectricityPanelCard extends LitElement {
     return 'holiday';
   }
 
+  private _ntRemainingMins(starts: string[], offsets: number[]): number {
+    const now = Date.now();
+    const midnight = new Date(); midnight.setHours(0,0,0,0);
+    let rem = 0;
+    starts.forEach((s, i) => {
+      const [h, m] = s.split(':').map(Number);
+      const st = midnight.getTime() + (h*60+m)*60000;
+      const en = st + offsets[i]*60000;
+      if (now < en) rem += (en - Math.max(now, st)) / 60000;
+    });
+    return rem;
+  }
+
+  private _fmtMins(mins: number): string {
+    const h = Math.floor(mins / 60);
+    const m = Math.floor(mins % 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  }
+
+  private _tomorrowDayType(): 'weekday' | 'weekend' {
+    const d = (new Date().getDay() + 1) % 7;
+    return (d === 0 || d === 6) ? 'weekend' : 'weekday';
+  }
+
+  private _fmtCostRate(watts: number): string {
+    const hdo = this._config.hdo;
+    if (!hdo?.nt_price && !hdo?.vt_price) return '';
+    const isNT = this._isOn(hdo.switch);
+    const price = isNT ? (hdo.nt_price ?? 0) : (hdo.vt_price ?? 0);
+    const cur = hdo.currency ?? 'Kč';
+    return `${((watts / 1000) * price).toFixed(2)} ${cur}/h`;
+  }
+
   private _renderHdoSchedule(): TemplateResult | typeof nothing {
     const hdo = this._config.hdo;
     if (!hdo) return nothing;
-
     const preset = hdo.tariff_preset ? PRE_TARIFFS[hdo.tariff_preset] : undefined;
     const src = preset ?? hdo.schedule;
     if (!src) return nothing;
 
-    const dt = this._dayType();
+    const showing = this._showTomorrow;
+    const dt = showing ? this._tomorrowDayType() : this._dayType();
     const day = dt === 'holiday' && src.holiday ? src.holiday
-      : dt === 'weekend' ? src.weekend
-      : src.weekday;
+      : dt === 'weekend' ? src.weekend : src.weekday;
 
     const isNT = this._isOn(hdo.switch);
     const color = isNT ? 'var(--success-color,#43a047)' : 'var(--error-color,#e53935)';
     const now = Date.now();
     const midnight = new Date(); midnight.setHours(0,0,0,0);
+    const base = showing ? midnight.getTime() + 86400000 : midnight.getTime();
     const fmt = (ms: number) => new Date(ms).toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
 
     const slots = day.starts.map((start, i) => {
       const [h, m] = start.split(':').map(Number);
-      const s = midnight.getTime() + (h*60+m)*60000;
+      const s = base + (h*60+m)*60000;
       const e = s + day.offsets[i]*60000;
-      const isPast = now >= e;
-      const isCurrent = now >= s && now < e;
+      const isPast = !showing && now >= e;
+      const isCurrent = !showing && now >= s && now < e;
       const pct = isCurrent ? Math.min(100, ((now-s)/(e-s))*100) : isPast ? 100 : 0;
       const dur = day.offsets[i];
       const durStr = dur >= 60 ? `${Math.floor(dur/60)}h${dur%60 ? ` ${dur%60}m` : ''}` : `${dur}m`;
-      return { label: `${fmt(s)} – ${fmt(e)}`, isPast, isCurrent, pct, durStr };
+      return { label: `${fmt(s)}–${fmt(e)}`, isPast, isCurrent, pct, durStr };
     });
+
+    const remaining = showing ? null : this._ntRemainingMins(day.starts, day.offsets);
+    const totalNT = day.offsets.reduce((a, b) => a + b, 0);
 
     return html`
       <div class="schedule-block">
         <div class="schedule-title">
-          Today's NT schedule
-          <span class="schedule-day">${dt}</span>
+          <span>${showing ? "Tomorrow's" : "Today's"} NT schedule
+            <span class="schedule-day">${dt}</span>
+          </span>
+          <div class="schedule-nav">
+            ${remaining !== null ? html`<span class="nt-remaining">${this._fmtMins(remaining)} left · ${this._fmtMins(totalNT)} total</span>` : nothing}
+            <button class="sday-btn" @click=${() => { this._showTomorrow = !this._showTomorrow; }}>
+              ${showing ? 'Today' : 'Tomorrow'}
+            </button>
+          </div>
         </div>
         ${slots.map(sl => html`
           <div class="srow ${sl.isPast ? 'past' : sl.isCurrent ? 'active' : ''}">
@@ -203,10 +247,13 @@ export class ElectricityPanelCard extends LitElement {
     if (!hdo?.switch) return nothing;
     const isNT = this._isOn(hdo.switch);
     const cd = this._hdoCountdown();
+    const price = isNT ? hdo.nt_price : hdo.vt_price;
+    const cur = hdo.currency ?? 'Kč';
     return html`
       <div class="hdo-bar ${isNT ? 'nt' : 'vt'}">
         <ha-icon icon="mdi:lightning-bolt-circle"></ha-icon>
         <span class="hdo-label">${isNT ? 'NT — low tariff' : 'VT — high tariff'}</span>
+        ${price ? html`<span class="hdo-price">${price} ${cur}/kWh</span>` : nothing}
         ${cd ? html`<span class="hdo-cd">ends in ${cd}</span>` : nothing}
       </div>
     `;
@@ -288,6 +335,7 @@ export class ElectricityPanelCard extends LitElement {
               ${current.toFixed(1)} A
               ${c.voltage ? html` · ${this._num(c.voltage).toFixed(0)} V` : nothing}
               ${energy > 0 ? html` · ${energy.toFixed(2)} kWh` : nothing}
+              ${power > 0 && this._fmtCostRate(power) ? html` · <span class="cost-rate">${this._fmtCostRate(power)}</span>` : nothing}
             </span>
           </div>
           ${hasDevices
@@ -491,6 +539,32 @@ export class ElectricityPanelCard extends LitElement {
       min-width: 30px;
       text-align: right;
     }
+    .schedule-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+    }
+    .nt-remaining {
+      font-size: 10px;
+      color: var(--secondary-text-color);
+      white-space: nowrap;
+    }
+    .sday-btn {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.15));
+      background: none;
+      color: var(--secondary-text-color);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .sday-btn:hover { background: var(--secondary-background-color); }
+    .cost-rate {
+      color: var(--warning-color, #f57c00);
+      font-weight: 500;
+    }
 
     /* HDO bar */
     .hdo-bar {
@@ -508,6 +582,13 @@ export class ElectricityPanelCard extends LitElement {
     .hdo-bar ha-icon { --mdc-icon-size: 18px; }
     .hdo-label { flex: 1; }
     .hdo-cd { font-size: 12px; opacity: 0.75; }
+    .hdo-price {
+      font-size: 12px;
+      opacity: 0.8;
+      font-weight: 600;
+      margin-left: auto;
+      margin-right: 4px;
+    }
 
     /* Section utilities */
     .section-label {

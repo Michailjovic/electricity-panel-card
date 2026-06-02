@@ -89,6 +89,12 @@ export interface HdoConfig {
    * built-in schedule for that tariff. Takes precedence over `schedule`.
    */
   tariff_preset?: string;
+  /** Price per kWh during low tariff (NT) — used for cost rate display */
+  nt_price?: number;
+  /** Price per kWh during high tariff (VT) — used for cost rate display */
+  vt_price?: number;
+  /** Currency symbol shown next to prices (default: Kč) */
+  currency?: string;
   /** Manual NT schedule (used when tariff_preset is not set) */
   schedule?: {
     weekday: TariffDay;

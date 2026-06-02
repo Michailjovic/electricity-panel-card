@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.0] - 2026-06-02
+
+### Added
+- NT remaining time — "Xh Ym left · Xh total" shown under today's schedule header, summarising how much low-tariff time is still available today
+- Tomorrow's NT schedule — toggle button next to the schedule header switches between today and tomorrow; uses the correct weekday/weekend/holiday schedule for each day
+- Tariff pricing — `nt_price` and `vt_price` (per kWh) and `currency` can now be set in the HDO config; the current price rate is shown in the HDO bar next to the NT/VT indicator
+- Cost rate per circuit — when tariff prices are configured, each circuit footer shows an estimated cost rate (e.g. `0.42 Kč/h`) based on live power draw
+- Drag & drop circuit reordering in the GUI editor — grab the ⠿ handle on any circuit row and drag it to a new position
+
+### Fixed
+- Escaped backtick syntax errors introduced by the Python-based patch script in v2.1.0-dev; all template literals restored to valid TypeScript
+
+---
+
 ## [2.0.5] - 2026-06-02
 
 ### Added

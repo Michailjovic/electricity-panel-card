@@ -698,6 +698,8 @@ let ElectricityPanelEditor = class extends i {
     super(...arguments);
     this._openCircuit = -1;
     this._openDevice = -1;
+    this._dragOverIdx = -1;
+    this._dragSrcIdx = -1;
     this._datalistFilled = false;
   }
   // Block re-renders when only hass changes (it updates constantly in HA).
@@ -763,27 +765,39 @@ let ElectricityPanelEditor = class extends i {
     this._openCircuit = cfg.circuits.length - 1;
     this._openDevice = -1;
   }
-  _removeCircuit(idx) {
+  _removeCircuit(idx2) {
     var _a2;
     const cfg = deepClone(this._config);
-    (_a2 = cfg.circuits) == null ? void 0 : _a2.splice(idx, 1);
+    (_a2 = cfg.circuits) == null ? void 0 : _a2.splice(idx2, 1);
     this._config = cfg;
     this._fire(cfg);
     this._openCircuit = -1;
   }
-  _moveCircuit(idx, dir) {
+  _moveCircuit(idx2, dir) {
     const cfg = deepClone(this._config);
     const arr = cfg.circuits ?? [];
-    const t2 = idx + dir;
+    const t2 = idx2 + dir;
     if (t2 < 0 || t2 >= arr.length) return;
-    [arr[idx], arr[t2]] = [arr[t2], arr[idx]];
+    [arr[idx2], arr[t2]] = [arr[t2], arr[idx2]];
     this._config = cfg;
     this._fire(cfg);
     this._openCircuit = t2;
   }
-  _setCircuitField(idx, field, val) {
+  _moveCircuitTo(from, to) {
+    if (from === to) return;
     const cfg = deepClone(this._config);
-    const c2 = cfg.circuits[idx];
+    const arr = cfg.circuits ?? [];
+    const [item] = arr.splice(from, 1);
+    arr.splice(to, 0, item);
+    this._config = cfg;
+    this._fire(cfg);
+    this._openCircuit = to;
+    this._dragSrcIdx = -1;
+    this._dragOverIdx = -1;
+  }
+  _setCircuitField(idx2, field, val) {
+    const cfg = deepClone(this._config);
+    const c2 = cfg.circuits[idx2];
     if (val === "") {
       delete c2[field];
     } else {
@@ -793,9 +807,9 @@ let ElectricityPanelEditor = class extends i {
     this._config = cfg;
     this._fire(cfg);
   }
-  _setCircuitCheck(idx, field, val) {
+  _setCircuitCheck(idx2, field, val) {
     const cfg = deepClone(this._config);
-    cfg.circuits[idx][field] = val;
+    cfg.circuits[idx2][field] = val;
     this._config = cfg;
     this._fire(cfg);
   }
@@ -921,6 +935,10 @@ let ElectricityPanelEditor = class extends i {
               Weekday / weekend / holiday schedules are loaded automatically.
             </span>
           </div>
+          <div class="group-label" style="margin-top:12px;">Tariff prices (optional)</div>
+          ${this._numField("NT price per kWh (low tariff)", h2.nt_price, s2("nt_price"), "0.00")}
+          ${this._numField("VT price per kWh (high tariff)", h2.vt_price, s2("vt_price"), "0.00")}
+          ${this._textField("Currency symbol", h2.currency, s2("currency"), "Kč")}
         </div>
       </details>`;
   }
@@ -945,7 +963,18 @@ let ElectricityPanelEditor = class extends i {
     const open = this._openDevice === di;
     const s2 = (f2) => (v2) => this._setDeviceField(ci, di, f2, v2);
     return b`
-      <div class="sub-item ${open ? "open" : ""}">
+      <div class="sub-item ${open ? "open" : ""}"
+        @dragover=${(e2) => {
+      e2.preventDefault();
+      if (this._dragSrcIdx !== idx) this._dragOverIdx = idx;
+    }}
+        @dragleave=${() => {
+      if (this._dragOverIdx === idx) this._dragOverIdx = -1;
+    }}
+        @drop=${(e2) => {
+      e2.preventDefault();
+      if (this._dragSrcIdx >= 0 && this._dragSrcIdx !== idx) this._moveCircuitTo(this._dragSrcIdx, idx);
+    }}>
         <div class="row-hdr" @click=${() => {
       this._openDevice = open ? -1 : di;
     }}>
@@ -973,28 +1002,38 @@ let ElectricityPanelEditor = class extends i {
           </div>` : A}
       </div>`;
   }
-  _renderCircuitRow(c2, idx) {
+  _renderCircuitRow(c2, idx2) {
     var _a2;
-    const open = this._openCircuit === idx;
-    const total = ((_a2 = this._config.circuits) == null ? void 0 : _a2.length) ?? 0;
-    const sf = (f2) => (v2) => this._setCircuitField(idx, f2, v2);
+    const open = this._openCircuit === idx2;
+    ((_a2 = this._config.circuits) == null ? void 0 : _a2.length) ?? 0;
+    const sf = (f2) => (v2) => this._setCircuitField(idx2, f2, v2);
     return b`
       <div class="sub-item ${open ? "open" : ""}">
-        <div class="row-hdr" @click=${() => {
-      this._openCircuit = open ? -1 : idx;
+        <div class="row-hdr ${this._dragOverIdx === idx2 ? "drag-over" : ""}"
+          @click=${() => {
+      this._openCircuit = open ? -1 : idx2;
       this._openDevice = -1;
     }}>
+          <ha-icon icon="mdi:drag-vertical" class="drag-handle"
+            draggable="true"
+            @dragstart=${(e2) => {
+      e2.stopPropagation();
+      this._dragSrcIdx = idx2;
+      e2.dataTransfer.effectAllowed = "move";
+    }}
+            @dragend=${(e2) => {
+      e2.stopPropagation();
+      this._dragOverIdx = -1;
+    }}
+            @click=${(e2) => e2.stopPropagation()}>
+          </ha-icon>
           <span class="row-lbl">${c2.name || "(unnamed circuit)"}</span>
           <div class="badges">
             ${c2.phases === 3 ? b`<span class="badge info">3ph</span>` : A}
             ${c2.critical ? b`<span class="badge warn">critical</span>` : A}
           </div>
           <div class="row-acts" @click=${(e2) => e2.stopPropagation()}>
-            ${idx > 0 ? b`<button class="btn-icon" @click=${() => this._moveCircuit(idx, -1)}>
-              <ha-icon icon="mdi:arrow-up"></ha-icon></button>` : A}
-            ${idx < total - 1 ? b`<button class="btn-icon" @click=${() => this._moveCircuit(idx, 1)}>
-              <ha-icon icon="mdi:arrow-down"></ha-icon></button>` : A}
-            <button class="btn-icon danger" @click=${() => this._removeCircuit(idx)}>
+            <button class="btn-icon danger" @click=${() => this._removeCircuit(idx2)}>
               <ha-icon icon="mdi:minus-circle-outline"></ha-icon>
             </button>
           </div>
@@ -1006,15 +1045,15 @@ let ElectricityPanelEditor = class extends i {
             ${this._textField("Circuit ID", c2.id, sf("id"), "e.g. c08")}
             <div class="field">
               <label>Phases</label>
-              <select @change=${(e2) => this._setCircuitField(idx, "phases", e2.target.value)}>
+              <select @change=${(e2) => this._setCircuitField(idx2, "phases", e2.target.value)}>
                 <option value="1" ?selected=${c2.phases !== 3}>1 — single-phase</option>
                 <option value="3" ?selected=${c2.phases === 3}>3 — three-phase</option>
               </select>
             </div>
             <div class="field checkbox">
-              <input type="checkbox" id="crit-${idx}" .checked=${c2.critical ?? false}
-                @change=${(e2) => this._setCircuitCheck(idx, "critical", e2.target.checked)} />
-              <label for="crit-${idx}">Critical circuit (disables remote toggle)</label>
+              <input type="checkbox" id="crit-${idx2}" .checked=${c2.critical ?? false}
+                @change=${(e2) => this._setCircuitCheck(idx2, "critical", e2.target.checked)} />
+              <label for="crit-${idx2}">Critical circuit (disables remote toggle)</label>
             </div>
             ${this._numField("Max current A (breaker rating)", c2.max_current, sf("max_current"), c2.phases === 3 ? "63" : "16")}
             <div class="group-label" style="margin-top:10px;">Breaker entities</div>
@@ -1024,8 +1063,8 @@ let ElectricityPanelEditor = class extends i {
             ${this._entityField("Energy today (kWh)", c2.energy, sf("energy"))}
             ${this._entityField("Voltage (V)", c2.voltage, sf("voltage"))}
             <div class="group-label" style="margin-top:10px;">Devices behind this breaker</div>
-            ${(c2.devices ?? []).map((d2, di) => this._renderDeviceRow(idx, d2, di))}
-            <button class="btn-add" @click=${() => this._addDevice(idx)}>
+            ${(c2.devices ?? []).map((d2, di) => this._renderDeviceRow(idx2, d2, di))}
+            <button class="btn-add" @click=${() => this._addDevice(idx2)}>
               <ha-icon icon="mdi:plus"></ha-icon> Add device
             </button>
           </div>` : A}
@@ -1135,6 +1174,18 @@ ElectricityPanelEditor.styles = i$3`
     .badge.info { background: rgba(33,150,243,0.12); color: var(--primary-color, #2196f3); }
       .badge.warn { background: rgba(245,124,0,0.12); color: var(--warning-color, #f57c00); }
 
+    .drag-handle {
+      --mdc-icon-size: 18px;
+      color: var(--disabled-text-color);
+      cursor: grab;
+      flex-shrink: 0;
+      touch-action: none;
+    }
+    .drag-handle:active { cursor: grabbing; }
+    .row-hdr.drag-over {
+      background: var(--secondary-background-color);
+      border-top: 2px solid var(--primary-color, #2196f3);
+    }
     .btn-icon { background: none; border: none; cursor: pointer; color: var(--secondary-text-color); padding: 2px; border-radius: 4px; display: flex; align-items: center; }
     .btn-icon:hover { background: var(--secondary-background-color); }
     .btn-icon.danger:hover { color: var(--error-color, #e53935); }
@@ -1162,6 +1213,9 @@ __decorateClass$1([
 __decorateClass$1([
   r()
 ], ElectricityPanelEditor.prototype, "_openDevice", 2);
+__decorateClass$1([
+  r()
+], ElectricityPanelEditor.prototype, "_dragOverIdx", 2);
 ElectricityPanelEditor = __decorateClass$1([
   t("electricity-panel-editor")
 ], ElectricityPanelEditor);
@@ -1179,6 +1233,7 @@ let ElectricityPanelCard = class extends i {
   constructor() {
     super(...arguments);
     this._expanded = /* @__PURE__ */ new Set();
+    this._showTomorrow = false;
   }
   connectedCallback() {
     super.connectedCallback();
@@ -1288,36 +1343,79 @@ let ElectricityPanelCard = class extends i {
     if (d2 === 0 || d2 === 6) return "weekend";
     return "holiday";
   }
+  _ntRemainingMins(starts, offsets) {
+    const now = Date.now();
+    const midnight = /* @__PURE__ */ new Date();
+    midnight.setHours(0, 0, 0, 0);
+    let rem = 0;
+    starts.forEach((s2, i2) => {
+      const [h2, m2] = s2.split(":").map(Number);
+      const st = midnight.getTime() + (h2 * 60 + m2) * 6e4;
+      const en = st + offsets[i2] * 6e4;
+      if (now < en) rem += (en - Math.max(now, st)) / 6e4;
+    });
+    return rem;
+  }
+  _fmtMins(mins) {
+    const h2 = Math.floor(mins / 60);
+    const m2 = Math.floor(mins % 60);
+    return h2 > 0 ? `${h2}h ${m2}m` : `${m2}m`;
+  }
+  _tomorrowDayType() {
+    const d2 = ((/* @__PURE__ */ new Date()).getDay() + 1) % 7;
+    return d2 === 0 || d2 === 6 ? "weekend" : "weekday";
+  }
+  _fmtCostRate(watts) {
+    const hdo = this._config.hdo;
+    if (!(hdo == null ? void 0 : hdo.nt_price) && !(hdo == null ? void 0 : hdo.vt_price)) return "";
+    const isNT = this._isOn(hdo.switch);
+    const price = isNT ? hdo.nt_price ?? 0 : hdo.vt_price ?? 0;
+    const cur = hdo.currency ?? "Kč";
+    return `${(watts / 1e3 * price).toFixed(2)} ${cur}/h`;
+  }
   _renderHdoSchedule() {
     const hdo = this._config.hdo;
     if (!hdo) return A;
     const preset = hdo.tariff_preset ? PRE_TARIFFS[hdo.tariff_preset] : void 0;
     const src = preset ?? hdo.schedule;
     if (!src) return A;
-    const dt = this._dayType();
+    const showing = this._showTomorrow;
+    const dt = showing ? this._tomorrowDayType() : this._dayType();
     const day = dt === "holiday" && src.holiday ? src.holiday : dt === "weekend" ? src.weekend : src.weekday;
     const isNT = this._isOn(hdo.switch);
     const color = isNT ? "var(--success-color,#43a047)" : "var(--error-color,#e53935)";
     const now = Date.now();
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
+    const base = showing ? midnight.getTime() + 864e5 : midnight.getTime();
     const fmt = (ms) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
     const slots = day.starts.map((start, i2) => {
       const [h2, m2] = start.split(":").map(Number);
-      const s2 = midnight.getTime() + (h2 * 60 + m2) * 6e4;
+      const s2 = base + (h2 * 60 + m2) * 6e4;
       const e2 = s2 + day.offsets[i2] * 6e4;
-      const isPast = now >= e2;
-      const isCurrent = now >= s2 && now < e2;
+      const isPast = !showing && now >= e2;
+      const isCurrent = !showing && now >= s2 && now < e2;
       const pct = isCurrent ? Math.min(100, (now - s2) / (e2 - s2) * 100) : isPast ? 100 : 0;
       const dur = day.offsets[i2];
       const durStr = dur >= 60 ? `${Math.floor(dur / 60)}h${dur % 60 ? ` ${dur % 60}m` : ""}` : `${dur}m`;
-      return { label: `${fmt(s2)} – ${fmt(e2)}`, isPast, isCurrent, pct, durStr };
+      return { label: `${fmt(s2)}–${fmt(e2)}`, isPast, isCurrent, pct, durStr };
     });
+    const remaining = showing ? null : this._ntRemainingMins(day.starts, day.offsets);
+    const totalNT = day.offsets.reduce((a2, b2) => a2 + b2, 0);
     return b`
       <div class="schedule-block">
         <div class="schedule-title">
-          Today's NT schedule
-          <span class="schedule-day">${dt}</span>
+          <span>${showing ? "Tomorrow's" : "Today's"} NT schedule
+            <span class="schedule-day">${dt}</span>
+          </span>
+          <div class="schedule-nav">
+            ${remaining !== null ? b`<span class="nt-remaining">${this._fmtMins(remaining)} left · ${this._fmtMins(totalNT)} total</span>` : A}
+            <button class="sday-btn" @click=${() => {
+      this._showTomorrow = !this._showTomorrow;
+    }}>
+              ${showing ? "Today" : "Tomorrow"}
+            </button>
+          </div>
         </div>
         ${slots.map((sl) => b`
           <div class="srow ${sl.isPast ? "past" : sl.isCurrent ? "active" : ""}">
@@ -1337,10 +1435,13 @@ let ElectricityPanelCard = class extends i {
     if (!(hdo == null ? void 0 : hdo.switch)) return A;
     const isNT = this._isOn(hdo.switch);
     const cd = this._hdoCountdown();
+    const price = isNT ? hdo.nt_price : hdo.vt_price;
+    const cur = hdo.currency ?? "Kč";
     return b`
       <div class="hdo-bar ${isNT ? "nt" : "vt"}">
         <ha-icon icon="mdi:lightning-bolt-circle"></ha-icon>
         <span class="hdo-label">${isNT ? "NT — low tariff" : "VT — high tariff"}</span>
+        ${price ? b`<span class="hdo-price">${price} ${cur}/kWh</span>` : A}
         ${cd ? b`<span class="hdo-cd">ends in ${cd}</span>` : A}
       </div>
     `;
@@ -1414,6 +1515,7 @@ let ElectricityPanelCard = class extends i {
               ${current.toFixed(1)} A
               ${c2.voltage ? b` · ${this._num(c2.voltage).toFixed(0)} V` : A}
               ${energy > 0 ? b` · ${energy.toFixed(2)} kWh` : A}
+              ${power > 0 && this._fmtCostRate(power) ? b` · <span class="cost-rate">${this._fmtCostRate(power)}</span>` : A}
             </span>
           </div>
           ${hasDevices ? b`<button class="expand-btn" @click=${() => this._toggleExpanded(c2.id)}>
@@ -1598,6 +1700,32 @@ ElectricityPanelCard.styles = i$3`
       min-width: 30px;
       text-align: right;
     }
+    .schedule-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+    }
+    .nt-remaining {
+      font-size: 10px;
+      color: var(--secondary-text-color);
+      white-space: nowrap;
+    }
+    .sday-btn {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.15));
+      background: none;
+      color: var(--secondary-text-color);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .sday-btn:hover { background: var(--secondary-background-color); }
+    .cost-rate {
+      color: var(--warning-color, #f57c00);
+      font-weight: 500;
+    }
 
     /* HDO bar */
     .hdo-bar {
@@ -1615,6 +1743,13 @@ ElectricityPanelCard.styles = i$3`
     .hdo-bar ha-icon { --mdc-icon-size: 18px; }
     .hdo-label { flex: 1; }
     .hdo-cd { font-size: 12px; opacity: 0.75; }
+    .hdo-price {
+      font-size: 12px;
+      opacity: 0.8;
+      font-weight: 600;
+      margin-left: auto;
+      margin-right: 4px;
+    }
 
     /* Section utilities */
     .section-label {
@@ -1861,6 +1996,9 @@ __decorateClass([
 __decorateClass([
   r()
 ], ElectricityPanelCard.prototype, "_expanded", 2);
+__decorateClass([
+  r()
+], ElectricityPanelCard.prototype, "_showTomorrow", 2);
 ElectricityPanelCard = __decorateClass([
   t("electricity-panel-card")
 ], ElectricityPanelCard);

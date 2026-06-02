@@ -23,6 +23,8 @@ export class ElectricityPanelEditor extends LitElement {
   @state() private _config!: ElectricityPanelConfig;
   @state() private _openCircuit = -1;
   @state() private _openDevice = -1;
+  @state() private _dragOverIdx = -1;
+  private _dragSrcIdx = -1;
   private _datalistFilled = false;
 
   // Block re-renders when only hass changes (it updates constantly in HA).
@@ -117,6 +119,19 @@ export class ElectricityPanelEditor extends LitElement {
     this._config = cfg;
     this._fire(cfg);
     this._openCircuit = t;
+  }
+
+  private _moveCircuitTo(from: number, to: number): void {
+    if (from === to) return;
+    const cfg = deepClone(this._config);
+    const arr = cfg.circuits ?? [];
+    const [item] = arr.splice(from, 1);
+    arr.splice(to, 0, item);
+    this._config = cfg;
+    this._fire(cfg);
+    this._openCircuit = to;
+    this._dragSrcIdx = -1;
+    this._dragOverIdx = -1;
   }
 
   private _setCircuitField(idx: number, field: keyof Circuit, val: string): void {
@@ -273,6 +288,10 @@ export class ElectricityPanelEditor extends LitElement {
               Weekday / weekend / holiday schedules are loaded automatically.
             </span>
           </div>
+          <div class="group-label" style="margin-top:12px;">Tariff prices (optional)</div>
+          ${this._numField('NT price per kWh (low tariff)', h.nt_price as number | undefined, s('nt_price'), '0.00')}
+          ${this._numField('VT price per kWh (high tariff)', h.vt_price as number | undefined, s('vt_price'), '0.00')}
+          ${this._textField('Currency symbol', h.currency, s('currency'), 'Kč')}
         </div>
       </details>`;
   }
@@ -299,7 +318,10 @@ export class ElectricityPanelEditor extends LitElement {
     const open = this._openDevice === di;
     const s = (f: keyof CircuitDevice) => (v: string) => this._setDeviceField(ci, di, f, v);
     return html`
-      <div class="sub-item ${open ? 'open' : ''}">
+      <div class="sub-item ${open ? 'open' : ''}"
+        @dragover=${(e: DragEvent) => { e.preventDefault(); if (this._dragSrcIdx !== idx) this._dragOverIdx = idx; }}
+        @dragleave=${() => { if (this._dragOverIdx === idx) this._dragOverIdx = -1; }}
+        @drop=${(e: DragEvent) => { e.preventDefault(); if (this._dragSrcIdx >= 0 && this._dragSrcIdx !== idx) this._moveCircuitTo(this._dragSrcIdx, idx); }}>
         <div class="row-hdr" @click=${() => { this._openDevice = open ? -1 : di; }}>
           <span class="row-lbl">${d.name || '(unnamed device)'}</span>
           <div class="row-acts" @click=${(e: Event) => e.stopPropagation()}>
@@ -332,17 +354,20 @@ export class ElectricityPanelEditor extends LitElement {
     const sf = (f: keyof Circuit) => (v: string) => this._setCircuitField(idx, f, v);
     return html`
       <div class="sub-item ${open ? 'open' : ''}">
-        <div class="row-hdr" @click=${() => { this._openCircuit = open ? -1 : idx; this._openDevice = -1; }}>
+        <div class="row-hdr ${this._dragOverIdx === idx ? 'drag-over' : ''}"
+          @click=${() => { this._openCircuit = open ? -1 : idx; this._openDevice = -1; }}>
+          <ha-icon icon="mdi:drag-vertical" class="drag-handle"
+            draggable="true"
+            @dragstart=${(e: DragEvent) => { e.stopPropagation(); this._dragSrcIdx = idx; e.dataTransfer!.effectAllowed = 'move'; }}
+            @dragend=${(e: DragEvent) => { e.stopPropagation(); this._dragOverIdx = -1; }}
+            @click=${(e: Event) => e.stopPropagation()}>
+          </ha-icon>
           <span class="row-lbl">${c.name || '(unnamed circuit)'}</span>
           <div class="badges">
             ${c.phases === 3 ? html`<span class="badge info">3ph</span>` : nothing}
             ${c.critical ? html`<span class="badge warn">critical</span>` : nothing}
           </div>
           <div class="row-acts" @click=${(e: Event) => e.stopPropagation()}>
-            ${idx > 0 ? html`<button class="btn-icon" @click=${() => this._moveCircuit(idx, -1)}>
-              <ha-icon icon="mdi:arrow-up"></ha-icon></button>` : nothing}
-            ${idx < total - 1 ? html`<button class="btn-icon" @click=${() => this._moveCircuit(idx, 1)}>
-              <ha-icon icon="mdi:arrow-down"></ha-icon></button>` : nothing}
             <button class="btn-icon danger" @click=${() => this._removeCircuit(idx)}>
               <ha-icon icon="mdi:minus-circle-outline"></ha-icon>
             </button>
@@ -482,6 +507,18 @@ export class ElectricityPanelEditor extends LitElement {
     .badge.info { background: rgba(33,150,243,0.12); color: var(--primary-color, #2196f3); }
       .badge.warn { background: rgba(245,124,0,0.12); color: var(--warning-color, #f57c00); }
 
+    .drag-handle {
+      --mdc-icon-size: 18px;
+      color: var(--disabled-text-color);
+      cursor: grab;
+      flex-shrink: 0;
+      touch-action: none;
+    }
+    .drag-handle:active { cursor: grabbing; }
+    .row-hdr.drag-over {
+      background: var(--secondary-background-color);
+      border-top: 2px solid var(--primary-color, #2196f3);
+    }
     .btn-icon { background: none; border: none; cursor: pointer; color: var(--secondary-text-color); padding: 2px; border-radius: 4px; display: flex; align-items: center; }
     .btn-icon:hover { background: var(--secondary-background-color); }
     .btn-icon.danger:hover { color: var(--error-color, #e53935); }
