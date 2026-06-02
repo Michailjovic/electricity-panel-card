@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.4] - 2026-06-02
+
+### Added
+- Countdown timer is now live — card auto-refreshes every 30 seconds via `setInterval`, so the time-to-next-switch stays accurate without waiting for an entity state change
+- Smart power formatting: values below 1 kW display as W (e.g. `85 W`), values above display as kW (e.g. `2.20 kW`)
+- Voltage (V) now shown in circuit footer when `voltage` entity is configured
+
+---
+
 ## [2.0.3] - 2026-06-02
 
 ### Added

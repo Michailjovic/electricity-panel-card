@@ -16,6 +16,19 @@ export class ElectricityPanelCard extends LitElement {
   @state() private _config!: ElectricityPanelConfig;
   @state() private _expanded = new Set<string>();
 
+  private _timer?: number;
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    // Refresh every 30 s so countdowns stay accurate between entity updates
+    this._timer = window.setInterval(() => this.requestUpdate(), 30_000);
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    clearInterval(this._timer);
+  }
+
   // ── HA card API ────────────────────────────────────────────────────────────
 
   setConfig(config: ElectricityPanelConfig): void {
@@ -83,6 +96,12 @@ export class ElectricityPanelCard extends LitElement {
     if (unit === 'kW') return val * 1000;
     if (unit === 'MW') return val * 1_000_000;
     return val; // assumes W
+  }
+
+  /** Format watts for display: W below 1 kW, kW above */
+  private _fmtW(w: number): string {
+    if (w >= 1000) return `${(w / 1000).toFixed(2)} kW`;
+    return `${w.toFixed(0)} W`;
   }
 
   /** Return energy in kWh, auto-converting from Wh/MWh if needed */
@@ -201,10 +220,11 @@ export class ElectricityPanelCard extends LitElement {
 
         <div class="circuit-footer">
           <div class="metrics">
-            <span class="metric-primary">${power.toFixed(0)} W</span>
+            <span class="metric-primary">${this._fmtW(power)}</span>
             <span class="metric-small">
               ${current.toFixed(1)} A
-              ${energy > 0 ? html` · ${energy.toFixed(1)} kWh today` : nothing}
+              ${c.voltage ? html` · ${this._num(c.voltage).toFixed(0)} V` : nothing}
+              ${energy > 0 ? html` · ${energy.toFixed(2)} kWh` : nothing}
             </span>
           </div>
           ${hasDevices
@@ -240,7 +260,7 @@ export class ElectricityPanelCard extends LitElement {
         <div class="status-dot sm ${isOn ? 'on' : d.switch ? 'off' : 'none'}"></div>
         <span class="device-name">${d.name}</span>
         <span class="device-metrics">
-          ${power > 0 ? html`${power.toFixed(0)} W` : nothing}
+          ${power > 0 ? html`${this._fmtW(power)}` : nothing}
           ${current > 0 ? html` · ${current.toFixed(1)} A` : nothing}
         </span>
         ${d.switch
@@ -263,7 +283,7 @@ export class ElectricityPanelCard extends LitElement {
         <div class="status-dot sm ${isOn ? 'on' : ch.switch ? 'off' : 'none'}"></div>
         <span class="device-name">${ch.name}</span>
         <span class="device-metrics">
-          ${power > 0 ? html`${power.toFixed(0)} W` : nothing}
+          ${power > 0 ? html`${this._fmtW(power)}` : nothing}
           ${current > 0 ? html` · ${current.toFixed(1)} A` : nothing}
         </span>
         ${ch.switch

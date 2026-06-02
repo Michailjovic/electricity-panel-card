@@ -1081,6 +1081,14 @@ let ElectricityPanelCard = class extends i {
     super(...arguments);
     this._expanded = /* @__PURE__ */ new Set();
   }
+  connectedCallback() {
+    super.connectedCallback();
+    this._timer = window.setInterval(() => this.requestUpdate(), 3e4);
+  }
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    clearInterval(this._timer);
+  }
   // ── HA card API ────────────────────────────────────────────────────────────
   setConfig(config) {
     if (!config) throw new Error("Invalid configuration");
@@ -1139,6 +1147,11 @@ let ElectricityPanelCard = class extends i {
     if (unit === "kW") return val * 1e3;
     if (unit === "MW") return val * 1e6;
     return val;
+  }
+  /** Format watts for display: W below 1 kW, kW above */
+  _fmtW(w) {
+    if (w >= 1e3) return `${(w / 1e3).toFixed(2)} kW`;
+    return `${w.toFixed(0)} W`;
   }
   /** Return energy in kWh, auto-converting from Wh/MWh if needed */
   _kwh(entityId) {
@@ -1245,10 +1258,11 @@ let ElectricityPanelCard = class extends i {
 
         <div class="circuit-footer">
           <div class="metrics">
-            <span class="metric-primary">${power.toFixed(0)} W</span>
+            <span class="metric-primary">${this._fmtW(power)}</span>
             <span class="metric-small">
               ${current.toFixed(1)} A
-              ${energy > 0 ? b` · ${energy.toFixed(1)} kWh today` : A}
+              ${c2.voltage ? b` · ${this._num(c2.voltage).toFixed(0)} V` : A}
+              ${energy > 0 ? b` · ${energy.toFixed(2)} kWh` : A}
             </span>
           </div>
           ${hasDevices ? b`<button class="expand-btn" @click=${() => this._toggleExpanded(c2.id)}>
@@ -1280,7 +1294,7 @@ let ElectricityPanelCard = class extends i {
         <div class="status-dot sm ${isOn ? "on" : d2.switch ? "off" : "none"}"></div>
         <span class="device-name">${d2.name}</span>
         <span class="device-metrics">
-          ${power > 0 ? b`${power.toFixed(0)} W` : A}
+          ${power > 0 ? b`${this._fmtW(power)}` : A}
           ${current > 0 ? b` · ${current.toFixed(1)} A` : A}
         </span>
         ${d2.switch ? b`<button
@@ -1300,7 +1314,7 @@ let ElectricityPanelCard = class extends i {
         <div class="status-dot sm ${isOn ? "on" : ch.switch ? "off" : "none"}"></div>
         <span class="device-name">${ch.name}</span>
         <span class="device-metrics">
-          ${power > 0 ? b`${power.toFixed(0)} W` : A}
+          ${power > 0 ? b`${this._fmtW(power)}` : A}
           ${current > 0 ? b` · ${current.toFixed(1)} A` : A}
         </span>
         ${ch.switch ? b`<button
