@@ -765,20 +765,20 @@ let ElectricityPanelEditor = class extends i {
     this._openCircuit = cfg.circuits.length - 1;
     this._openDevice = -1;
   }
-  _removeCircuit(idx2) {
+  _removeCircuit(idx) {
     var _a2;
     const cfg = deepClone(this._config);
-    (_a2 = cfg.circuits) == null ? void 0 : _a2.splice(idx2, 1);
+    (_a2 = cfg.circuits) == null ? void 0 : _a2.splice(idx, 1);
     this._config = cfg;
     this._fire(cfg);
     this._openCircuit = -1;
   }
-  _moveCircuit(idx2, dir) {
+  _moveCircuit(idx, dir) {
     const cfg = deepClone(this._config);
     const arr = cfg.circuits ?? [];
-    const t2 = idx2 + dir;
+    const t2 = idx + dir;
     if (t2 < 0 || t2 >= arr.length) return;
-    [arr[idx2], arr[t2]] = [arr[t2], arr[idx2]];
+    [arr[idx], arr[t2]] = [arr[t2], arr[idx]];
     this._config = cfg;
     this._fire(cfg);
     this._openCircuit = t2;
@@ -795,9 +795,9 @@ let ElectricityPanelEditor = class extends i {
     this._dragSrcIdx = -1;
     this._dragOverIdx = -1;
   }
-  _setCircuitField(idx2, field, val) {
+  _setCircuitField(idx, field, val) {
     const cfg = deepClone(this._config);
-    const c2 = cfg.circuits[idx2];
+    const c2 = cfg.circuits[idx];
     if (val === "") {
       delete c2[field];
     } else {
@@ -807,9 +807,9 @@ let ElectricityPanelEditor = class extends i {
     this._config = cfg;
     this._fire(cfg);
   }
-  _setCircuitCheck(idx2, field, val) {
+  _setCircuitCheck(idx, field, val) {
     const cfg = deepClone(this._config);
-    cfg.circuits[idx2][field] = val;
+    cfg.circuits[idx][field] = val;
     this._config = cfg;
     this._fire(cfg);
   }
@@ -959,26 +959,32 @@ let ElectricityPanelEditor = class extends i {
         ${this._entityField("Current (A)", ch.current, s2("current"))}
       </div>`;
   }
+  _setDeviceNote(ci, di, val) {
+    const cfg = deepClone(this._config);
+    const d2 = cfg.circuits[ci].devices[di];
+    if (val) {
+      d2.note = true;
+      delete d2.switch;
+      delete d2.power;
+      delete d2.current;
+      delete d2.channels;
+    } else {
+      delete d2.note;
+    }
+    this._config = cfg;
+    this._fire(cfg);
+  }
   _renderDeviceRow(ci, d2, di) {
     const open = this._openDevice === di;
     const s2 = (f2) => (v2) => this._setDeviceField(ci, di, f2, v2);
     return b`
-      <div class="sub-item ${open ? "open" : ""}"
-        @dragover=${(e2) => {
-      e2.preventDefault();
-      if (this._dragSrcIdx !== idx) this._dragOverIdx = idx;
-    }}
-        @dragleave=${() => {
-      if (this._dragOverIdx === idx) this._dragOverIdx = -1;
-    }}
-        @drop=${(e2) => {
-      e2.preventDefault();
-      if (this._dragSrcIdx >= 0 && this._dragSrcIdx !== idx) this._moveCircuitTo(this._dragSrcIdx, idx);
-    }}>
+      <div class="sub-item ${open ? "open" : ""}">
         <div class="row-hdr" @click=${() => {
       this._openDevice = open ? -1 : di;
     }}>
+          <ha-icon icon="${d2.note ? "mdi:label-outline" : "mdi:power-plug-outline"}" class="device-type-icon"></ha-icon>
           <span class="row-lbl">${d2.name || "(unnamed device)"}</span>
+          ${d2.note ? b`<span class="badge warn">note</span>` : A}
           <div class="row-acts" @click=${(e2) => e2.stopPropagation()}>
             <button class="btn-icon danger" @click=${() => this._removeDevice(ci, di)}>
               <ha-icon icon="mdi:minus-circle-outline"></ha-icon>
@@ -989,36 +995,43 @@ let ElectricityPanelEditor = class extends i {
         ${open ? b`
           <div class="sub-fields">
             ${this._textField("Device name", d2.name, s2("name"), "e.g. Washing machine")}
-            ${this._entityField("Switch", d2.switch, s2("switch"))}
-            ${this._entityField("Power (W)", d2.power, s2("power"))}
-            ${this._entityField("Current (A)", d2.current, s2("current"))}
-            <div class="group-label" style="margin-top:10px;">
-              Channels (for multi-relay devices like Shelly 4PM)
+            <div class="field checkbox">
+              <input type="checkbox" id="note-${ci}-${di}" .checked=${d2.note ?? false}
+                @change=${(e2) => this._setDeviceNote(ci, di, e2.target.checked)} />
+              <label for="note-${ci}-${di}">Text label only (no entities, no switch)</label>
             </div>
-            ${(d2.channels ?? []).map((ch, chi) => this._renderChannelRow(ci, di, ch, chi))}
-            <button class="btn-add" @click=${() => this._addChannel(ci, di)}>
-              <ha-icon icon="mdi:plus"></ha-icon> Add channel
-            </button>
+            ${!d2.note ? b`
+              ${this._entityField("Switch", d2.switch, s2("switch"))}
+              ${this._entityField("Power (W)", d2.power, s2("power"))}
+              ${this._entityField("Current (A)", d2.current, s2("current"))}
+              <div class="group-label" style="margin-top:10px;">
+                Channels (for multi-relay devices like Shelly 4PM)
+              </div>
+              ${(d2.channels ?? []).map((ch, chi) => this._renderChannelRow(ci, di, ch, chi))}
+              <button class="btn-add" @click=${() => this._addChannel(ci, di)}>
+                <ha-icon icon="mdi:plus"></ha-icon> Add channel
+              </button>
+            ` : A}
           </div>` : A}
       </div>`;
   }
-  _renderCircuitRow(c2, idx2) {
+  _renderCircuitRow(c2, idx) {
     var _a2;
-    const open = this._openCircuit === idx2;
+    const open = this._openCircuit === idx;
     ((_a2 = this._config.circuits) == null ? void 0 : _a2.length) ?? 0;
-    const sf = (f2) => (v2) => this._setCircuitField(idx2, f2, v2);
+    const sf = (f2) => (v2) => this._setCircuitField(idx, f2, v2);
     return b`
       <div class="sub-item ${open ? "open" : ""}">
-        <div class="row-hdr ${this._dragOverIdx === idx2 ? "drag-over" : ""}"
+        <div class="row-hdr ${this._dragOverIdx === idx ? "drag-over" : ""}"
           @click=${() => {
-      this._openCircuit = open ? -1 : idx2;
+      this._openCircuit = open ? -1 : idx;
       this._openDevice = -1;
     }}>
           <ha-icon icon="mdi:drag-vertical" class="drag-handle"
             draggable="true"
             @dragstart=${(e2) => {
       e2.stopPropagation();
-      this._dragSrcIdx = idx2;
+      this._dragSrcIdx = idx;
       e2.dataTransfer.effectAllowed = "move";
     }}
             @dragend=${(e2) => {
@@ -1033,7 +1046,7 @@ let ElectricityPanelEditor = class extends i {
             ${c2.critical ? b`<span class="badge warn">critical</span>` : A}
           </div>
           <div class="row-acts" @click=${(e2) => e2.stopPropagation()}>
-            <button class="btn-icon danger" @click=${() => this._removeCircuit(idx2)}>
+            <button class="btn-icon danger" @click=${() => this._removeCircuit(idx)}>
               <ha-icon icon="mdi:minus-circle-outline"></ha-icon>
             </button>
           </div>
@@ -1045,15 +1058,15 @@ let ElectricityPanelEditor = class extends i {
             ${this._textField("Circuit ID", c2.id, sf("id"), "e.g. c08")}
             <div class="field">
               <label>Phases</label>
-              <select @change=${(e2) => this._setCircuitField(idx2, "phases", e2.target.value)}>
+              <select @change=${(e2) => this._setCircuitField(idx, "phases", e2.target.value)}>
                 <option value="1" ?selected=${c2.phases !== 3}>1 — single-phase</option>
                 <option value="3" ?selected=${c2.phases === 3}>3 — three-phase</option>
               </select>
             </div>
             <div class="field checkbox">
-              <input type="checkbox" id="crit-${idx2}" .checked=${c2.critical ?? false}
-                @change=${(e2) => this._setCircuitCheck(idx2, "critical", e2.target.checked)} />
-              <label for="crit-${idx2}">Critical circuit (disables remote toggle)</label>
+              <input type="checkbox" id="crit-${idx}" .checked=${c2.critical ?? false}
+                @change=${(e2) => this._setCircuitCheck(idx, "critical", e2.target.checked)} />
+              <label for="crit-${idx}">Critical circuit (disables remote toggle)</label>
             </div>
             ${this._numField("Max current A (breaker rating)", c2.max_current, sf("max_current"), c2.phases === 3 ? "63" : "16")}
             <div class="group-label" style="margin-top:10px;">Breaker entities</div>
@@ -1063,8 +1076,8 @@ let ElectricityPanelEditor = class extends i {
             ${this._entityField("Energy today (kWh)", c2.energy, sf("energy"))}
             ${this._entityField("Voltage (V)", c2.voltage, sf("voltage"))}
             <div class="group-label" style="margin-top:10px;">Devices behind this breaker</div>
-            ${(c2.devices ?? []).map((d2, di) => this._renderDeviceRow(idx2, d2, di))}
-            <button class="btn-add" @click=${() => this._addDevice(idx2)}>
+            ${(c2.devices ?? []).map((d2, di) => this._renderDeviceRow(idx, d2, di))}
+            <button class="btn-add" @click=${() => this._addDevice(idx)}>
               <ha-icon icon="mdi:plus"></ha-icon> Add device
             </button>
           </div>` : A}
@@ -1174,6 +1187,11 @@ ElectricityPanelEditor.styles = i$3`
     .badge.info { background: rgba(33,150,243,0.12); color: var(--primary-color, #2196f3); }
       .badge.warn { background: rgba(245,124,0,0.12); color: var(--warning-color, #f57c00); }
 
+    .device-type-icon {
+      --mdc-icon-size: 15px;
+      color: var(--disabled-text-color);
+      flex-shrink: 0;
+    }
     .drag-handle {
       --mdc-icon-size: 18px;
       color: var(--disabled-text-color);
@@ -1252,24 +1270,20 @@ let ElectricityPanelCard = class extends i {
     return document.createElement("electricity-panel-editor");
   }
   static getStubConfig() {
-    return {
-      type: "custom:electricity-panel-card",
-      circuits: []
-    };
+    return { type: "custom:electricity-panel-card", circuits: [] };
   }
   getCardSize() {
     var _a2;
     return 4 + Math.ceil((((_a2 = this._config.circuits) == null ? void 0 : _a2.length) ?? 0) / 2);
   }
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Entity helpers ─────────────────────────────────────────────────────────
   _state(id) {
     var _a2, _b;
     if (!id) return "unavailable";
     return ((_b = (_a2 = this.hass) == null ? void 0 : _a2.states[id]) == null ? void 0 : _b.state) ?? "unavailable";
   }
   _num(id) {
-    const s2 = this._state(id);
-    const n3 = parseFloat(s2);
+    const n3 = parseFloat(this._state(id));
     return isNaN(n3) ? 0 : n3;
   }
   _isOn(id) {
@@ -1285,11 +1299,10 @@ let ElectricityPanelCard = class extends i {
     this._expanded = s2;
   }
   _loadColor(pct) {
-    if (pct > 80) return "var(--error-color, #e53935)";
-    if (pct > 55) return "var(--warning-color, #f57c00)";
-    return "var(--success-color, #43a047)";
+    if (pct > 80) return "var(--error-color, #ef4444)";
+    if (pct > 55) return "var(--warning-color, #f59e0b)";
+    return "var(--success-color, #22c55e)";
   }
-  /** Return power in W, auto-converting from kW/MW if needed */
   _watts(entityId) {
     var _a2;
     if (!entityId) return 0;
@@ -1302,12 +1315,10 @@ let ElectricityPanelCard = class extends i {
     if (unit === "MW") return val * 1e6;
     return val;
   }
-  /** Format watts for display: W below 1 kW, kW above */
   _fmtW(w) {
     if (w >= 1e3) return `${(w / 1e3).toFixed(2)} kW`;
     return `${w.toFixed(0)} W`;
   }
-  /** Return energy in kWh, auto-converting from Wh/MWh if needed */
   _kwh(entityId) {
     var _a2;
     if (!entityId) return 0;
@@ -1334,7 +1345,6 @@ let ElectricityPanelCard = class extends i {
     const m2 = Math.floor(diff % 3600 / 60);
     return h2 > 0 ? `${h2} h ${String(m2).padStart(2, "0")} min` : `${m2} min`;
   }
-  // ── HDO schedule ───────────────────────────────────────────────────────────
   _dayType() {
     var _a2;
     const isWorkday = this._isOn((_a2 = this._config.hdo) == null ? void 0 : _a2.workday_sensor);
@@ -1342,6 +1352,10 @@ let ElectricityPanelCard = class extends i {
     if (isWorkday) return "weekday";
     if (d2 === 0 || d2 === 6) return "weekend";
     return "holiday";
+  }
+  _tomorrowDayType() {
+    const d2 = ((/* @__PURE__ */ new Date()).getDay() + 1) % 7;
+    return d2 === 0 || d2 === 6 ? "weekend" : "weekday";
   }
   _ntRemainingMins(starts, offsets) {
     const now = Date.now();
@@ -1361,10 +1375,6 @@ let ElectricityPanelCard = class extends i {
     const m2 = Math.floor(mins % 60);
     return h2 > 0 ? `${h2}h ${m2}m` : `${m2}m`;
   }
-  _tomorrowDayType() {
-    const d2 = ((/* @__PURE__ */ new Date()).getDay() + 1) % 7;
-    return d2 === 0 || d2 === 6 ? "weekend" : "weekday";
-  }
   _fmtCostRate(watts) {
     const hdo = this._config.hdo;
     if (!(hdo == null ? void 0 : hdo.nt_price) && !(hdo == null ? void 0 : hdo.vt_price)) return "";
@@ -1373,6 +1383,46 @@ let ElectricityPanelCard = class extends i {
     const cur = hdo.currency ?? "Kč";
     return `${(watts / 1e3 * price).toFixed(2)} ${cur}/h`;
   }
+  // ── Full-day schedule builder ──────────────────────────────────────────────
+  _buildFullDaySlots(starts, offsets, base, showing) {
+    const fmt = (ms) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    const fmtDur = (m2) => m2 >= 60 ? `${Math.floor(m2 / 60)}h${m2 % 60 ? ` ${m2 % 60}m` : ""}` : `${m2}m`;
+    const now = Date.now();
+    const dayEnd = base + 864e5;
+    const ntWindows = starts.map((start, i2) => {
+      const [h2, m2] = start.split(":").map(Number);
+      const s2 = base + (h2 * 60 + m2) * 6e4;
+      return { s: s2, e: s2 + offsets[i2] * 6e4, durMins: offsets[i2] };
+    });
+    const makeSlot = (type, slotStart, slotEnd, durMins) => {
+      const isPast = !showing && now >= slotEnd;
+      const isCurrent = !showing && now >= slotStart && now < slotEnd;
+      const pct = isCurrent ? Math.min(100, (now - slotStart) / (slotEnd - slotStart) * 100) : isPast ? 100 : 0;
+      return {
+        type,
+        label: `${fmt(slotStart)}–${fmt(slotEnd)}`,
+        isPast,
+        isCurrent,
+        pct,
+        durMins,
+        durStr: fmtDur(durMins)
+      };
+    };
+    const slots = [];
+    let cursor = base;
+    for (const nt of ntWindows) {
+      if (nt.s > cursor) {
+        slots.push(makeSlot("vt", cursor, nt.s, Math.round((nt.s - cursor) / 6e4)));
+      }
+      slots.push(makeSlot("nt", nt.s, nt.e, nt.durMins));
+      cursor = nt.e;
+    }
+    if (cursor < dayEnd) {
+      slots.push(makeSlot("vt", cursor, dayEnd, Math.round((dayEnd - cursor) / 6e4)));
+    }
+    return slots;
+  }
+  // ── Render: HDO schedule ───────────────────────────────────────────────────
   _renderHdoSchedule() {
     const hdo = this._config.hdo;
     if (!hdo) return A;
@@ -1382,34 +1432,19 @@ let ElectricityPanelCard = class extends i {
     const showing = this._showTomorrow;
     const dt = showing ? this._tomorrowDayType() : this._dayType();
     const day = dt === "holiday" && src.holiday ? src.holiday : dt === "weekend" ? src.weekend : src.weekday;
-    const isNT = this._isOn(hdo.switch);
-    const color = isNT ? "var(--success-color,#43a047)" : "var(--error-color,#e53935)";
-    const now = Date.now();
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
     const base = showing ? midnight.getTime() + 864e5 : midnight.getTime();
-    const fmt = (ms) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-    const slots = day.starts.map((start, i2) => {
-      const [h2, m2] = start.split(":").map(Number);
-      const s2 = base + (h2 * 60 + m2) * 6e4;
-      const e2 = s2 + day.offsets[i2] * 6e4;
-      const isPast = !showing && now >= e2;
-      const isCurrent = !showing && now >= s2 && now < e2;
-      const pct = isCurrent ? Math.min(100, (now - s2) / (e2 - s2) * 100) : isPast ? 100 : 0;
-      const dur = day.offsets[i2];
-      const durStr = dur >= 60 ? `${Math.floor(dur / 60)}h${dur % 60 ? ` ${dur % 60}m` : ""}` : `${dur}m`;
-      return { label: `${fmt(s2)}–${fmt(e2)}`, isPast, isCurrent, pct, durStr };
-    });
+    const slots = this._buildFullDaySlots(day.starts, day.offsets, base, showing);
     const remaining = showing ? null : this._ntRemainingMins(day.starts, day.offsets);
     const totalNT = day.offsets.reduce((a2, b2) => a2 + b2, 0);
     return b`
       <div class="schedule-block">
         <div class="schedule-title">
-          <span>${showing ? "Tomorrow's" : "Today's"} NT schedule
-            <span class="schedule-day">${dt}</span>
-          </span>
+          <span class="schedule-when">${showing ? "Tomorrow" : "Today"}</span>
+          <span class="schedule-day">${dt}</span>
           <div class="schedule-nav">
-            ${remaining !== null ? b`<span class="nt-remaining">${this._fmtMins(remaining)} left · ${this._fmtMins(totalNT)} total</span>` : A}
+            ${remaining !== null ? b`<span class="nt-remaining">${this._fmtMins(remaining)} NT left · ${this._fmtMins(totalNT)} total</span>` : A}
             <button class="sday-btn" @click=${() => {
       this._showTomorrow = !this._showTomorrow;
     }}>
@@ -1417,19 +1452,22 @@ let ElectricityPanelCard = class extends i {
             </button>
           </div>
         </div>
-        ${slots.map((sl) => b`
-          <div class="srow ${sl.isPast ? "past" : sl.isCurrent ? "active" : ""}">
-            <span class="srow-time">${sl.label}</span>
-            <div class="srow-track">
-              <div class="srow-fill" style="width:${sl.pct.toFixed(1)}%;background:${color}"></div>
+        <div class="schedule-rows">
+          ${slots.map((sl) => b`
+            <div class="srow ${sl.isPast ? "past" : sl.isCurrent ? "active" : "future"} ${sl.type}">
+              <span class="stariff ${sl.type}">${sl.type.toUpperCase()}</span>
+              <span class="srow-time">${sl.label}</span>
+              <div class="srow-track">
+                <div class="srow-fill ${sl.type}" style="width:${sl.pct.toFixed(1)}%"></div>
+              </div>
+              ${sl.isCurrent ? b`<span class="snow ${sl.type}">Now</span>` : b`<span class="sdur">${sl.durStr}</span>`}
             </div>
-            ${sl.isCurrent ? b`<span class="snow" style="background:${color}">Now</span>` : b`<span class="sdur">${sl.durStr}</span>`}
-          </div>
-        `)}
+          `)}
+        </div>
       </div>
     `;
   }
-  // ── Render sections ────────────────────────────────────────────────────────
+  // ── Render: HDO bar ────────────────────────────────────────────────────────
   _renderHdo() {
     const hdo = this._config.hdo;
     if (!(hdo == null ? void 0 : hdo.switch)) return A;
@@ -1439,13 +1477,18 @@ let ElectricityPanelCard = class extends i {
     const cur = hdo.currency ?? "Kč";
     return b`
       <div class="hdo-bar ${isNT ? "nt" : "vt"}">
-        <ha-icon icon="mdi:lightning-bolt-circle"></ha-icon>
-        <span class="hdo-label">${isNT ? "NT — low tariff" : "VT — high tariff"}</span>
+        <div class="hdo-icon-wrap">
+          <ha-icon icon="mdi:lightning-bolt"></ha-icon>
+        </div>
+        <div class="hdo-info">
+          <span class="hdo-label">${isNT ? "Low tariff — NT" : "High tariff — VT"}</span>
+          ${cd ? b`<span class="hdo-cd">ends in ${cd}</span>` : A}
+        </div>
         ${price ? b`<span class="hdo-price">${price} ${cur}/kWh</span>` : A}
-        ${cd ? b`<span class="hdo-cd">ends in ${cd}</span>` : A}
       </div>
     `;
   }
+  // ── Render: main meter ─────────────────────────────────────────────────────
   _renderMainMeter() {
     const m2 = this._config.main_meter;
     if (!m2) return A;
@@ -1456,11 +1499,15 @@ let ElectricityPanelCard = class extends i {
       { label: "L3", power: m2.power_l3, current: m2.current_l3 }
     ];
     return b`
-      <div class="section-block">
+      <div class="section-block meter-block">
         <div class="meter-header">
-          <ha-icon icon="mdi:transmission-tower"></ha-icon>
-          <span class="meter-title">Main meter</span>
-          <span class="badge badge-info">3φ</span>
+          <div class="meter-icon">
+            <ha-icon icon="mdi:transmission-tower"></ha-icon>
+          </div>
+          <div class="meter-title-wrap">
+            <span class="meter-title">Main meter</span>
+            <span class="badge badge-info">3φ</span>
+          </div>
           <div class="meter-total">
             <span class="metric-primary">${(totalW / 1e3).toFixed(2)} kW</span>
             ${m2.energy_today ? b`<span class="metric-small">${this._kwh(m2.energy_today).toFixed(1)} kWh today</span>` : A}
@@ -1478,6 +1525,7 @@ let ElectricityPanelCard = class extends i {
       </div>
     `;
   }
+  // ── Render: circuit ────────────────────────────────────────────────────────
   _renderCircuit(c2) {
     var _a2;
     const isOn = this._isOn(c2.switch);
@@ -1489,19 +1537,19 @@ let ElectricityPanelCard = class extends i {
     const barColor = this._loadColor(loadPct);
     const expanded = this._expanded.has(c2.id);
     const hasDevices = (((_a2 = c2.devices) == null ? void 0 : _a2.length) ?? 0) > 0;
+    const costRate = power > 0 ? this._fmtCostRate(power) : "";
     return b`
-      <div class="circuit-card ${c2.critical ? "critical" : ""} ${c2.phases === 3 ? "three-phase" : ""}">
+      <div class="circuit-card ${c2.critical ? "critical" : ""} ${c2.switch && isOn ? "is-on" : ""}">
 
         <div class="circuit-header">
-          <div class="status-dot ${isOn ? "on" : "off"}"></div>
+          <div class="status-dot ${isOn ? "on" : c2.switch ? "off" : "none"}"></div>
           <span class="circuit-name">${c2.name}</span>
-          <span class="circuit-id">${c2.id}</span>
-          ${c2.phases === 3 ? b`<span class="badge badge-info">3φ</span>` : A}
-          ${c2.critical ? b`<ha-icon icon="mdi:lock" class="lock-icon" title="Critical circuit — remote off disabled"></ha-icon>` : c2.switch ? b`<button
-                  class="toggle ${isOn ? "on" : "off"}"
-                  @click=${() => this._toggle(c2.switch)}
-                  aria-label="${isOn ? "Turn off" : "Turn on"} ${c2.name}">
-                </button>` : A}
+          ${c2.phases === 3 ? b`<span class="badge badge-phase">3φ</span>` : A}
+          ${c2.critical ? b`<ha-icon icon="mdi:lock" class="lock-icon"></ha-icon>` : c2.switch ? b`<button
+                    class="toggle ${isOn ? "on" : "off"}"
+                    @click=${() => this._toggle(c2.switch)}
+                    aria-label="${isOn ? "Turn off" : "Turn on"} ${c2.name}">
+                  </button>` : A}
         </div>
 
         <div class="load-track">
@@ -1513,14 +1561,13 @@ let ElectricityPanelCard = class extends i {
             <span class="metric-primary">${this._fmtW(power)}</span>
             <span class="metric-small">
               ${current.toFixed(1)} A
-              ${c2.voltage ? b` · ${this._num(c2.voltage).toFixed(0)} V` : A}
-              ${energy > 0 ? b` · ${energy.toFixed(2)} kWh` : A}
-              ${power > 0 && this._fmtCostRate(power) ? b` · <span class="cost-rate">${this._fmtCostRate(power)}</span>` : A}
+              ${c2.voltage ? b`<span class="metric-sep">·</span>${this._num(c2.voltage).toFixed(0)} V` : A}
+              ${energy > 0 ? b`<span class="metric-sep">·</span>${energy.toFixed(2)} kWh` : A}
+              ${costRate ? b`<span class="metric-sep">·</span><span class="cost-rate">${costRate}</span>` : A}
             </span>
           </div>
           ${hasDevices ? b`<button class="expand-btn" @click=${() => this._toggleExpanded(c2.id)}>
                 <ha-icon icon="${expanded ? "mdi:chevron-up" : "mdi:chevron-down"}"></ha-icon>
-                <span>${expanded ? "hide" : "devices"}</span>
               </button>` : A}
         </div>
 
@@ -1528,10 +1575,18 @@ let ElectricityPanelCard = class extends i {
       </div>
     `;
   }
+  // ── Render: device ─────────────────────────────────────────────────────────
   _renderDevice(d2) {
     var _a2;
-    const hasChannels = (((_a2 = d2.channels) == null ? void 0 : _a2.length) ?? 0) > 0;
-    if (hasChannels) {
+    if (d2.note) {
+      return b`
+        <div class="device-row note-row">
+          <ha-icon icon="mdi:label-outline" class="note-icon"></ha-icon>
+          <span class="device-name">${d2.name}</span>
+        </div>
+      `;
+    }
+    if ((((_a2 = d2.channels) == null ? void 0 : _a2.length) ?? 0) > 0) {
       return b`
         <div class="device-group">
           <div class="device-group-label">${d2.name}</div>
@@ -1551,13 +1606,14 @@ let ElectricityPanelCard = class extends i {
           ${current > 0 ? b` · ${current.toFixed(1)} A` : A}
         </span>
         ${d2.switch ? b`<button
-              class="toggle sm ${isOn ? "on" : "off"}"
-              @click=${() => this._toggle(d2.switch)}
-              aria-label="${isOn ? "Turn off" : "Turn on"} ${d2.name}">
-            </button>` : A}
+                class="toggle sm ${isOn ? "on" : "off"}"
+                @click=${() => this._toggle(d2.switch)}
+                aria-label="${isOn ? "Turn off" : "Turn on"} ${d2.name}">
+              </button>` : A}
       </div>
     `;
   }
+  // ── Render: channel ────────────────────────────────────────────────────────
   _renderChannel(ch) {
     const isOn = this._isOn(ch.switch);
     const power = this._num(ch.power);
@@ -1571,10 +1627,10 @@ let ElectricityPanelCard = class extends i {
           ${current > 0 ? b` · ${current.toFixed(1)} A` : A}
         </span>
         ${ch.switch ? b`<button
-              class="toggle sm ${isOn ? "on" : "off"}"
-              @click=${() => this._toggle(ch.switch)}
-              aria-label="${isOn ? "Turn off" : "Turn on"} ${ch.name}">
-            </button>` : A}
+                class="toggle sm ${isOn ? "on" : "off"}"
+                @click=${() => this._toggle(ch.switch)}
+                aria-label="${isOn ? "Turn off" : "Turn on"} ${ch.name}">
+              </button>` : A}
       </div>
     `;
   }
@@ -1594,7 +1650,7 @@ let ElectricityPanelCard = class extends i {
 
           ${threePhase.length > 0 ? b`
             <div class="section-label">3-phase circuits</div>
-            <div class="circuit-grid three-phase-row">
+            <div class="circuit-grid">
               ${threePhase.map((c2) => this._renderCircuit(c2))}
             </div>
           ` : A}
@@ -1611,69 +1667,178 @@ let ElectricityPanelCard = class extends i {
   }
 };
 ElectricityPanelCard.styles = i$3`
-    :host { display: block; }
+    :host {
+      display: block;
+      container-type: inline-size;
+    }
 
     ha-card { overflow: hidden; }
 
     .card-header {
       padding: 16px 16px 0;
-      font-size: 16px;
-      font-weight: 500;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
       color: var(--primary-text-color);
     }
 
     .card-content { padding: 12px 12px 16px; }
 
-    /* HDO schedule */
+    /* ── HDO bar ─────────────────────────────────────────────────────────── */
+    .hdo-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      margin-bottom: 10px;
+      border: 1px solid transparent;
+      flex-wrap: wrap;
+    }
+    .hdo-bar.nt {
+      background: linear-gradient(135deg, rgba(34,197,94,0.14) 0%, rgba(34,197,94,0.06) 100%);
+      border-color: rgba(34,197,94,0.25);
+      color: var(--success-color, #16a34a);
+    }
+    .hdo-bar.vt {
+      background: linear-gradient(135deg, rgba(239,68,68,0.12) 0%, rgba(239,68,68,0.04) 100%);
+      border-color: rgba(239,68,68,0.2);
+      color: var(--error-color, #dc2626);
+    }
+    .hdo-icon-wrap {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .hdo-bar.nt .hdo-icon-wrap { background: rgba(34,197,94,0.15); }
+    .hdo-bar.vt .hdo-icon-wrap { background: rgba(239,68,68,0.12); }
+    .hdo-bar ha-icon { --mdc-icon-size: 20px; }
+    .hdo-info {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      flex: 1;
+      min-width: 0;
+    }
+    .hdo-label {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .hdo-cd {
+      font-size: 11px;
+      opacity: 0.75;
+    }
+    .hdo-price {
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    /* ── Schedule ────────────────────────────────────────────────────────── */
     .schedule-block {
-      background: var(--secondary-background-color, rgba(0,0,0,0.04));
-      border-radius: 10px;
+      background: var(--secondary-background-color, rgba(0,0,0,0.03));
+      border-radius: 12px;
       padding: 12px 14px;
       margin-bottom: 10px;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.06));
     }
     .schedule-title {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--secondary-text-color);
+      gap: 6px;
       margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .schedule-when {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--primary-text-color);
     }
     .schedule-day {
-      font-size: 9px;
-      padding: 1px 6px;
-      border-radius: 4px;
+      font-size: 10px;
+      padding: 1px 7px;
+      border-radius: 20px;
       background: var(--primary-color, #2196f3);
-      color: white;
-      opacity: 0.7;
+      color: #fff;
+      opacity: 0.75;
       text-transform: capitalize;
-      letter-spacing: 0.3px;
     }
-    .srow {
+    .schedule-nav {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 5px 0;
-      border-bottom: 1px solid var(--divider-color, rgba(0,0,0,0.06));
-      opacity: 0.4;
+      gap: 8px;
+      margin-left: auto;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
-    .srow:last-child { border-bottom: none; }
+    .nt-remaining {
+      font-size: 10px;
+      color: var(--secondary-text-color);
+      white-space: nowrap;
+    }
+    .sday-btn {
+      font-size: 10px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.15));
+      background: var(--primary-background-color, #fff);
+      color: var(--secondary-text-color);
+      cursor: pointer;
+      white-space: nowrap;
+      font-weight: 500;
+    }
+    .sday-btn:hover { background: var(--secondary-background-color); }
+
+    .schedule-rows { display: flex; flex-direction: column; gap: 2px; }
+
+    .srow {
+      display: grid;
+      grid-template-columns: 24px minmax(0, 100px) 1fr auto;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 6px;
+      border-radius: 6px;
+      transition: opacity 0.2s;
+    }
+    .srow.past { opacity: 0.35; }
+    .srow.future { opacity: 0.65; }
     .srow.active { opacity: 1; }
-    .srow:not(.past):not(.active) { opacity: 0.65; }
+    .srow.active.nt { background: rgba(34,197,94,0.08); }
+    .srow.active.vt { background: rgba(239,68,68,0.07); }
+    .srow.future.nt { background: rgba(34,197,94,0.04); }
+
+    .stariff {
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      padding: 2px 4px;
+      border-radius: 3px;
+      text-align: center;
+    }
+    .stariff.nt {
+      background: rgba(34,197,94,0.18);
+      color: var(--success-color, #16a34a);
+    }
+    .stariff.vt {
+      background: rgba(239,68,68,0.12);
+      color: var(--error-color, #dc2626);
+    }
     .srow-time {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 500;
       color: var(--primary-text-color);
-      white-space: nowrap;
-      flex-shrink: 0;
       font-variant-numeric: tabular-nums;
-      min-width: 110px;
+      white-space: nowrap;
+      overflow: hidden;
     }
     .srow-track {
-      flex: 1;
-      height: 3px;
+      height: 4px;
       background: var(--divider-color, rgba(0,0,0,0.1));
       border-radius: 2px;
       overflow: hidden;
@@ -1683,75 +1848,27 @@ ElectricityPanelCard.styles = i$3`
       border-radius: 2px;
       transition: width 1s ease;
     }
+    .srow-fill.nt { background: var(--success-color, #22c55e); }
+    .srow-fill.vt { background: var(--error-color, #ef4444); }
     .snow {
       font-size: 8px;
       text-transform: uppercase;
-      letter-spacing: 1.5px;
+      letter-spacing: 1px;
       font-weight: 800;
-      padding: 1px 6px;
-      border-radius: 4px;
-      color: #000;
-      flex-shrink: 0;
+      padding: 2px 6px;
+      border-radius: 10px;
+      white-space: nowrap;
     }
+    .snow.nt { background: rgba(34,197,94,0.2); color: var(--success-color, #16a34a); }
+    .snow.vt { background: rgba(239,68,68,0.15); color: var(--error-color, #dc2626); }
     .sdur {
       font-size: 10px;
       color: var(--disabled-text-color);
-      flex-shrink: 0;
-      min-width: 30px;
+      white-space: nowrap;
       text-align: right;
     }
-    .schedule-nav {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-left: auto;
-    }
-    .nt-remaining {
-      font-size: 10px;
-      color: var(--secondary-text-color);
-      white-space: nowrap;
-    }
-    .sday-btn {
-      font-size: 10px;
-      padding: 2px 8px;
-      border-radius: 4px;
-      border: 1px solid var(--divider-color, rgba(0,0,0,0.15));
-      background: none;
-      color: var(--secondary-text-color);
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .sday-btn:hover { background: var(--secondary-background-color); }
-    .cost-rate {
-      color: var(--warning-color, #f57c00);
-      font-weight: 500;
-    }
 
-    /* HDO bar */
-    .hdo-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      font-size: 13px;
-      font-weight: 500;
-    }
-    .hdo-bar.nt { background: rgba(67,160,71,0.12); color: var(--success-color, #43a047); }
-    .hdo-bar.vt { background: rgba(229,57,53,0.12); color: var(--error-color, #e53935); }
-    .hdo-bar ha-icon { --mdc-icon-size: 18px; }
-    .hdo-label { flex: 1; }
-    .hdo-cd { font-size: 12px; opacity: 0.75; }
-    .hdo-price {
-      font-size: 12px;
-      opacity: 0.8;
-      font-weight: 600;
-      margin-left: auto;
-      margin-right: 4px;
-    }
-
-    /* Section utilities */
+    /* ── Section utilities ───────────────────────────────────────────────── */
     .section-label {
       font-size: 10px;
       text-transform: uppercase;
@@ -1760,21 +1877,45 @@ ElectricityPanelCard.styles = i$3`
       margin: 12px 0 6px;
     }
     .section-block {
-      background: var(--secondary-background-color, rgba(0,0,0,0.04));
-      border-radius: 10px;
+      background: var(--secondary-background-color, rgba(0,0,0,0.03));
+      border-radius: 12px;
       padding: 12px 14px;
       margin-bottom: 10px;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.06));
     }
 
-    /* Main meter */
+    /* ── Main meter ──────────────────────────────────────────────────────── */
+    .meter-block {}
     .meter-header {
       display: flex;
       align-items: center;
-      gap: 7px;
+      gap: 8px;
       margin-bottom: 10px;
     }
-    .meter-header ha-icon { --mdc-icon-size: 18px; color: var(--secondary-text-color); }
-    .meter-title { font-size: 13px; color: var(--secondary-text-color); }
+    .meter-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: rgba(var(--rgb-primary-color, 33,150,243), 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .meter-icon ha-icon {
+      --mdc-icon-size: 18px;
+      color: var(--primary-color, #2196f3);
+    }
+    .meter-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .meter-title {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--secondary-text-color);
+    }
     .meter-total {
       display: flex;
       flex-direction: column;
@@ -1791,201 +1932,133 @@ ElectricityPanelCard.styles = i$3`
       background: var(--primary-background-color, #fff);
       border-radius: 8px;
       padding: 8px 10px;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.05));
     }
-    .phase-label { font-size: 11px; color: var(--disabled-text-color); margin-bottom: 2px; }
-    .phase-power { font-size: 15px; font-weight: 500; color: var(--primary-text-color); }
+    .phase-power { font-size: 15px; font-weight: 600; color: var(--primary-text-color); }
     .phase-detail { font-size: 11px; color: var(--secondary-text-color); margin-top: 2px; }
 
-    /* Circuit grid */
+    /* circuit grid */
     .circuit-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
       gap: 8px;
     }
+    @container (max-width: 320px) {
+      .circuit-grid { grid-template-columns: 1fr; }
+    }
 
-    /* Circuit card */
+    /* circuit card */
     .circuit-card {
-      background: var(--secondary-background-color, rgba(0,0,0,0.04));
-      border-radius: 10px;
+      background: var(--ha-card-background, var(--card-background-color, #fff));
+      border-radius: 12px;
       padding: 12px 14px;
-      border: 1px solid transparent;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.07));
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
     }
-    .circuit-card.critical {
-      border-left: 3px solid var(--warning-color, #f57c00);
-    }
-
+    .circuit-card.critical { border-left: 3px solid var(--warning-color, #f59e0b); }
+    .circuit-card.is-on    { border-left: 3px solid var(--success-color, #22c55e); }
+    .circuit-card.critical.is-on { border-left: 3px solid var(--warning-color, #f59e0b); }
     .circuit-header {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 2px;
+      display: flex; align-items: center; gap: 6px; margin-bottom: 2px;
     }
     .circuit-name {
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--primary-text-color);
-      flex: 1;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: 13px; font-weight: 600; color: var(--primary-text-color);
+      flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .circuit-id {
-      font-size: 11px;
-      color: var(--disabled-text-color);
-      flex-shrink: 0;
-    }
-    .lock-icon {
-      --mdc-icon-size: 16px;
-      color: var(--warning-color, #f57c00);
-      flex-shrink: 0;
-    }
+    .lock-icon { --mdc-icon-size: 16px; color: var(--warning-color, #f59e0b); flex-shrink: 0; }
 
-    /* Load bar */
+    /* load bar */
     .load-track {
-      height: 3px;
-      background: var(--divider-color, rgba(0,0,0,0.1));
-      border-radius: 2px;
-      overflow: hidden;
-      margin: 8px 0 6px;
+      height: 5px; background: var(--divider-color, rgba(0,0,0,0.08));
+      border-radius: 3px; overflow: hidden; margin: 8px 0;
     }
-    .load-fill {
-      height: 100%;
-      border-radius: 2px;
-      transition: width 1s ease;
-    }
+    .load-fill { height: 100%; border-radius: 3px; transition: width 1s ease; }
 
-    /* Footer */
+    /* circuit footer */
     .circuit-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
+      display: flex; align-items: flex-end; justify-content: space-between; gap: 6px;
     }
-    .metrics {
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-      min-width: 0;
-    }
+    .metrics { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .metric-primary {
-      font-size: 15px;
-      font-weight: 500;
-      color: var(--primary-text-color);
+      font-size: 18px; font-weight: 700; color: var(--primary-text-color); line-height: 1;
     }
     .metric-small {
-      font-size: 11px;
-      color: var(--secondary-text-color);
-      white-space: nowrap;
+      font-size: 11px; color: var(--secondary-text-color);
+      display: flex; flex-wrap: wrap; align-items: center; gap: 1px 2px;
     }
+    .metric-sep { opacity: 0.4; margin: 0 1px; }
+    .cost-rate { color: var(--warning-color, #f59e0b); font-weight: 600; }
 
-    /* Badge */
+    /* badge */
     .badge {
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 4px;
-      font-weight: 600;
-      flex-shrink: 0;
+      font-size: 9px; padding: 1px 5px; border-radius: 4px;
+      font-weight: 700; flex-shrink: 0; letter-spacing: 0.3px;
     }
-    .badge-info {
-      background: rgba(var(--rgb-primary-color, 33,150,243), 0.12);
-      color: var(--primary-color, #2196f3);
-    }
+    .badge-info  { background: rgba(33,150,243,0.12); color: var(--primary-color, #2196f3); }
+    .badge-phase { background: rgba(33,150,243,0.10); color: var(--primary-color, #2196f3); }
 
-    /* Toggle switch */
+    /* toggle */
     .toggle {
-      width: 34px;
-      height: 18px;
-      border-radius: 9px;
-      border: none;
-      cursor: pointer;
-      position: relative;
-      flex-shrink: 0;
-      transition: background 0.2s;
+      width: 34px; height: 20px; border-radius: 10px;
+      border: none; cursor: pointer; position: relative; flex-shrink: 0; transition: background 0.2s;
     }
     .toggle::after {
-      content: '';
-      position: absolute;
-      top: 2px;
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      background: white;
-      transition: left 0.2s;
+      content: ''; position: absolute; top: 3px;
+      width: 14px; height: 14px; border-radius: 50%; background: white;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: left 0.2s;
     }
-    .toggle.on  { background: var(--success-color, #43a047); }
-    .toggle.on::after  { left: 18px; }
+    .toggle.on  { background: var(--success-color, #22c55e); }
+    .toggle.on::after  { left: 17px; }
     .toggle.off { background: var(--disabled-text-color, #9e9e9e); }
-    .toggle.off::after { left: 2px; }
+    .toggle.off::after { left: 3px; }
     .toggle.sm  { width: 28px; height: 16px; border-radius: 8px; }
-    .toggle.sm::after { width: 12px; height: 12px; }
-    .toggle.sm.on::after  { left: 14px; }
-    .toggle.sm.off::after { left: 2px; }
+    .toggle.sm::after { width: 10px; height: 10px; top: 3px; }
+    .toggle.sm.on::after  { left: 15px; }
+    .toggle.sm.off::after { left: 3px; }
 
-    /* Expand button */
+    /* expand button */
     .expand-btn {
-      display: flex;
-      align-items: center;
-      gap: 2px;
-      background: none;
-      border: none;
-      cursor: pointer;
-      color: var(--secondary-text-color);
-      font-size: 11px;
-      padding: 0;
-      flex-shrink: 0;
+      display: flex; align-items: center;
+      background: var(--secondary-background-color, rgba(0,0,0,0.04));
+      border: none; border-radius: 6px; cursor: pointer;
+      color: var(--secondary-text-color); padding: 2px 4px; flex-shrink: 0;
     }
     .expand-btn ha-icon { --mdc-icon-size: 16px; }
 
-    /* Status dot */
+    /* status dot */
     .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
+      width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; transition: box-shadow 0.3s;
     }
-    .status-dot.on  { background: var(--success-color, #43a047); }
+    .status-dot.on  { background: var(--success-color, #22c55e); box-shadow: 0 0 0 3px rgba(34,197,94,0.2); }
     .status-dot.off { background: var(--disabled-text-color, #9e9e9e); }
-    .status-dot.none { background: transparent; border: 1px solid var(--divider-color); }
+    .status-dot.none { background: transparent; border: 1.5px solid var(--divider-color, rgba(0,0,0,0.2)); }
     .status-dot.sm  { width: 7px; height: 7px; }
+    .status-dot.sm.on { box-shadow: 0 0 0 2px rgba(34,197,94,0.2); }
 
-    /* Devices section */
+    /* devices */
     .devices-section {
-      border-top: 1px solid var(--divider-color, rgba(0,0,0,0.1));
-      margin-top: 8px;
-      padding-top: 8px;
+      border-top: 1px solid var(--divider-color, rgba(0,0,0,0.08));
+      margin-top: 8px; padding-top: 8px;
     }
     .device-group { margin-bottom: 6px; }
     .device-group-label {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--disabled-text-color);
-      margin-bottom: 4px;
-      padding-left: 16px;
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+      color: var(--disabled-text-color); margin-bottom: 4px; padding-left: 16px;
     }
     .device-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 4px 0;
-      border-bottom: 1px solid var(--divider-color, rgba(0,0,0,0.06));
+      display: flex; align-items: center; gap: 7px;
+      padding: 4px 0; border-bottom: 1px solid var(--divider-color, rgba(0,0,0,0.05));
     }
     .device-row:last-child { border-bottom: none; }
     .device-row.channel { padding-left: 8px; }
     .device-name {
-      flex: 1;
-      font-size: 12px;
-      color: var(--primary-text-color);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      flex: 1; font-size: 12px; color: var(--primary-text-color);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .device-metrics {
-      font-size: 11px;
-      color: var(--secondary-text-color);
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
+    .device-metrics { font-size: 11px; color: var(--secondary-text-color); white-space: nowrap; flex-shrink: 0; }
+    .note-row { opacity: 0.7; }
+    .note-icon { --mdc-icon-size: 13px; color: var(--disabled-text-color); flex-shrink: 0; }
+    .note-row .device-name { font-style: italic; }
   `;
 __decorateClass([
   n2({ attribute: false })

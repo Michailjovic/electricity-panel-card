@@ -314,16 +314,29 @@ export class ElectricityPanelEditor extends LitElement {
       </div>`;
   }
 
+  private _setDeviceNote(ci: number, di: number, val: boolean): void {
+    const cfg = deepClone(this._config);
+    const d = cfg.circuits![ci].devices![di];
+    if (val) {
+      d.note = true;
+      // clear entity fields — a note has no entities
+      delete d.switch; delete d.power; delete d.current; delete d.channels;
+    } else {
+      delete d.note;
+    }
+    this._config = cfg;
+    this._fire(cfg);
+  }
+
   private _renderDeviceRow(ci: number, d: CircuitDevice, di: number): TemplateResult {
     const open = this._openDevice === di;
     const s = (f: keyof CircuitDevice) => (v: string) => this._setDeviceField(ci, di, f, v);
     return html`
-      <div class="sub-item ${open ? 'open' : ''}"
-        @dragover=${(e: DragEvent) => { e.preventDefault(); if (this._dragSrcIdx !== idx) this._dragOverIdx = idx; }}
-        @dragleave=${() => { if (this._dragOverIdx === idx) this._dragOverIdx = -1; }}
-        @drop=${(e: DragEvent) => { e.preventDefault(); if (this._dragSrcIdx >= 0 && this._dragSrcIdx !== idx) this._moveCircuitTo(this._dragSrcIdx, idx); }}>
+      <div class="sub-item ${open ? 'open' : ''}">
         <div class="row-hdr" @click=${() => { this._openDevice = open ? -1 : di; }}>
+          <ha-icon icon="${d.note ? 'mdi:label-outline' : 'mdi:power-plug-outline'}" class="device-type-icon"></ha-icon>
           <span class="row-lbl">${d.name || '(unnamed device)'}</span>
+          ${d.note ? html`<span class="badge warn">note</span>` : nothing}
           <div class="row-acts" @click=${(e: Event) => e.stopPropagation()}>
             <button class="btn-icon danger" @click=${() => this._removeDevice(ci, di)}>
               <ha-icon icon="mdi:minus-circle-outline"></ha-icon>
@@ -334,16 +347,23 @@ export class ElectricityPanelEditor extends LitElement {
         ${open ? html`
           <div class="sub-fields">
             ${this._textField('Device name', d.name, s('name'), 'e.g. Washing machine')}
-            ${this._entityField('Switch', d.switch, s('switch'))}
-            ${this._entityField('Power (W)', d.power, s('power'))}
-            ${this._entityField('Current (A)', d.current, s('current'))}
-            <div class="group-label" style="margin-top:10px;">
-              Channels (for multi-relay devices like Shelly 4PM)
+            <div class="field checkbox">
+              <input type="checkbox" id="note-${ci}-${di}" .checked=${d.note ?? false}
+                @change=${(e: Event) => this._setDeviceNote(ci, di, (e.target as HTMLInputElement).checked)} />
+              <label for="note-${ci}-${di}">Text label only (no entities, no switch)</label>
             </div>
-            ${(d.channels ?? []).map((ch, chi) => this._renderChannelRow(ci, di, ch, chi))}
-            <button class="btn-add" @click=${() => this._addChannel(ci, di)}>
-              <ha-icon icon="mdi:plus"></ha-icon> Add channel
-            </button>
+            ${!d.note ? html`
+              ${this._entityField('Switch', d.switch, s('switch'))}
+              ${this._entityField('Power (W)', d.power, s('power'))}
+              ${this._entityField('Current (A)', d.current, s('current'))}
+              <div class="group-label" style="margin-top:10px;">
+                Channels (for multi-relay devices like Shelly 4PM)
+              </div>
+              ${(d.channels ?? []).map((ch, chi) => this._renderChannelRow(ci, di, ch, chi))}
+              <button class="btn-add" @click=${() => this._addChannel(ci, di)}>
+                <ha-icon icon="mdi:plus"></ha-icon> Add channel
+              </button>
+            ` : nothing}
           </div>` : nothing}
       </div>`;
   }
@@ -507,6 +527,11 @@ export class ElectricityPanelEditor extends LitElement {
     .badge.info { background: rgba(33,150,243,0.12); color: var(--primary-color, #2196f3); }
       .badge.warn { background: rgba(245,124,0,0.12); color: var(--warning-color, #f57c00); }
 
+    .device-type-icon {
+      --mdc-icon-size: 15px;
+      color: var(--disabled-text-color);
+      flex-shrink: 0;
+    }
     .drag-handle {
       --mdc-icon-size: 18px;
       color: var(--disabled-text-color);

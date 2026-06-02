@@ -28,6 +28,8 @@ export interface DeviceChannel {
 /** A device wired behind a circuit breaker */
 export interface CircuitDevice {
   name: string;
+  /** When true, renders as a plain text label — no entities, no toggle */
+  note?: boolean;
   switch?: string;              // entity_id — if the device has a smart relay
   power?: string;               // entity_id — power sensor (W)
   current?: string;             // entity_id — current sensor (A)

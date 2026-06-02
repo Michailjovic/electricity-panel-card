@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.0] - 2026-06-02
+
+### Added
+- Full-day tariff schedule — the schedule now shows all 24 hours as alternating NT/VT blocks, not just the low-tariff windows. Each row has a colour-coded NT/VT badge, a progress bar, and a "Now" pill on the currently active slot.
+- Text-only device label — a device under a circuit breaker can now be marked as a note (`note: true`). It renders as a plain italic label (e.g. "Mikrovlnka") with no entity, no toggle, and no metrics. The editor shows a checkbox to toggle this mode.
+
+### Changed
+- Responsive circuit grid — switched to `auto-fill minmax(150px, 1fr)` with a container query fallback to a single column on very narrow screens. Circuit cards no longer overflow off-screen on mobile.
+- Visual redesign — modernised card appearance: subtle drop-shadows on circuit cards, coloured left-border accent (green when on, amber when critical), glow ring on active status dots, gradient HDO bar with icon pill, 18 px bold power metric, and wrappable secondary metrics so nothing clips on mobile.
+
+### Fixed
+- Device rows in the editor incorrectly carried circuit drag-and-drop handlers (`idx` reference error); removed from device rows.
+
+---
+
 ## [2.1.0] - 2026-06-02
 
 ### Added

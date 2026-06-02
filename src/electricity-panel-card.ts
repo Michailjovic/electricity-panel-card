@@ -8,8 +8,17 @@ import type {
   Circuit,
   CircuitDevice,
   DeviceChannel,
-  MainMeter,
 } from './types.js';
+
+interface DaySlot {
+  type: 'nt' | 'vt';
+  label: string;
+  isPast: boolean;
+  isCurrent: boolean;
+  pct: number;
+  durMins: number;
+  durStr: string;
+}
 
 @customElement('electricity-panel-card')
 export class ElectricityPanelCard extends LitElement {
@@ -22,7 +31,6 @@ export class ElectricityPanelCard extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
-    // Refresh every 30 s so countdowns stay accurate between entity updates
     this._timer = window.setInterval(() => this.requestUpdate(), 30_000);
   }
 
@@ -43,17 +51,14 @@ export class ElectricityPanelCard extends LitElement {
   }
 
   static getStubConfig(): ElectricityPanelConfig {
-    return {
-      type: 'custom:electricity-panel-card',
-      circuits: [],
-    };
+    return { type: 'custom:electricity-panel-card', circuits: [] };
   }
 
   getCardSize(): number {
     return 4 + Math.ceil((this._config.circuits?.length ?? 0) / 2);
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Entity helpers ─────────────────────────────────────────────────────────
 
   private _state(id?: string): string {
     if (!id) return 'unavailable';
@@ -61,8 +66,7 @@ export class ElectricityPanelCard extends LitElement {
   }
 
   private _num(id?: string): number {
-    const s = this._state(id);
-    const n = parseFloat(s);
+    const n = parseFloat(this._state(id));
     return isNaN(n) ? 0 : n;
   }
 
@@ -82,12 +86,11 @@ export class ElectricityPanelCard extends LitElement {
   }
 
   private _loadColor(pct: number): string {
-    if (pct > 80) return 'var(--error-color, #e53935)';
-    if (pct > 55) return 'var(--warning-color, #f57c00)';
-    return 'var(--success-color, #43a047)';
+    if (pct > 80) return 'var(--error-color, #ef4444)';
+    if (pct > 55) return 'var(--warning-color, #f59e0b)';
+    return 'var(--success-color, #22c55e)';
   }
 
-  /** Return power in W, auto-converting from kW/MW if needed */
   private _watts(entityId?: string): number {
     if (!entityId) return 0;
     const entity = this.hass?.states[entityId];
@@ -97,16 +100,14 @@ export class ElectricityPanelCard extends LitElement {
     const unit = (entity.attributes['unit_of_measurement'] as string | undefined) ?? '';
     if (unit === 'kW') return val * 1000;
     if (unit === 'MW') return val * 1_000_000;
-    return val; // assumes W
+    return val;
   }
 
-  /** Format watts for display: W below 1 kW, kW above */
   private _fmtW(w: number): string {
     if (w >= 1000) return `${(w / 1000).toFixed(2)} kW`;
     return `${w.toFixed(0)} W`;
   }
 
-  /** Return energy in kWh, auto-converting from Wh/MWh if needed */
   private _kwh(entityId?: string): number {
     if (!entityId) return 0;
     const entity = this.hass?.states[entityId];
@@ -116,7 +117,7 @@ export class ElectricityPanelCard extends LitElement {
     const unit = (entity.attributes['unit_of_measurement'] as string | undefined) ?? '';
     if (unit === 'Wh') return val / 1000;
     if (unit === 'MWh') return val * 1000;
-    return val; // assumes kWh
+    return val;
   }
 
   // ── HDO helpers ────────────────────────────────────────────────────────────
@@ -135,24 +136,27 @@ export class ElectricityPanelCard extends LitElement {
     return h > 0 ? `${h} h ${String(m).padStart(2, '0')} min` : `${m} min`;
   }
 
-  // ── HDO schedule ───────────────────────────────────────────────────────────
-
   private _dayType(): 'weekday' | 'weekend' | 'holiday' {
     const isWorkday = this._isOn(this._config.hdo?.workday_sensor);
-    const d = new Date().getDay(); // 0=Sun, 6=Sat
+    const d = new Date().getDay();
     if (isWorkday) return 'weekday';
     if (d === 0 || d === 6) return 'weekend';
     return 'holiday';
   }
 
+  private _tomorrowDayType(): 'weekday' | 'weekend' {
+    const d = (new Date().getDay() + 1) % 7;
+    return (d === 0 || d === 6) ? 'weekend' : 'weekday';
+  }
+
   private _ntRemainingMins(starts: string[], offsets: number[]): number {
     const now = Date.now();
-    const midnight = new Date(); midnight.setHours(0,0,0,0);
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
     let rem = 0;
     starts.forEach((s, i) => {
       const [h, m] = s.split(':').map(Number);
-      const st = midnight.getTime() + (h*60+m)*60000;
-      const en = st + offsets[i]*60000;
+      const st = midnight.getTime() + (h * 60 + m) * 60000;
+      const en = st + offsets[i] * 60000;
       if (now < en) rem += (en - Math.max(now, st)) / 60000;
     });
     return rem;
@@ -164,11 +168,6 @@ export class ElectricityPanelCard extends LitElement {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   }
 
-  private _tomorrowDayType(): 'weekday' | 'weekend' {
-    const d = (new Date().getDay() + 1) % 7;
-    return (d === 0 || d === 6) ? 'weekend' : 'weekday';
-  }
-
   private _fmtCostRate(watts: number): string {
     const hdo = this._config.hdo;
     if (!hdo?.nt_price && !hdo?.vt_price) return '';
@@ -177,6 +176,64 @@ export class ElectricityPanelCard extends LitElement {
     const cur = hdo.currency ?? 'Kč';
     return `${((watts / 1000) * price).toFixed(2)} ${cur}/h`;
   }
+
+  // ── Full-day schedule builder ──────────────────────────────────────────────
+
+  private _buildFullDaySlots(
+    starts: string[],
+    offsets: number[],
+    base: number,
+    showing: boolean
+  ): DaySlot[] {
+    const fmt = (ms: number) =>
+      new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const fmtDur = (m: number) =>
+      m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}` : `${m}m`;
+    const now = Date.now();
+    const dayEnd = base + 86400000;
+
+    const ntWindows = starts.map((start, i) => {
+      const [h, m] = start.split(':').map(Number);
+      const s = base + (h * 60 + m) * 60000;
+      return { s, e: s + offsets[i] * 60000, durMins: offsets[i] };
+    });
+
+    const makeSlot = (
+      type: 'nt' | 'vt',
+      slotStart: number,
+      slotEnd: number,
+      durMins: number
+    ): DaySlot => {
+      const isPast = !showing && now >= slotEnd;
+      const isCurrent = !showing && now >= slotStart && now < slotEnd;
+      const pct = isCurrent
+        ? Math.min(100, ((now - slotStart) / (slotEnd - slotStart)) * 100)
+        : isPast ? 100 : 0;
+      return {
+        type, label: `${fmt(slotStart)}–${fmt(slotEnd)}`,
+        isPast, isCurrent, pct, durMins, durStr: fmtDur(durMins),
+      };
+    };
+
+    const slots: DaySlot[] = [];
+    let cursor = base;
+
+    for (const nt of ntWindows) {
+      if (nt.s > cursor) {
+        slots.push(makeSlot('vt', cursor, nt.s, Math.round((nt.s - cursor) / 60000)));
+      }
+      slots.push(makeSlot('nt', nt.s, nt.e, nt.durMins));
+      cursor = nt.e;
+    }
+
+    if (cursor < dayEnd) {
+      slots.push(makeSlot('vt', cursor, dayEnd, Math.round((dayEnd - cursor) / 60000)));
+    }
+
+    return slots;
+  }
+
+  // ── Render: HDO schedule ───────────────────────────────────────────────────
 
   private _renderHdoSchedule(): TemplateResult | typeof nothing {
     const hdo = this._config.hdo;
@@ -187,60 +244,49 @@ export class ElectricityPanelCard extends LitElement {
 
     const showing = this._showTomorrow;
     const dt = showing ? this._tomorrowDayType() : this._dayType();
-    const day = dt === 'holiday' && src.holiday ? src.holiday
+    const day = (dt === 'holiday' && src.holiday) ? src.holiday
       : dt === 'weekend' ? src.weekend : src.weekday;
 
-    const isNT = this._isOn(hdo.switch);
-    const color = isNT ? 'var(--success-color,#43a047)' : 'var(--error-color,#e53935)';
-    const now = Date.now();
-    const midnight = new Date(); midnight.setHours(0,0,0,0);
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
     const base = showing ? midnight.getTime() + 86400000 : midnight.getTime();
-    const fmt = (ms: number) => new Date(ms).toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
 
-    const slots = day.starts.map((start, i) => {
-      const [h, m] = start.split(':').map(Number);
-      const s = base + (h*60+m)*60000;
-      const e = s + day.offsets[i]*60000;
-      const isPast = !showing && now >= e;
-      const isCurrent = !showing && now >= s && now < e;
-      const pct = isCurrent ? Math.min(100, ((now-s)/(e-s))*100) : isPast ? 100 : 0;
-      const dur = day.offsets[i];
-      const durStr = dur >= 60 ? `${Math.floor(dur/60)}h${dur%60 ? ` ${dur%60}m` : ''}` : `${dur}m`;
-      return { label: `${fmt(s)}–${fmt(e)}`, isPast, isCurrent, pct, durStr };
-    });
-
+    const slots = this._buildFullDaySlots(day.starts, day.offsets, base, showing);
     const remaining = showing ? null : this._ntRemainingMins(day.starts, day.offsets);
     const totalNT = day.offsets.reduce((a, b) => a + b, 0);
 
     return html`
       <div class="schedule-block">
         <div class="schedule-title">
-          <span>${showing ? "Tomorrow's" : "Today's"} NT schedule
-            <span class="schedule-day">${dt}</span>
-          </span>
+          <span class="schedule-when">${showing ? 'Tomorrow' : 'Today'}</span>
+          <span class="schedule-day">${dt}</span>
           <div class="schedule-nav">
-            ${remaining !== null ? html`<span class="nt-remaining">${this._fmtMins(remaining)} left · ${this._fmtMins(totalNT)} total</span>` : nothing}
+            ${remaining !== null
+              ? html`<span class="nt-remaining">${this._fmtMins(remaining)} NT left · ${this._fmtMins(totalNT)} total</span>`
+              : nothing}
             <button class="sday-btn" @click=${() => { this._showTomorrow = !this._showTomorrow; }}>
               ${showing ? 'Today' : 'Tomorrow'}
             </button>
           </div>
         </div>
-        ${slots.map(sl => html`
-          <div class="srow ${sl.isPast ? 'past' : sl.isCurrent ? 'active' : ''}">
-            <span class="srow-time">${sl.label}</span>
-            <div class="srow-track">
-              <div class="srow-fill" style="width:${sl.pct.toFixed(1)}%;background:${color}"></div>
+        <div class="schedule-rows">
+          ${slots.map(sl => html`
+            <div class="srow ${sl.isPast ? 'past' : sl.isCurrent ? 'active' : 'future'} ${sl.type}">
+              <span class="stariff ${sl.type}">${sl.type.toUpperCase()}</span>
+              <span class="srow-time">${sl.label}</span>
+              <div class="srow-track">
+                <div class="srow-fill ${sl.type}" style="width:${sl.pct.toFixed(1)}%"></div>
+              </div>
+              ${sl.isCurrent
+                ? html`<span class="snow ${sl.type}">Now</span>`
+                : html`<span class="sdur">${sl.durStr}</span>`}
             </div>
-            ${sl.isCurrent
-              ? html`<span class="snow" style="background:${color}">Now</span>`
-              : html`<span class="sdur">${sl.durStr}</span>`}
-          </div>
-        `)}
+          `)}
+        </div>
       </div>
     `;
   }
 
-  // ── Render sections ────────────────────────────────────────────────────────
+  // ── Render: HDO bar ────────────────────────────────────────────────────────
 
   private _renderHdo(): TemplateResult | typeof nothing {
     const hdo = this._config.hdo;
@@ -251,29 +297,39 @@ export class ElectricityPanelCard extends LitElement {
     const cur = hdo.currency ?? 'Kč';
     return html`
       <div class="hdo-bar ${isNT ? 'nt' : 'vt'}">
-        <ha-icon icon="mdi:lightning-bolt-circle"></ha-icon>
-        <span class="hdo-label">${isNT ? 'NT — low tariff' : 'VT — high tariff'}</span>
+        <div class="hdo-icon-wrap">
+          <ha-icon icon="mdi:lightning-bolt"></ha-icon>
+        </div>
+        <div class="hdo-info">
+          <span class="hdo-label">${isNT ? 'Low tariff — NT' : 'High tariff — VT'}</span>
+          ${cd ? html`<span class="hdo-cd">ends in ${cd}</span>` : nothing}
+        </div>
         ${price ? html`<span class="hdo-price">${price} ${cur}/kWh</span>` : nothing}
-        ${cd ? html`<span class="hdo-cd">ends in ${cd}</span>` : nothing}
       </div>
     `;
   }
+
+  // ── Render: main meter ─────────────────────────────────────────────────────
 
   private _renderMainMeter(): TemplateResult | typeof nothing {
     const m = this._config.main_meter;
     if (!m) return nothing;
     const totalW = this._watts(m.power_l1) + this._watts(m.power_l2) + this._watts(m.power_l3);
-    const phases: Array<{ label: string; power: string | undefined; current: string | undefined }> = [
+    const phases = [
       { label: 'L1', power: m.power_l1, current: m.current_l1 },
       { label: 'L2', power: m.power_l2, current: m.current_l2 },
       { label: 'L3', power: m.power_l3, current: m.current_l3 },
     ];
     return html`
-      <div class="section-block">
+      <div class="section-block meter-block">
         <div class="meter-header">
-          <ha-icon icon="mdi:transmission-tower"></ha-icon>
-          <span class="meter-title">Main meter</span>
-          <span class="badge badge-info">3φ</span>
+          <div class="meter-icon">
+            <ha-icon icon="mdi:transmission-tower"></ha-icon>
+          </div>
+          <div class="meter-title-wrap">
+            <span class="meter-title">Main meter</span>
+            <span class="badge badge-info">3φ</span>
+          </div>
           <div class="meter-total">
             <span class="metric-primary">${(totalW / 1000).toFixed(2)} kW</span>
             ${m.energy_today
@@ -294,33 +350,37 @@ export class ElectricityPanelCard extends LitElement {
     `;
   }
 
+  // ── Render: circuit ────────────────────────────────────────────────────────
+
   private _renderCircuit(c: Circuit): TemplateResult {
     const isOn = this._isOn(c.switch);
     const power = this._watts(c.power);
     const current = this._num(c.current);
     const energy = this._kwh(c.energy);
     const maxA = c.max_current ?? (c.phases === 3 ? 63 : 16);
-    const loadPct = Math.min(100, current > 0 ? (current / maxA) * 100 : (power / (maxA * 230)) * 100);
+    const loadPct = Math.min(100, current > 0
+      ? (current / maxA) * 100
+      : (power / (maxA * 230)) * 100);
     const barColor = this._loadColor(loadPct);
     const expanded = this._expanded.has(c.id);
     const hasDevices = (c.devices?.length ?? 0) > 0;
+    const costRate = power > 0 ? this._fmtCostRate(power) : '';
 
     return html`
-      <div class="circuit-card ${c.critical ? 'critical' : ''} ${c.phases === 3 ? 'three-phase' : ''}">
+      <div class="circuit-card ${c.critical ? 'critical' : ''} ${c.switch && isOn ? 'is-on' : ''}">
 
         <div class="circuit-header">
-          <div class="status-dot ${isOn ? 'on' : 'off'}"></div>
+          <div class="status-dot ${isOn ? 'on' : c.switch ? 'off' : 'none'}"></div>
           <span class="circuit-name">${c.name}</span>
-          <span class="circuit-id">${c.id}</span>
-          ${c.phases === 3 ? html`<span class="badge badge-info">3φ</span>` : nothing}
+          ${c.phases === 3 ? html`<span class="badge badge-phase">3φ</span>` : nothing}
           ${c.critical
-            ? html`<ha-icon icon="mdi:lock" class="lock-icon" title="Critical circuit — remote off disabled"></ha-icon>`
+            ? html`<ha-icon icon="mdi:lock" class="lock-icon"></ha-icon>`
             : c.switch
               ? html`<button
-                  class="toggle ${isOn ? 'on' : 'off'}"
-                  @click=${() => this._toggle(c.switch!)}
-                  aria-label="${isOn ? 'Turn off' : 'Turn on'} ${c.name}">
-                </button>`
+                    class="toggle ${isOn ? 'on' : 'off'}"
+                    @click=${() => this._toggle(c.switch!)}
+                    aria-label="${isOn ? 'Turn off' : 'Turn on'} ${c.name}">
+                  </button>`
               : nothing}
         </div>
 
@@ -333,15 +393,14 @@ export class ElectricityPanelCard extends LitElement {
             <span class="metric-primary">${this._fmtW(power)}</span>
             <span class="metric-small">
               ${current.toFixed(1)} A
-              ${c.voltage ? html` · ${this._num(c.voltage).toFixed(0)} V` : nothing}
-              ${energy > 0 ? html` · ${energy.toFixed(2)} kWh` : nothing}
-              ${power > 0 && this._fmtCostRate(power) ? html` · <span class="cost-rate">${this._fmtCostRate(power)}</span>` : nothing}
+              ${c.voltage ? html`<span class="metric-sep">·</span>${this._num(c.voltage).toFixed(0)} V` : nothing}
+              ${energy > 0 ? html`<span class="metric-sep">·</span>${energy.toFixed(2)} kWh` : nothing}
+              ${costRate ? html`<span class="metric-sep">·</span><span class="cost-rate">${costRate}</span>` : nothing}
             </span>
           </div>
           ${hasDevices
             ? html`<button class="expand-btn" @click=${() => this._toggleExpanded(c.id)}>
                 <ha-icon icon="${expanded ? 'mdi:chevron-up' : 'mdi:chevron-down'}"></ha-icon>
-                <span>${expanded ? 'hide' : 'devices'}</span>
               </button>`
             : nothing}
         </div>
@@ -353,9 +412,21 @@ export class ElectricityPanelCard extends LitElement {
     `;
   }
 
+  // ── Render: device ─────────────────────────────────────────────────────────
+
   private _renderDevice(d: CircuitDevice): TemplateResult {
-    const hasChannels = (d.channels?.length ?? 0) > 0;
-    if (hasChannels) {
+    // Plain text note — no entities
+    if (d.note) {
+      return html`
+        <div class="device-row note-row">
+          <ha-icon icon="mdi:label-outline" class="note-icon"></ha-icon>
+          <span class="device-name">${d.name}</span>
+        </div>
+      `;
+    }
+
+    // Multi-channel device (Shelly 4PM etc.)
+    if ((d.channels?.length ?? 0) > 0) {
       return html`
         <div class="device-group">
           <div class="device-group-label">${d.name}</div>
@@ -363,6 +434,7 @@ export class ElectricityPanelCard extends LitElement {
         </div>
       `;
     }
+
     const isOn = this._isOn(d.switch);
     const power = this._num(d.power);
     const current = this._num(d.current);
@@ -376,14 +448,16 @@ export class ElectricityPanelCard extends LitElement {
         </span>
         ${d.switch
           ? html`<button
-              class="toggle sm ${isOn ? 'on' : 'off'}"
-              @click=${() => this._toggle(d.switch!)}
-              aria-label="${isOn ? 'Turn off' : 'Turn on'} ${d.name}">
-            </button>`
+                class="toggle sm ${isOn ? 'on' : 'off'}"
+                @click=${() => this._toggle(d.switch!)}
+                aria-label="${isOn ? 'Turn off' : 'Turn on'} ${d.name}">
+              </button>`
           : nothing}
       </div>
     `;
   }
+
+  // ── Render: channel ────────────────────────────────────────────────────────
 
   private _renderChannel(ch: DeviceChannel): TemplateResult {
     const isOn = this._isOn(ch.switch);
@@ -399,10 +473,10 @@ export class ElectricityPanelCard extends LitElement {
         </span>
         ${ch.switch
           ? html`<button
-              class="toggle sm ${isOn ? 'on' : 'off'}"
-              @click=${() => this._toggle(ch.switch!)}
-              aria-label="${isOn ? 'Turn off' : 'Turn on'} ${ch.name}">
-            </button>`
+                class="toggle sm ${isOn ? 'on' : 'off'}"
+                @click=${() => this._toggle(ch.switch!)}
+                aria-label="${isOn ? 'Turn off' : 'Turn on'} ${ch.name}">
+              </button>`
           : nothing}
       </div>
     `;
@@ -429,7 +503,7 @@ export class ElectricityPanelCard extends LitElement {
 
           ${threePhase.length > 0 ? html`
             <div class="section-label">3-phase circuits</div>
-            <div class="circuit-grid three-phase-row">
+            <div class="circuit-grid">
               ${threePhase.map(c => this._renderCircuit(c))}
             </div>
           ` : nothing}
@@ -450,69 +524,178 @@ export class ElectricityPanelCard extends LitElement {
   // ── Styles ─────────────────────────────────────────────────────────────────
 
   static styles = css`
-    :host { display: block; }
+    :host {
+      display: block;
+      container-type: inline-size;
+    }
 
     ha-card { overflow: hidden; }
 
     .card-header {
       padding: 16px 16px 0;
-      font-size: 16px;
-      font-weight: 500;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
       color: var(--primary-text-color);
     }
 
     .card-content { padding: 12px 12px 16px; }
 
-    /* HDO schedule */
+    /* ── HDO bar ─────────────────────────────────────────────────────────── */
+    .hdo-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      margin-bottom: 10px;
+      border: 1px solid transparent;
+      flex-wrap: wrap;
+    }
+    .hdo-bar.nt {
+      background: linear-gradient(135deg, rgba(34,197,94,0.14) 0%, rgba(34,197,94,0.06) 100%);
+      border-color: rgba(34,197,94,0.25);
+      color: var(--success-color, #16a34a);
+    }
+    .hdo-bar.vt {
+      background: linear-gradient(135deg, rgba(239,68,68,0.12) 0%, rgba(239,68,68,0.04) 100%);
+      border-color: rgba(239,68,68,0.2);
+      color: var(--error-color, #dc2626);
+    }
+    .hdo-icon-wrap {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .hdo-bar.nt .hdo-icon-wrap { background: rgba(34,197,94,0.15); }
+    .hdo-bar.vt .hdo-icon-wrap { background: rgba(239,68,68,0.12); }
+    .hdo-bar ha-icon { --mdc-icon-size: 20px; }
+    .hdo-info {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      flex: 1;
+      min-width: 0;
+    }
+    .hdo-label {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .hdo-cd {
+      font-size: 11px;
+      opacity: 0.75;
+    }
+    .hdo-price {
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    /* ── Schedule ────────────────────────────────────────────────────────── */
     .schedule-block {
-      background: var(--secondary-background-color, rgba(0,0,0,0.04));
-      border-radius: 10px;
+      background: var(--secondary-background-color, rgba(0,0,0,0.03));
+      border-radius: 12px;
       padding: 12px 14px;
       margin-bottom: 10px;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.06));
     }
     .schedule-title {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--secondary-text-color);
+      gap: 6px;
       margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .schedule-when {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--primary-text-color);
     }
     .schedule-day {
-      font-size: 9px;
-      padding: 1px 6px;
-      border-radius: 4px;
+      font-size: 10px;
+      padding: 1px 7px;
+      border-radius: 20px;
       background: var(--primary-color, #2196f3);
-      color: white;
-      opacity: 0.7;
+      color: #fff;
+      opacity: 0.75;
       text-transform: capitalize;
-      letter-spacing: 0.3px;
     }
-    .srow {
+    .schedule-nav {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 5px 0;
-      border-bottom: 1px solid var(--divider-color, rgba(0,0,0,0.06));
-      opacity: 0.4;
+      gap: 8px;
+      margin-left: auto;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
-    .srow:last-child { border-bottom: none; }
+    .nt-remaining {
+      font-size: 10px;
+      color: var(--secondary-text-color);
+      white-space: nowrap;
+    }
+    .sday-btn {
+      font-size: 10px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.15));
+      background: var(--primary-background-color, #fff);
+      color: var(--secondary-text-color);
+      cursor: pointer;
+      white-space: nowrap;
+      font-weight: 500;
+    }
+    .sday-btn:hover { background: var(--secondary-background-color); }
+
+    .schedule-rows { display: flex; flex-direction: column; gap: 2px; }
+
+    .srow {
+      display: grid;
+      grid-template-columns: 24px minmax(0, 100px) 1fr auto;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 6px;
+      border-radius: 6px;
+      transition: opacity 0.2s;
+    }
+    .srow.past { opacity: 0.35; }
+    .srow.future { opacity: 0.65; }
     .srow.active { opacity: 1; }
-    .srow:not(.past):not(.active) { opacity: 0.65; }
+    .srow.active.nt { background: rgba(34,197,94,0.08); }
+    .srow.active.vt { background: rgba(239,68,68,0.07); }
+    .srow.future.nt { background: rgba(34,197,94,0.04); }
+
+    .stariff {
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      padding: 2px 4px;
+      border-radius: 3px;
+      text-align: center;
+    }
+    .stariff.nt {
+      background: rgba(34,197,94,0.18);
+      color: var(--success-color, #16a34a);
+    }
+    .stariff.vt {
+      background: rgba(239,68,68,0.12);
+      color: var(--error-color, #dc2626);
+    }
     .srow-time {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 500;
       color: var(--primary-text-color);
-      white-space: nowrap;
-      flex-shrink: 0;
       font-variant-numeric: tabular-nums;
-      min-width: 110px;
+      white-space: nowrap;
+      overflow: hidden;
     }
     .srow-track {
-      flex: 1;
-      height: 3px;
+      height: 4px;
       background: var(--divider-color, rgba(0,0,0,0.1));
       border-radius: 2px;
       overflow: hidden;
@@ -522,75 +705,27 @@ export class ElectricityPanelCard extends LitElement {
       border-radius: 2px;
       transition: width 1s ease;
     }
+    .srow-fill.nt { background: var(--success-color, #22c55e); }
+    .srow-fill.vt { background: var(--error-color, #ef4444); }
     .snow {
       font-size: 8px;
       text-transform: uppercase;
-      letter-spacing: 1.5px;
+      letter-spacing: 1px;
       font-weight: 800;
-      padding: 1px 6px;
-      border-radius: 4px;
-      color: #000;
-      flex-shrink: 0;
+      padding: 2px 6px;
+      border-radius: 10px;
+      white-space: nowrap;
     }
+    .snow.nt { background: rgba(34,197,94,0.2); color: var(--success-color, #16a34a); }
+    .snow.vt { background: rgba(239,68,68,0.15); color: var(--error-color, #dc2626); }
     .sdur {
       font-size: 10px;
       color: var(--disabled-text-color);
-      flex-shrink: 0;
-      min-width: 30px;
+      white-space: nowrap;
       text-align: right;
     }
-    .schedule-nav {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-left: auto;
-    }
-    .nt-remaining {
-      font-size: 10px;
-      color: var(--secondary-text-color);
-      white-space: nowrap;
-    }
-    .sday-btn {
-      font-size: 10px;
-      padding: 2px 8px;
-      border-radius: 4px;
-      border: 1px solid var(--divider-color, rgba(0,0,0,0.15));
-      background: none;
-      color: var(--secondary-text-color);
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .sday-btn:hover { background: var(--secondary-background-color); }
-    .cost-rate {
-      color: var(--warning-color, #f57c00);
-      font-weight: 500;
-    }
 
-    /* HDO bar */
-    .hdo-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      font-size: 13px;
-      font-weight: 500;
-    }
-    .hdo-bar.nt { background: rgba(67,160,71,0.12); color: var(--success-color, #43a047); }
-    .hdo-bar.vt { background: rgba(229,57,53,0.12); color: var(--error-color, #e53935); }
-    .hdo-bar ha-icon { --mdc-icon-size: 18px; }
-    .hdo-label { flex: 1; }
-    .hdo-cd { font-size: 12px; opacity: 0.75; }
-    .hdo-price {
-      font-size: 12px;
-      opacity: 0.8;
-      font-weight: 600;
-      margin-left: auto;
-      margin-right: 4px;
-    }
-
-    /* Section utilities */
+    /* ── Section utilities ───────────────────────────────────────────────── */
     .section-label {
       font-size: 10px;
       text-transform: uppercase;
@@ -599,21 +734,45 @@ export class ElectricityPanelCard extends LitElement {
       margin: 12px 0 6px;
     }
     .section-block {
-      background: var(--secondary-background-color, rgba(0,0,0,0.04));
-      border-radius: 10px;
+      background: var(--secondary-background-color, rgba(0,0,0,0.03));
+      border-radius: 12px;
       padding: 12px 14px;
       margin-bottom: 10px;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.06));
     }
 
-    /* Main meter */
+    /* ── Main meter ──────────────────────────────────────────────────────── */
+    .meter-block {}
     .meter-header {
       display: flex;
       align-items: center;
-      gap: 7px;
+      gap: 8px;
       margin-bottom: 10px;
     }
-    .meter-header ha-icon { --mdc-icon-size: 18px; color: var(--secondary-text-color); }
-    .meter-title { font-size: 13px; color: var(--secondary-text-color); }
+    .meter-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: rgba(var(--rgb-primary-color, 33,150,243), 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .meter-icon ha-icon {
+      --mdc-icon-size: 18px;
+      color: var(--primary-color, #2196f3);
+    }
+    .meter-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .meter-title {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--secondary-text-color);
+    }
     .meter-total {
       display: flex;
       flex-direction: column;
@@ -630,205 +789,136 @@ export class ElectricityPanelCard extends LitElement {
       background: var(--primary-background-color, #fff);
       border-radius: 8px;
       padding: 8px 10px;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.05));
     }
-    .phase-label { font-size: 11px; color: var(--disabled-text-color); margin-bottom: 2px; }
-    .phase-power { font-size: 15px; font-weight: 500; color: var(--primary-text-color); }
+    .phase-power { font-size: 15px; font-weight: 600; color: var(--primary-text-color); }
     .phase-detail { font-size: 11px; color: var(--secondary-text-color); margin-top: 2px; }
 
-    /* Circuit grid */
+    /* circuit grid */
     .circuit-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
       gap: 8px;
     }
+    @container (max-width: 320px) {
+      .circuit-grid { grid-template-columns: 1fr; }
+    }
 
-    /* Circuit card */
+    /* circuit card */
     .circuit-card {
-      background: var(--secondary-background-color, rgba(0,0,0,0.04));
-      border-radius: 10px;
+      background: var(--ha-card-background, var(--card-background-color, #fff));
+      border-radius: 12px;
       padding: 12px 14px;
-      border: 1px solid transparent;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.07));
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
     }
-    .circuit-card.critical {
-      border-left: 3px solid var(--warning-color, #f57c00);
-    }
-
+    .circuit-card.critical { border-left: 3px solid var(--warning-color, #f59e0b); }
+    .circuit-card.is-on    { border-left: 3px solid var(--success-color, #22c55e); }
+    .circuit-card.critical.is-on { border-left: 3px solid var(--warning-color, #f59e0b); }
     .circuit-header {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 2px;
+      display: flex; align-items: center; gap: 6px; margin-bottom: 2px;
     }
     .circuit-name {
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--primary-text-color);
-      flex: 1;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: 13px; font-weight: 600; color: var(--primary-text-color);
+      flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .circuit-id {
-      font-size: 11px;
-      color: var(--disabled-text-color);
-      flex-shrink: 0;
-    }
-    .lock-icon {
-      --mdc-icon-size: 16px;
-      color: var(--warning-color, #f57c00);
-      flex-shrink: 0;
-    }
+    .lock-icon { --mdc-icon-size: 16px; color: var(--warning-color, #f59e0b); flex-shrink: 0; }
 
-    /* Load bar */
+    /* load bar */
     .load-track {
-      height: 3px;
-      background: var(--divider-color, rgba(0,0,0,0.1));
-      border-radius: 2px;
-      overflow: hidden;
-      margin: 8px 0 6px;
+      height: 5px; background: var(--divider-color, rgba(0,0,0,0.08));
+      border-radius: 3px; overflow: hidden; margin: 8px 0;
     }
-    .load-fill {
-      height: 100%;
-      border-radius: 2px;
-      transition: width 1s ease;
-    }
+    .load-fill { height: 100%; border-radius: 3px; transition: width 1s ease; }
 
-    /* Footer */
+    /* circuit footer */
     .circuit-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
+      display: flex; align-items: flex-end; justify-content: space-between; gap: 6px;
     }
-    .metrics {
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-      min-width: 0;
-    }
+    .metrics { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .metric-primary {
-      font-size: 15px;
-      font-weight: 500;
-      color: var(--primary-text-color);
+      font-size: 18px; font-weight: 700; color: var(--primary-text-color); line-height: 1;
     }
     .metric-small {
-      font-size: 11px;
-      color: var(--secondary-text-color);
-      white-space: nowrap;
+      font-size: 11px; color: var(--secondary-text-color);
+      display: flex; flex-wrap: wrap; align-items: center; gap: 1px 2px;
     }
+    .metric-sep { opacity: 0.4; margin: 0 1px; }
+    .cost-rate { color: var(--warning-color, #f59e0b); font-weight: 600; }
 
-    /* Badge */
+    /* badge */
     .badge {
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 4px;
-      font-weight: 600;
-      flex-shrink: 0;
+      font-size: 9px; padding: 1px 5px; border-radius: 4px;
+      font-weight: 700; flex-shrink: 0; letter-spacing: 0.3px;
     }
-    .badge-info {
-      background: rgba(var(--rgb-primary-color, 33,150,243), 0.12);
-      color: var(--primary-color, #2196f3);
-    }
+    .badge-info  { background: rgba(33,150,243,0.12); color: var(--primary-color, #2196f3); }
+    .badge-phase { background: rgba(33,150,243,0.10); color: var(--primary-color, #2196f3); }
 
-    /* Toggle switch */
+    /* toggle */
     .toggle {
-      width: 34px;
-      height: 18px;
-      border-radius: 9px;
-      border: none;
-      cursor: pointer;
-      position: relative;
-      flex-shrink: 0;
-      transition: background 0.2s;
+      width: 34px; height: 20px; border-radius: 10px;
+      border: none; cursor: pointer; position: relative; flex-shrink: 0; transition: background 0.2s;
     }
     .toggle::after {
-      content: '';
-      position: absolute;
-      top: 2px;
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      background: white;
-      transition: left 0.2s;
+      content: ''; position: absolute; top: 3px;
+      width: 14px; height: 14px; border-radius: 50%; background: white;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: left 0.2s;
     }
-    .toggle.on  { background: var(--success-color, #43a047); }
-    .toggle.on::after  { left: 18px; }
+    .toggle.on  { background: var(--success-color, #22c55e); }
+    .toggle.on::after  { left: 17px; }
     .toggle.off { background: var(--disabled-text-color, #9e9e9e); }
-    .toggle.off::after { left: 2px; }
+    .toggle.off::after { left: 3px; }
     .toggle.sm  { width: 28px; height: 16px; border-radius: 8px; }
-    .toggle.sm::after { width: 12px; height: 12px; }
-    .toggle.sm.on::after  { left: 14px; }
-    .toggle.sm.off::after { left: 2px; }
+    .toggle.sm::after { width: 10px; height: 10px; top: 3px; }
+    .toggle.sm.on::after  { left: 15px; }
+    .toggle.sm.off::after { left: 3px; }
 
-    /* Expand button */
+    /* expand button */
     .expand-btn {
-      display: flex;
-      align-items: center;
-      gap: 2px;
-      background: none;
-      border: none;
-      cursor: pointer;
-      color: var(--secondary-text-color);
-      font-size: 11px;
-      padding: 0;
-      flex-shrink: 0;
+      display: flex; align-items: center;
+      background: var(--secondary-background-color, rgba(0,0,0,0.04));
+      border: none; border-radius: 6px; cursor: pointer;
+      color: var(--secondary-text-color); padding: 2px 4px; flex-shrink: 0;
     }
     .expand-btn ha-icon { --mdc-icon-size: 16px; }
 
-    /* Status dot */
+    /* status dot */
     .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
+      width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; transition: box-shadow 0.3s;
     }
-    .status-dot.on  { background: var(--success-color, #43a047); }
+    .status-dot.on  { background: var(--success-color, #22c55e); box-shadow: 0 0 0 3px rgba(34,197,94,0.2); }
     .status-dot.off { background: var(--disabled-text-color, #9e9e9e); }
-    .status-dot.none { background: transparent; border: 1px solid var(--divider-color); }
+    .status-dot.none { background: transparent; border: 1.5px solid var(--divider-color, rgba(0,0,0,0.2)); }
     .status-dot.sm  { width: 7px; height: 7px; }
+    .status-dot.sm.on { box-shadow: 0 0 0 2px rgba(34,197,94,0.2); }
 
-    /* Devices section */
+    /* devices */
     .devices-section {
-      border-top: 1px solid var(--divider-color, rgba(0,0,0,0.1));
-      margin-top: 8px;
-      padding-top: 8px;
+      border-top: 1px solid var(--divider-color, rgba(0,0,0,0.08));
+      margin-top: 8px; padding-top: 8px;
     }
     .device-group { margin-bottom: 6px; }
     .device-group-label {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--disabled-text-color);
-      margin-bottom: 4px;
-      padding-left: 16px;
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+      color: var(--disabled-text-color); margin-bottom: 4px; padding-left: 16px;
     }
     .device-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 4px 0;
-      border-bottom: 1px solid var(--divider-color, rgba(0,0,0,0.06));
+      display: flex; align-items: center; gap: 7px;
+      padding: 4px 0; border-bottom: 1px solid var(--divider-color, rgba(0,0,0,0.05));
     }
     .device-row:last-child { border-bottom: none; }
     .device-row.channel { padding-left: 8px; }
     .device-name {
-      flex: 1;
-      font-size: 12px;
-      color: var(--primary-text-color);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      flex: 1; font-size: 12px; color: var(--primary-text-color);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .device-metrics {
-      font-size: 11px;
-      color: var(--secondary-text-color);
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
+    .device-metrics { font-size: 11px; color: var(--secondary-text-color); white-space: nowrap; flex-shrink: 0; }
+    .note-row { opacity: 0.7; }
+    .note-icon { --mdc-icon-size: 13px; color: var(--disabled-text-color); flex-shrink: 0; }
+    .note-row .device-name { font-style: italic; }
   `;
 }
 
-// Register the card in the HA card picker
 (window as unknown as Record<string, unknown>)['customCards'] ??= [];
 ((window as unknown as Record<string, unknown[]>)['customCards']).push({
   type: 'electricity-panel-card',
