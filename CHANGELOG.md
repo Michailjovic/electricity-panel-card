@@ -7,17 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.3] - 2026-06-03
+
+### Fixed
+- **"Custom element doesn't exist" after 3.0.1** — reverted Lit externalisation introduced in 3.0.1. HA's import map does not reliably provide `lit/decorators.js` as a resolvable bare specifier, so the card module failed to load entirely. The root cause of the dashboard freeze was the `shouldUpdate` override (removed in 3.0.2), not the bundled Lit copy. Lit is bundled again; bundle size is back to ~93 kB.
+
+---
+
 ## [3.0.2] - 2026-06-03
 
 ### Fixed
-- **All dashboards freezing after install (part 2)** — the custom `shouldUpdate` override was a non-standard intrusion into Lit's internal update lifecycle. Although intended as a performance optimisation (skip re-render when no tracked entity changed), it produced side-effects inside a lifecycle method that is expected to be pure, and its interaction with HA's own Lit-based update propagation caused the entire Lovelace reactive chain to stall. Removed entirely; the card now follows standard Lit behaviour and re-renders whenever `hass` changes, which is the correct and well-tested pattern for HA custom cards.
+- **All dashboards freezing after install (root cause)** — the custom `shouldUpdate` override was a non-standard intrusion into Lit's internal update lifecycle. Although intended as a performance optimisation (skip re-render when no tracked entity changed), it produced side-effects inside a lifecycle hook that is expected to be pure, and its interaction with HA's Lit-based update propagation caused the entire Lovelace reactive chain to stall for every card on the page. Removed entirely; the card now follows standard Lit behaviour and re-renders whenever `hass` changes.
 
 ---
 
 ## [3.0.1] - 2026-06-03
 
 ### Fixed
-- **All dashboards freezing after install** — the card was bundling its own copy of Lit (v4.2.2) alongside Home Assistant's built-in Lit. Both instances shared `globalThis.litPropertyMetadata` and other global Lit state, corrupting the reactive-element update cycle for every Lovelace card on the page — not just this one. Fixed by externalising Lit from the Vite bundle (`rollupOptions.external`); the card now uses HA's provided Lit via the import map (available since HA 2023.4). Bundle size reduced from 95 kB to 70 kB as a side effect.
+- **All dashboards freezing after install** — the card was bundling its own copy of Lit (v4.2.2) alongside Home Assistant's built-in Lit. Both instances shared `globalThis.litPropertyMetadata` and other global Lit state, potentially corrupting the reactive-element update cycle. Fixed by externalising Lit from the Vite bundle (`rollupOptions.external`); the card uses HA's provided Lit via the import map. Bundle size reduced from 95 kB to 70 kB. *(Note: this fix was superseded by 3.0.2 and reverted in 3.0.3.)*
 
 ---
 
