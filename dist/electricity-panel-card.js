@@ -1544,7 +1544,7 @@ let ElectricityPanelCard = class extends i {
     return [...new Set(ids)];
   }
   async _fetchHistory() {
-    var _a2;
+    var _a2, _b;
     if (!this._hass || !this._config || this._historyFetching) return;
     const graphIds = this._graphEntityIds();
     const hdoSwitch = (_a2 = this._config.hdo) == null ? void 0 : _a2.switch;
@@ -1565,8 +1565,14 @@ let ElectricityPanelCard = class extends i {
         if (pts.length > 0) this._historyCache.set(id, pts);
       }
     };
+    if (typeof this._hass.callWS !== "function") {
+      console.error("[ep-card] hass.callWS is not available on this HA version");
+      this._historyFetching = false;
+      return;
+    }
     try {
       if (graphIds.length > 0) {
+        console.log(`[ep-card] fetching history: ${graphIds.length} entities, start=${graphStart}`);
         const raw = await this._hass.callWS({
           type: "history/history_during_period",
           start_time: graphStart,
@@ -1574,6 +1580,16 @@ let ElectricityPanelCard = class extends i {
           no_attributes: true,
           significant_changes_only: false
         });
+        const keys = Object.keys(raw ?? {});
+        const totalPts = keys.reduce((s2, k2) => {
+          var _a3;
+          return s2 + (((_a3 = raw[k2]) == null ? void 0 : _a3.length) ?? 0);
+        }, 0);
+        console.log(`[ep-card] history result: ${keys.length} entities, ${totalPts} total points`);
+        if (keys.length > 0) {
+          const sample = raw[keys[0]];
+          console.log(`[ep-card] sample entry (${keys[0]}):`, JSON.stringify(sample == null ? void 0 : sample[0]));
+        }
         processEntries(raw, []);
       }
       if (hdoSwitch) {
@@ -1584,11 +1600,13 @@ let ElectricityPanelCard = class extends i {
           no_attributes: true,
           significant_changes_only: false
         });
+        console.log(`[ep-card] HDO switch history: ${((_b = hdoRaw == null ? void 0 : hdoRaw[hdoSwitch]) == null ? void 0 : _b.length) ?? 0} entries`);
         processEntries(hdoRaw, [hdoSwitch]);
       }
+      console.log(`[ep-card] cache now has ${this._historyCache.size} entities`);
       this.requestUpdate();
     } catch (err) {
-      console.warn("[electricity-panel-card] history fetch failed:", err);
+      console.warn("[ep-card] history fetch failed:", err);
     } finally {
       this._historyFetching = false;
     }

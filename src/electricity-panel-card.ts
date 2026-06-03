@@ -358,8 +358,15 @@ export class ElectricityPanelCard extends LitElement {
         if (pts.length > 0) this._historyCache.set(id, pts);
       }
     };
+    // Verify callWS is available
+    if (typeof (this._hass as Record<string, unknown>).callWS !== 'function') {
+      console.error('[ep-card] hass.callWS is not available on this HA version');
+      this._historyFetching = false;
+      return;
+    }
     try {
       if (graphIds.length > 0) {
+        console.log(`[ep-card] fetching history: ${graphIds.length} entities, start=${graphStart}`);
         const raw = await this._hass.callWS<Record<string, Array<{state: string; last_changed: string}>>>({
           type: 'history/history_during_period',
           start_time: graphStart,
@@ -367,9 +374,15 @@ export class ElectricityPanelCard extends LitElement {
           no_attributes: true,
           significant_changes_only: false,
         });
+        const keys = Object.keys(raw ?? {});
+        const totalPts = keys.reduce((s, k) => s + (raw[k]?.length ?? 0), 0);
+        console.log(`[ep-card] history result: ${keys.length} entities, ${totalPts} total points`);
+        if (keys.length > 0) {
+          const sample = raw[keys[0]];
+          console.log(`[ep-card] sample entry (${keys[0]}):`, JSON.stringify(sample?.[0]));
+        }
         processEntries(raw, []);
       }
-      // HDO switch: always fetch from midnight for accurate daily cost calculation
       if (hdoSwitch) {
         const hdoRaw = await this._hass.callWS<Record<string, Array<{state: string; last_changed: string}>>>({
           type: 'history/history_during_period',
@@ -378,11 +391,13 @@ export class ElectricityPanelCard extends LitElement {
           no_attributes: true,
           significant_changes_only: false,
         });
+        console.log(`[ep-card] HDO switch history: ${hdoRaw?.[hdoSwitch]?.length ?? 0} entries`);
         processEntries(hdoRaw, [hdoSwitch]);
       }
+      console.log(`[ep-card] cache now has ${this._historyCache.size} entities`);
       this.requestUpdate();
     } catch (err) {
-      console.warn('[electricity-panel-card] history fetch failed:', err);
+      console.warn('[ep-card] history fetch failed:', err);
     } finally {
       this._historyFetching = false;
     }

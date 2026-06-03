@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.2.3] - 2026-06-03
+
+### Added
+- Detailed `console.log` diagnostics for the history fetch — logs entity count, data point count, a sample entry, and final cache size. Useful for debugging when sparkline graphs or cost calculations do not appear. Will be removed in the next release once the root cause is confirmed.
+
+---
+
 ## [4.2.2] - 2026-06-03
 
 ### Fixed
