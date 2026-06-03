@@ -7,6 +7,9 @@ export default defineConfig({
       formats: ["es"],
       fileName: "electricity-panel-card",
     },
+    rollupOptions: {
+      external: [/^lit/, /^@lit\//],
+    },
     emptyOutDir: false,
     minify: false,
     sourcemap: false,

@@ -29,6 +29,41 @@ export class ElectricityPanelCard extends LitElement {
   @state() private _scheduleExpanded = false;
 
   private _timer?: number;
+  private _trackedIds: string[] = [];
+
+  // Only re-render when one of our tracked entities actually changes.
+  // Without this, the card re-renders on every entity update in HA
+  // (potentially hundreds per second), blocking the JS thread.
+  protected override shouldUpdate(changedProps: Map<string, unknown>): boolean {
+    if (changedProps.has('_config')) {
+      this._trackedIds = this._buildTrackedIds();
+      return true;
+    }
+    if (!changedProps.has('hass')) return true;
+    const oldHass = changedProps.get('hass') as HomeAssistant | undefined;
+    if (!oldHass) return true;
+    const newHass = this.hass;
+    return this._trackedIds.some(id => newHass.states[id] !== oldHass.states[id]);
+  }
+
+  private _buildTrackedIds(): string[] {
+    if (!this._config) return [];
+    const ids: (string | undefined)[] = [];
+    const hdo = this._config.hdo;
+    if (hdo) ids.push(hdo.switch, hdo.next_high, hdo.next_low, hdo.workday_sensor);
+    const mm = this._config.main_meter;
+    if (mm) ids.push(mm.power_l1, mm.power_l2, mm.power_l3,
+                     mm.current_l1, mm.current_l2, mm.current_l3, mm.energy_today);
+    for (const c of this._config.circuits ?? []) {
+      ids.push(c.switch, c.power, c.current, c.energy, c.voltage,
+               c.power_l1, c.power_l2, c.power_l3, c.current_l1, c.current_l2, c.current_l3);
+      for (const d of c.devices ?? []) {
+        ids.push(d.switch, d.power, d.current);
+        for (const ch of d.channels ?? []) ids.push(ch.switch, ch.power, ch.current);
+      }
+    }
+    return ids.filter(Boolean) as string[];
+  }
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -45,6 +80,7 @@ export class ElectricityPanelCard extends LitElement {
   setConfig(config: ElectricityPanelConfig): void {
     if (!config) throw new Error('Invalid configuration');
     this._config = config;
+    this._trackedIds = this._buildTrackedIds();
   }
 
   static getConfigElement(): HTMLElement {

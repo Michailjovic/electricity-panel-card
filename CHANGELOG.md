@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.1] - 2026-06-03
+
+### Fixed
+- **All dashboards freezing after install** — the card was bundling its own copy of Lit (v4.2.2) alongside Home Assistant's built-in Lit. Both instances shared `globalThis.litPropertyMetadata` and other global Lit state, corrupting the reactive-element update cycle for every Lovelace card on the page — not just this one. Fixed by externalising Lit from the Vite bundle (`rollupOptions.external`); the card now uses HA's provided Lit via the import map (available since HA 2023.4). Bundle size reduced from 95 kB to 70 kB as a side effect.
+
+---
+
 ## [3.0.0] - 2026-06-03
 
 ### Changed — Visual redesign
