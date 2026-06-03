@@ -117,4 +117,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.5.0] - 2026-06-03
 
 ### Added
-- Collapsible schedule — the daily tariff schedule is now collapsed by default, showing only the current day/type and NT remai
+- Collapsible schedule — the daily tariff schedule is now collapsed by default, showing only the current day/type and NT remaining time in the header. Click to expand the full 24h view. The Today/Tomorrow toggle appears only when expanded.
+- 3-phase device column layout — devices under a 3-phase circuit are now displayed in a 3-column grid (one column per phase), so L1/L2/L3 device groups align visually with the phase cells above them.
+
+### Fixed
+- Drag & drop reordering in the GUI editor now works — the drop target (`dragover`/`drop` handlers) was missing from circuit rows after the v2.2.0 device-row bugfix. Restored on the correct element. The drag handle is now a plain `<span>⠿</span>` instead of `ha-icon`, which is reliably draggable in all browsers.
+
+---
+
+## [2.4.0] - 2026-06-02
+
+### Fixed
+- **Midnight VT bug** — PRE 605/606 (D57d) presets were missing two NT windows per day: `00:00–01:00` at the start and `22:00–00:00` at the end. The schedule incorrectly showed VT at midnight. Data now sourced directly from the official P
