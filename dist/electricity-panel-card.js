@@ -1632,7 +1632,7 @@ let ElectricityPanelCard = class extends i {
     if (!hdo) return false;
     if (hdo.switch) {
       const hdoHist = this._historyCache.get(hdo.switch);
-      if (hdoHist && hdoHist.length > 0) {
+      if (hdoHist && hdoHist.length > 0 && t2 >= hdoHist[0].t) {
         let state2 = hdoHist[0].v;
         for (const pt of hdoHist) {
           if (pt.t <= t2) state2 = pt.v;
@@ -1656,15 +1656,17 @@ let ElectricityPanelCard = class extends i {
     }
     return this._isOn(hdo.switch);
   }
-  _calcDailyCost(powerEntityId, fallbackWatts) {
+  _calcDailyCost(powerEntityId) {
     const hdo = this._config.hdo;
     if (!hdo || !hdo.nt_price && !hdo.vt_price || !powerEntityId) return "";
     const data = this._historyCache.get(powerEntityId);
-    if (!data || data.length < 2) return this._fmtCostRate(fallbackWatts ?? this._watts(powerEntityId));
+    if (!data || data.length < 2) return "";
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
     const todayPts = data.filter((p2) => p2.t >= midnight.getTime());
-    if (todayPts.length < 2) return this._fmtCostRate(fallbackWatts ?? this._watts(powerEntityId));
+    if (todayPts.length < 2) return "";
+    const ntP = parseFloat(hdo.nt_price) || 0;
+    const vtP = parseFloat(hdo.vt_price) || 0;
     let ntWh = 0, vtWh = 0;
     for (let i2 = 1; i2 < todayPts.length; i2++) {
       const dtMs = todayPts[i2].t - todayPts[i2 - 1].t;
@@ -1674,10 +1676,8 @@ let ElectricityPanelCard = class extends i {
       if (this._isNTAt(midT)) ntWh += wh;
       else vtWh += wh;
     }
-    const ntP = parseFloat(hdo.nt_price) || 0;
-    const vtP = parseFloat(hdo.vt_price) || 0;
     const cost = ntWh / 1e3 * ntP + vtWh / 1e3 * vtP;
-    if (cost <= 0) return "";
+    if (cost < 5e-3) return "";
     const cur = hdo.currency ?? "Kč";
     return `${cost.toFixed(2)} ${cur}`;
   }
@@ -1813,7 +1813,7 @@ let ElectricityPanelCard = class extends i {
             <span class="metric-small">
               ${m2.energy_today ? b`${this._kwh(m2.energy_today).toFixed(1)} kWh today` : A}
               ${(() => {
-      const cr = this._calcDailyCost(m2.power_l1 ?? m2.power_l2 ?? m2.power_l3, totalW);
+      const cr = this._calcDailyCost(m2.power_l1 ?? m2.power_l2 ?? m2.power_l3);
       return cr ? b`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : A;
     })()}
             </span>
@@ -1965,7 +1965,7 @@ let ElectricityPanelCard = class extends i {
     const barColor = this._loadColor(loadPct);
     const expanded = this._expanded.has(c2.id);
     const hasDevices = (((_a2 = c2.devices) == null ? void 0 : _a2.length) ?? 0) > 0;
-    const costRate = totalPower > 0 ? this._calcDailyCost(c2.power ?? c2.power_l1, totalPower) : "";
+    const costRate = totalPower > 0 ? this._calcDailyCost(c2.power ?? c2.power_l1) : "";
     return b`
       <div class="three-phase-card ${c2.critical ? "critical" : ""} ${c2.switch && isOn ? "is-on" : ""}">
         <div class="tp-header">

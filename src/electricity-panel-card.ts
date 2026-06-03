@@ -429,10 +429,12 @@ export class ElectricityPanelCard extends LitElement {
   private _isNTAt(t: number): boolean {
     const hdo = this._config.hdo;
     if (!hdo) return false;
-    // Use actual HDO switch history when available — most accurate
+    // Use HDO switch history only for times within the recorded period.
+    // For times before the first history entry the switch state is unknown
+    // — fall through to the tariff schedule which is always authoritative.
     if (hdo.switch) {
       const hdoHist = this._historyCache.get(hdo.switch);
-      if (hdoHist && hdoHist.length > 0) {
+      if (hdoHist && hdoHist.length > 0 && t >= hdoHist[0].t) {
         let state = hdoHist[0].v;
         for (const pt of hdoHist) {
           if (pt.t <= t) state = pt.v;
@@ -441,7 +443,7 @@ export class ElectricityPanelCard extends LitElement {
         return state > 0.5; // 1 = on = NT
       }
     }
-    // Fallback: use tariff schedule
+    // Tariff schedule — primary source for everything before first history entry
     const preset = hdo.tariff_preset ? PRE_TARIFFS[hdo.tariff_preset] : undefined;
     const src = preset ?? hdo.schedule;
     if (src) {
@@ -458,14 +460,16 @@ export class ElectricityPanelCard extends LitElement {
     return this._isOn(hdo.switch);
   }
 
-  private _calcDailyCost(powerEntityId: string | undefined, fallbackWatts?: number): string {
+  private _calcDailyCost(powerEntityId: string | undefined): string {
     const hdo = this._config.hdo;
     if (!hdo || (!hdo.nt_price && !hdo.vt_price) || !powerEntityId) return '';
     const data = this._historyCache.get(powerEntityId);
-    if (!data || data.length < 2) return this._fmtCostRate(fallbackWatts ?? this._watts(powerEntityId));
+    if (!data || data.length < 2) return '';
     const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
     const todayPts = data.filter(p => p.t >= midnight.getTime());
-    if (todayPts.length < 2) return this._fmtCostRate(fallbackWatts ?? this._watts(powerEntityId));
+    if (todayPts.length < 2) return '';
+    const ntP = parseFloat(hdo.nt_price as unknown as string) || 0;
+    const vtP = parseFloat(hdo.vt_price as unknown as string) || 0;
     let ntWh = 0, vtWh = 0;
     for (let i = 1; i < todayPts.length; i++) {
       const dtMs = todayPts[i].t - todayPts[i - 1].t;
@@ -474,10 +478,8 @@ export class ElectricityPanelCard extends LitElement {
       const midT = (todayPts[i].t + todayPts[i - 1].t) / 2;
       if (this._isNTAt(midT)) ntWh += wh; else vtWh += wh;
     }
-    const ntP = parseFloat(hdo.nt_price as unknown as string) || 0;
-    const vtP = parseFloat(hdo.vt_price as unknown as string) || 0;
     const cost = (ntWh / 1000) * ntP + (vtWh / 1000) * vtP;
-    if (cost <= 0) return '';
+    if (cost < 0.005) return '';
     const cur = hdo.currency ?? 'Kč';
     return `${cost.toFixed(2)} ${cur}`;
   }
@@ -622,7 +624,7 @@ export class ElectricityPanelCard extends LitElement {
             <span class="metric-primary">${(totalW / 1000).toFixed(2)} kW</span>
             <span class="metric-small">
               ${m.energy_today ? html`${this._kwh(m.energy_today).toFixed(1)} kWh today` : nothing}
-              ${(() => { const cr = this._calcDailyCost(m.power_l1 ?? m.power_l2 ?? m.power_l3, totalW); return cr ? html`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : nothing; })()}
+              ${(() => { const cr = this._calcDailyCost(m.power_l1 ?? m.power_l2 ?? m.power_l3); return cr ? html`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : nothing; })()}
             </span>
           </div>
         </div>
@@ -804,7 +806,7 @@ export class ElectricityPanelCard extends LitElement {
     const barColor = this._loadColor(loadPct);
     const expanded = this._expanded.has(c.id);
     const hasDevices = (c.devices?.length ?? 0) > 0;
-    const costRate = totalPower > 0 ? this._calcDailyCost(c.power ?? c.power_l1, totalPower) : '';
+    const costRate = totalPower > 0 ? this._calcDailyCost(c.power ?? c.power_l1) : '';
 
     return html`
       <div class="three-phase-card ${c.critical ? 'critical' : ''} ${c.switch && isOn ? 'is-on' : ''}">
