@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.0] - 2026-06-03
+
+### Changed — Visual redesign
+- **HDO hero card** — the tariff bar is now a proper card with gradient background (green/red), pulsing live dot, and the countdown shown large (20px bold). A thin progress bar shows how far through the current tariff window you are.
+- **Circuit cards** — active circuits (is-on) now have a subtle green glow (`box-shadow`). Circuit name bumped to 14px/700. Power metric bumped to 22px/700.
+- **Load bar track** — the track now has a subtle 3-zone gradient (green → amber → red) so you can see the danger zones even at low load.
+- **Section labels** — left accent border for visual separation.
+- **Phase cells** — subtle primary-colour tint instead of plain white background.
+
+### Added
+- Current window progress — `_getCurrentSlotPct()` computes the % elapsed in the active NT/VT window from the schedule; used for the HDO card progress bar.
+
+---
+
 ## [2.7.1] - 2026-06-03
 
 ### Fixed

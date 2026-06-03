@@ -235,6 +235,22 @@ export class ElectricityPanelCard extends LitElement {
   }
 
 
+
+  private _getCurrentSlotPct(): number {
+    const hdo = this._config.hdo;
+    if (!hdo) return -1;
+    const preset = hdo.tariff_preset ? PRE_TARIFFS[hdo.tariff_preset] : undefined;
+    const src = preset ?? hdo.schedule;
+    if (!src) return -1;
+    const dt = this._dayType();
+    const day = (dt === 'holiday' && src.holiday) ? src.holiday
+      : dt === 'weekend' ? src.weekend : src.weekday;
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    const slots = this._buildFullDaySlots(day.starts, day.offsets, midnight.getTime(), false);
+    const current = slots.find(s => s.isCurrent);
+    return current ? current.pct : -1;
+  }
+
   // ── Render: 24h timeline bar ───────────────────────────────────────────────
 
   private _renderTimeline(slots: DaySlot[], showMarker = false): TemplateResult {
@@ -328,16 +344,27 @@ export class ElectricityPanelCard extends LitElement {
     const cd = this._hdoCountdown();
     const price = isNT ? hdo.nt_price : hdo.vt_price;
     const cur = hdo.currency ?? 'Kč';
+    const slotPct = this._getCurrentSlotPct();
     return html`
-      <div class="hdo-bar ${isNT ? 'nt' : 'vt'}">
-        <div class="hdo-icon-wrap">
-          <ha-icon icon="mdi:lightning-bolt"></ha-icon>
+      <div class="hdo-card ${isNT ? 'nt' : 'vt'}">
+        <div class="hdo-main">
+          <div class="hdo-dot ${isNT ? 'nt' : 'vt'}"></div>
+          <div class="hdo-info">
+            <span class="hdo-label">${isNT ? 'NT — Low tariff' : 'VT — High tariff'}</span>
+            ${price ? html`<span class="hdo-sub">${price} ${cur}/kWh</span>` : nothing}
+          </div>
+          ${cd ? html`
+            <div class="hdo-cd-block">
+              <span class="hdo-cd-label">ends in</span>
+              <span class="hdo-cd-val">${cd}</span>
+            </div>
+          ` : nothing}
         </div>
-        <div class="hdo-info">
-          <span class="hdo-label">${isNT ? 'Low tariff — NT' : 'High tariff — VT'}</span>
-          ${cd ? html`<span class="hdo-cd">ends in ${cd}</span>` : nothing}
-        </div>
-        ${price ? html`<span class="hdo-price">${price} ${cur}/kWh</span>` : nothing}
+        ${slotPct >= 0 ? html`
+          <div class="hdo-win-track">
+            <div class="hdo-win-fill ${isNT ? 'nt' : 'vt'}" style="width:${slotPct.toFixed(1)}%"></div>
+          </div>
+        ` : nothing}
       </div>
     `;
   }
@@ -663,39 +690,47 @@ export class ElectricityPanelCard extends LitElement {
 
     .card-content { padding: 12px 12px 16px; }
 
-    /* ── HDO bar ─────────────────────────────────────────────────────────── */
-    .hdo-bar {
+    /* ── HDO card (hero) ─────────────────────────────────────────────────── */
+    .hdo-card {
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      border: 1px solid transparent;
+    }
+    .hdo-card.nt {
+      background: linear-gradient(135deg, rgba(34,197,94,0.18) 0%, rgba(34,197,94,0.05) 100%);
+      border-color: rgba(34,197,94,0.3);
+      box-shadow: 0 0 20px rgba(34,197,94,0.08);
+    }
+    .hdo-card.vt {
+      background: linear-gradient(135deg, rgba(239,68,68,0.14) 0%, rgba(239,68,68,0.04) 100%);
+      border-color: rgba(239,68,68,0.24);
+      box-shadow: 0 0 20px rgba(239,68,68,0.06);
+    }
+    .hdo-main {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 10px 14px;
-      border-radius: 12px;
-      margin-bottom: 10px;
-      border: 1px solid transparent;
-      flex-wrap: wrap;
     }
-    .hdo-bar.nt {
-      background: linear-gradient(135deg, rgba(34,197,94,0.14) 0%, rgba(34,197,94,0.06) 100%);
-      border-color: rgba(34,197,94,0.25);
-      color: var(--success-color, #16a34a);
-    }
-    .hdo-bar.vt {
-      background: linear-gradient(135deg, rgba(239,68,68,0.12) 0%, rgba(239,68,68,0.04) 100%);
-      border-color: rgba(239,68,68,0.2);
-      color: var(--error-color, #dc2626);
-    }
-    .hdo-icon-wrap {
-      width: 32px;
-      height: 32px;
+    .hdo-dot {
+      width: 11px;
+      height: 11px;
       border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
       flex-shrink: 0;
     }
-    .hdo-bar.nt .hdo-icon-wrap { background: rgba(34,197,94,0.15); }
-    .hdo-bar.vt .hdo-icon-wrap { background: rgba(239,68,68,0.12); }
-    .hdo-bar ha-icon { --mdc-icon-size: 20px; }
+    .hdo-dot.nt {
+      background: var(--success-color, #22c55e);
+      box-shadow: 0 0 0 3px rgba(34,197,94,0.2);
+      animation: hdo-pulse 2.5s ease-in-out infinite;
+    }
+    .hdo-dot.vt {
+      background: var(--error-color, #ef4444);
+      box-shadow: 0 0 0 3px rgba(239,68,68,0.18);
+    }
+    @keyframes hdo-pulse {
+      0%, 100% { box-shadow: 0 0 0 3px rgba(34,197,94,0.2); }
+      50% { box-shadow: 0 0 0 6px rgba(34,197,94,0.08); }
+    }
     .hdo-info {
       display: flex;
       flex-direction: column;
@@ -704,18 +739,42 @@ export class ElectricityPanelCard extends LitElement {
       min-width: 0;
     }
     .hdo-label {
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .hdo-cd {
-      font-size: 11px;
-      opacity: 0.75;
-    }
-    .hdo-price {
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 700;
+      color: var(--primary-text-color);
+    }
+    .hdo-sub {
+      font-size: 11px;
+      color: var(--secondary-text-color);
+    }
+    .hdo-cd-block {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
       flex-shrink: 0;
     }
+    .hdo-cd-label {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--secondary-text-color);
+    }
+    .hdo-cd-val {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--primary-text-color);
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+    }
+    .hdo-win-track {
+      height: 3px;
+      background: rgba(255,255,255,0.07);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+    .hdo-win-fill.nt { height: 100%; background: var(--success-color, #22c55e); border-radius: 2px; }
+    .hdo-win-fill.vt { height: 100%; background: var(--error-color, #ef4444); border-radius: 2px; }
 
     /* ── Schedule ────────────────────────────────────────────────────────── */
     .schedule-block {
@@ -853,7 +912,10 @@ export class ElectricityPanelCard extends LitElement {
       text-transform: uppercase;
       letter-spacing: 1px;
       color: var(--secondary-text-color);
-      margin: 12px 0 6px;
+      margin: 14px 0 8px;
+      padding-left: 9px;
+      border-left: 2px solid var(--primary-color, #2196f3);
+      opacity: 0.8;
     }
     .section-block {
       background: var(--secondary-background-color, rgba(0,0,0,0.03));
@@ -908,10 +970,10 @@ export class ElectricityPanelCard extends LitElement {
       gap: 6px;
     }
     .phase-cell {
-      background: var(--primary-background-color, #fff);
+      background: rgba(var(--rgb-primary-color, 33,150,243), 0.04);
       border-radius: 8px;
       padding: 8px 10px;
-      border: 1px solid var(--divider-color, rgba(0,0,0,0.05));
+      border: 1px solid rgba(var(--rgb-primary-color, 33,150,243), 0.1);
     }
     .phase-power { font-size: 15px; font-weight: 600; color: var(--primary-text-color); }
     .phase-detail { font-size: 11px; color: var(--secondary-text-color); margin-top: 2px; }
@@ -943,20 +1005,24 @@ export class ElectricityPanelCard extends LitElement {
       box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
     }
     .circuit-card.critical { border-left: 3px solid var(--warning-color, #f59e0b); }
-    .circuit-card.is-on    { border-left: 3px solid var(--success-color, #22c55e); }
+    .circuit-card.is-on    { border-left: 3px solid var(--success-color, #22c55e); box-shadow: 0 0 14px rgba(34,197,94,0.1), 0 1px 4px rgba(0,0,0,0.06); }
     .circuit-card.critical.is-on { border-left: 3px solid var(--warning-color, #f59e0b); }
     .circuit-header {
       display: flex; align-items: center; gap: 6px; margin-bottom: 2px;
     }
     .circuit-name {
-      font-size: 13px; font-weight: 600; color: var(--primary-text-color);
+      font-size: 14px; font-weight: 700; color: var(--primary-text-color);
       flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .lock-icon { --mdc-icon-size: 16px; color: var(--warning-color, #f59e0b); flex-shrink: 0; }
 
     /* load bar */
     .load-track {
-      height: 5px; background: var(--divider-color, rgba(0,0,0,0.08));
+      height: 5px;
+      background: linear-gradient(90deg,
+        rgba(34,197,94,0.15) 0%, rgba(34,197,94,0.15) 55%,
+        rgba(245,158,11,0.2) 55%, rgba(245,158,11,0.2) 80%,
+        rgba(239,68,68,0.25) 80%, rgba(239,68,68,0.25) 100%);
       border-radius: 3px; overflow: hidden; margin: 8px 0;
     }
     .load-fill { height: 100%; border-radius: 3px; transition: width 1s ease; }
@@ -967,7 +1033,7 @@ export class ElectricityPanelCard extends LitElement {
     }
     .metrics { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .metric-primary {
-      font-size: 18px; font-weight: 700; color: var(--primary-text-color); line-height: 1;
+      font-size: 22px; font-weight: 700; color: var(--primary-text-color); line-height: 1; letter-spacing: -0.5px;
     }
     .metric-small {
       font-size: 11px; color: var(--secondary-text-color);
