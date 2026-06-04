@@ -1295,7 +1295,7 @@ let ElectricityPanelCard = class extends i {
     if (!config) throw new Error("Invalid configuration");
     this._config = config;
     this._trackedIds = this._buildTrackedIds();
-    this._historyCache.clear();
+    if (!this._historyFetching) this._historyCache.clear();
     void this._fetchHistory();
   }
   _buildTrackedIds() {
@@ -1544,7 +1544,7 @@ let ElectricityPanelCard = class extends i {
     return [...new Set(ids)];
   }
   async _fetchHistory() {
-    var _a2, _b;
+    var _a2, _b, _c, _d;
     if (!this._hass || !this._config || this._historyFetching) return;
     const graphIds = this._graphEntityIds();
     const hdoSwitch = (_a2 = this._config.hdo) == null ? void 0 : _a2.switch;
@@ -1555,15 +1555,37 @@ let ElectricityPanelCard = class extends i {
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
     const midnightStr = midnight.toISOString();
+    const wattsMul = /* @__PURE__ */ new Map();
+    for (const id of graphIds) {
+      const unit = ((_c = (_b = this._hass.states[id]) == null ? void 0 : _b.attributes) == null ? void 0 : _c["unit_of_measurement"]) ?? "";
+      wattsMul.set(id, unit === "kW" ? 1e3 : unit === "MW" ? 1e6 : 1);
+    }
     const processEntries = (raw, switchIds) => {
+      const cacheRef = this._historyCache;
+      let written = 0;
       for (const [id, entries] of Object.entries(raw)) {
+        if (!Array.isArray(entries)) {
+          console.warn(`[ep-card] ${id}: entries not Array (${typeof entries})`);
+          continue;
+        }
         const isSwitch = switchIds.includes(id);
-        const pts = entries.map((e2) => ({
-          t: new Date(e2.last_changed).getTime(),
-          v: isSwitch ? e2.state === "on" ? 1 : 0 : parseFloat(e2.state)
-        })).filter((p2) => !isNaN(p2.v));
-        if (pts.length > 0) this._historyCache.set(id, pts);
+        const mul = isSwitch ? 1 : wattsMul.get(id) ?? 1;
+        const pts = entries.map((e2) => {
+          const stateStr = e2.s ?? e2.state ?? "";
+          const tSec = e2.lc ?? e2.lu;
+          const t2 = tSec !== void 0 ? tSec * 1e3 : e2.last_changed ? new Date(e2.last_changed).getTime() : NaN;
+          const v2 = isSwitch ? stateStr === "on" ? 1 : 0 : parseFloat(stateStr) * mul;
+          return { t: t2, v: v2 };
+        }).filter((p2) => !isNaN(p2.v) && !isNaN(p2.t) && p2.t > 0);
+        if (pts.length > 0) {
+          cacheRef.set(id, pts);
+          written++;
+        } else {
+          const s2 = JSON.stringify(entries.slice(0, 2).map((e2) => ({ s: e2.s, state: e2.state, lu: e2.lu, lc: e2.lc })));
+          console.warn(`[ep-card] ${id}: 0 pts from ${entries.length} entries, sample: ${s2}`);
+        }
       }
+      console.log(`[ep-card] processEntries: ${written}/${Object.keys(raw).length} written, cache=${cacheRef.size}`);
     };
     if (typeof this._hass.callWS !== "function") {
       console.error("[ep-card] hass.callWS is not available on this HA version");
@@ -1600,7 +1622,7 @@ let ElectricityPanelCard = class extends i {
           no_attributes: true,
           significant_changes_only: false
         });
-        console.log(`[ep-card] HDO switch history: ${((_b = hdoRaw == null ? void 0 : hdoRaw[hdoSwitch]) == null ? void 0 : _b.length) ?? 0} entries`);
+        console.log(`[ep-card] HDO switch history: ${((_d = hdoRaw == null ? void 0 : hdoRaw[hdoSwitch]) == null ? void 0 : _d.length) ?? 0} entries`);
         processEntries(hdoRaw, [hdoSwitch]);
       }
       console.log(`[ep-card] cache now has ${this._historyCache.size} entities`);
@@ -1616,7 +1638,7 @@ let ElectricityPanelCard = class extends i {
     if (!hdo) return false;
     if (hdo.switch) {
       const hdoHist = this._historyCache.get(hdo.switch);
-      if (hdoHist && hdoHist.length > 0) {
+      if (hdoHist && hdoHist.length > 0 && t2 >= hdoHist[0].t) {
         let state2 = hdoHist[0].v;
         for (const pt of hdoHist) {
           if (pt.t <= t2) state2 = pt.v;
@@ -1640,28 +1662,36 @@ let ElectricityPanelCard = class extends i {
     }
     return this._isOn(hdo.switch);
   }
-  _calcDailyCost(powerEntityId, fallbackWatts) {
+  /** Accumulate today's energy cost across one or more power entities (W).
+   *  Entities are integrated independently and summed — correct for multi-phase
+   *  circuits where each phase has its own history entity. */
+  _calcDailyCost(...entityIds) {
     const hdo = this._config.hdo;
-    if (!hdo || !hdo.nt_price && !hdo.vt_price || !powerEntityId) return "";
-    const data = this._historyCache.get(powerEntityId);
-    if (!data || data.length < 2) return this._fmtCostRate(fallbackWatts ?? this._watts(powerEntityId));
+    if (!hdo || !hdo.nt_price && !hdo.vt_price) return "";
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
-    const todayPts = data.filter((p2) => p2.t >= midnight.getTime());
-    if (todayPts.length < 2) return this._fmtCostRate(fallbackWatts ?? this._watts(powerEntityId));
-    let ntWh = 0, vtWh = 0;
-    for (let i2 = 1; i2 < todayPts.length; i2++) {
-      const dtMs = todayPts[i2].t - todayPts[i2 - 1].t;
-      const avgW = (todayPts[i2].v + todayPts[i2 - 1].v) / 2;
-      const wh = avgW * (dtMs / 36e5);
-      const midT = (todayPts[i2].t + todayPts[i2 - 1].t) / 2;
-      if (this._isNTAt(midT)) ntWh += wh;
-      else vtWh += wh;
-    }
     const ntP = parseFloat(hdo.nt_price) || 0;
     const vtP = parseFloat(hdo.vt_price) || 0;
+    let ntWh = 0, vtWh = 0, hasData = false;
+    for (const id of entityIds) {
+      if (!id) continue;
+      const data = this._historyCache.get(id);
+      if (!data || data.length < 2) continue;
+      const todayPts = data.filter((p2) => p2.t >= midnight.getTime());
+      if (todayPts.length < 2) continue;
+      hasData = true;
+      for (let i2 = 1; i2 < todayPts.length; i2++) {
+        const dtMs = todayPts[i2].t - todayPts[i2 - 1].t;
+        const avgW = (todayPts[i2].v + todayPts[i2 - 1].v) / 2;
+        const wh = avgW * (dtMs / 36e5);
+        const midT = (todayPts[i2].t + todayPts[i2 - 1].t) / 2;
+        if (this._isNTAt(midT)) ntWh += wh;
+        else vtWh += wh;
+      }
+    }
+    if (!hasData) return "";
     const cost = ntWh / 1e3 * ntP + vtWh / 1e3 * vtP;
-    if (cost <= 0) return "";
+    if (cost < 5e-3) return "";
     const cur = hdo.currency ?? "Kč";
     return `${cost.toFixed(2)} ${cur}`;
   }
@@ -1797,7 +1827,7 @@ let ElectricityPanelCard = class extends i {
             <span class="metric-small">
               ${m2.energy_today ? b`${this._kwh(m2.energy_today).toFixed(1)} kWh today` : A}
               ${(() => {
-      const cr = this._calcDailyCost(m2.power_l1 ?? m2.power_l2 ?? m2.power_l3, totalW);
+      const cr = this._calcDailyCost(m2.power_l1, m2.power_l2, m2.power_l3);
       return cr ? b`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : A;
     })()}
             </span>
@@ -1949,7 +1979,7 @@ let ElectricityPanelCard = class extends i {
     const barColor = this._loadColor(loadPct);
     const expanded = this._expanded.has(c2.id);
     const hasDevices = (((_a2 = c2.devices) == null ? void 0 : _a2.length) ?? 0) > 0;
-    const costRate = totalPower > 0 ? this._calcDailyCost(c2.power ?? c2.power_l1, totalPower) : "";
+    const costRate = totalPower > 0 ? this._calcDailyCost(c2.power, c2.power_l1, c2.power_l2, c2.power_l3) : "";
     return b`
       <div class="three-phase-card ${c2.critical ? "critical" : ""} ${c2.switch && isOn ? "is-on" : ""}">
         <div class="tp-header">

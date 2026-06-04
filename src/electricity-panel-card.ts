@@ -68,7 +68,8 @@ export class ElectricityPanelCard extends LitElement {
     if (!config) throw new Error('Invalid configuration');
     this._config = config;
     this._trackedIds = this._buildTrackedIds();
-    this._historyCache.clear();
+    // Avoid clearing cache while a fetch is in progress (race condition)
+    if (!this._historyFetching) this._historyCache.clear();
     void this._fetchHistory();
   }
 
@@ -348,15 +349,44 @@ export class ElectricityPanelCard extends LitElement {
     const graphStart = new Date(Date.now() - hours * 3_600_000).toISOString();
     const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
     const midnightStr = midnight.toISOString();
-    const processEntries = (raw: Record<string, Array<{state: string; last_changed: string}>>, switchIds: string[]) => {
+    // HA 2023.3+ compressed format: s=state, lu=last_updated, lc=last_changed (unix float seconds)
+    // Older HA: state (string), last_changed (ISO string)
+    type HistEntry = { s?: string; state?: string; lu?: number; lc?: number; last_changed?: string };
+    // Build watts multiplier from current entity state so cached values are always in W,
+    // regardless of whether the sensor reports in W, kW, or MW.
+    const wattsMul = new Map<string, number>();
+    for (const id of graphIds) {
+      const unit = (this._hass.states[id]?.attributes?.['unit_of_measurement'] as string) ?? '';
+      wattsMul.set(id, unit === 'kW' ? 1000 : unit === 'MW' ? 1_000_000 : 1);
+    }
+    const processEntries = (raw: Record<string, Array<HistEntry>>, switchIds: string[]) => {
+      const cacheRef = this._historyCache;
+      let written = 0;
       for (const [id, entries] of Object.entries(raw)) {
+        if (!Array.isArray(entries)) {
+          console.warn(`[ep-card] ${id}: entries not Array (${typeof entries})`);
+          continue;
+        }
         const isSwitch = switchIds.includes(id);
-        const pts = entries.map(e => ({
-          t: new Date(e.last_changed).getTime(),
-          v: isSwitch ? (e.state === 'on' ? 1 : 0) : parseFloat(e.state),
-        })).filter(p => !isNaN(p.v));
-        if (pts.length > 0) this._historyCache.set(id, pts);
+        const mul = isSwitch ? 1 : (wattsMul.get(id) ?? 1);
+        const pts = entries.map(e => {
+          const stateStr = e.s ?? e.state ?? '';
+          const tSec = e.lc ?? e.lu;
+          const t = tSec !== undefined
+            ? tSec * 1000
+            : e.last_changed ? new Date(e.last_changed).getTime() : NaN;
+          const v = isSwitch ? (stateStr === 'on' ? 1 : 0) : parseFloat(stateStr) * mul;
+          return { t, v };
+        }).filter(p => !isNaN(p.v) && !isNaN(p.t) && p.t > 0);
+        if (pts.length > 0) {
+          cacheRef.set(id, pts);
+          written++;
+        } else {
+          const s = JSON.stringify(entries.slice(0, 2).map(e => ({ s: e.s, state: e.state, lu: e.lu, lc: e.lc })));
+          console.warn(`[ep-card] ${id}: 0 pts from ${entries.length} entries, sample: ${s}`);
+        }
       }
+      console.log(`[ep-card] processEntries: ${written}/${Object.keys(raw).length} written, cache=${cacheRef.size}`);
     };
     // Verify callWS is available
     if (typeof (this._hass as Record<string, unknown>).callWS !== 'function') {
@@ -407,10 +437,12 @@ export class ElectricityPanelCard extends LitElement {
   private _isNTAt(t: number): boolean {
     const hdo = this._config.hdo;
     if (!hdo) return false;
-    // Use actual HDO switch history when available — most accurate
+    // Use HDO switch history only for times within the recorded period.
+    // For times before the first history entry the switch state is unknown
+    // — fall through to the tariff schedule which is always authoritative.
     if (hdo.switch) {
       const hdoHist = this._historyCache.get(hdo.switch);
-      if (hdoHist && hdoHist.length > 0) {
+      if (hdoHist && hdoHist.length > 0 && t >= hdoHist[0].t) {
         let state = hdoHist[0].v;
         for (const pt of hdoHist) {
           if (pt.t <= t) state = pt.v;
@@ -419,7 +451,7 @@ export class ElectricityPanelCard extends LitElement {
         return state > 0.5; // 1 = on = NT
       }
     }
-    // Fallback: use tariff schedule
+    // Tariff schedule — primary source for everything before first history entry
     const preset = hdo.tariff_preset ? PRE_TARIFFS[hdo.tariff_preset] : undefined;
     const src = preset ?? hdo.schedule;
     if (src) {
@@ -436,26 +468,34 @@ export class ElectricityPanelCard extends LitElement {
     return this._isOn(hdo.switch);
   }
 
-  private _calcDailyCost(powerEntityId: string | undefined, fallbackWatts?: number): string {
+  /** Accumulate today's energy cost across one or more power entities (W).
+   *  Entities are integrated independently and summed — correct for multi-phase
+   *  circuits where each phase has its own history entity. */
+  private _calcDailyCost(...entityIds: (string | undefined)[]): string {
     const hdo = this._config.hdo;
-    if (!hdo || (!hdo.nt_price && !hdo.vt_price) || !powerEntityId) return '';
-    const data = this._historyCache.get(powerEntityId);
-    if (!data || data.length < 2) return this._fmtCostRate(fallbackWatts ?? this._watts(powerEntityId));
+    if (!hdo || (!hdo.nt_price && !hdo.vt_price)) return '';
     const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
-    const todayPts = data.filter(p => p.t >= midnight.getTime());
-    if (todayPts.length < 2) return this._fmtCostRate(fallbackWatts ?? this._watts(powerEntityId));
-    let ntWh = 0, vtWh = 0;
-    for (let i = 1; i < todayPts.length; i++) {
-      const dtMs = todayPts[i].t - todayPts[i - 1].t;
-      const avgW = (todayPts[i].v + todayPts[i - 1].v) / 2;
-      const wh = avgW * (dtMs / 3_600_000);
-      const midT = (todayPts[i].t + todayPts[i - 1].t) / 2;
-      if (this._isNTAt(midT)) ntWh += wh; else vtWh += wh;
-    }
     const ntP = parseFloat(hdo.nt_price as unknown as string) || 0;
     const vtP = parseFloat(hdo.vt_price as unknown as string) || 0;
+    let ntWh = 0, vtWh = 0, hasData = false;
+    for (const id of entityIds) {
+      if (!id) continue;
+      const data = this._historyCache.get(id);
+      if (!data || data.length < 2) continue;
+      const todayPts = data.filter(p => p.t >= midnight.getTime());
+      if (todayPts.length < 2) continue;
+      hasData = true;
+      for (let i = 1; i < todayPts.length; i++) {
+        const dtMs = todayPts[i].t - todayPts[i - 1].t;
+        const avgW = (todayPts[i].v + todayPts[i - 1].v) / 2;
+        const wh = avgW * (dtMs / 3_600_000);
+        const midT = (todayPts[i].t + todayPts[i - 1].t) / 2;
+        if (this._isNTAt(midT)) ntWh += wh; else vtWh += wh;
+      }
+    }
+    if (!hasData) return '';
     const cost = (ntWh / 1000) * ntP + (vtWh / 1000) * vtP;
-    if (cost <= 0) return '';
+    if (cost < 0.005) return '';
     const cur = hdo.currency ?? 'Kč';
     return `${cost.toFixed(2)} ${cur}`;
   }
@@ -600,7 +640,7 @@ export class ElectricityPanelCard extends LitElement {
             <span class="metric-primary">${(totalW / 1000).toFixed(2)} kW</span>
             <span class="metric-small">
               ${m.energy_today ? html`${this._kwh(m.energy_today).toFixed(1)} kWh today` : nothing}
-              ${(() => { const cr = this._calcDailyCost(m.power_l1 ?? m.power_l2 ?? m.power_l3, totalW); return cr ? html`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : nothing; })()}
+              ${(() => { const cr = this._calcDailyCost(m.power_l1, m.power_l2, m.power_l3); return cr ? html`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : nothing; })()}
             </span>
           </div>
         </div>
@@ -782,7 +822,7 @@ export class ElectricityPanelCard extends LitElement {
     const barColor = this._loadColor(loadPct);
     const expanded = this._expanded.has(c.id);
     const hasDevices = (c.devices?.length ?? 0) > 0;
-    const costRate = totalPower > 0 ? this._calcDailyCost(c.power ?? c.power_l1, totalPower) : '';
+    const costRate = totalPower > 0 ? this._calcDailyCost(c.power, c.power_l1, c.power_l2, c.power_l3) : '';
 
     return html`
       <div class="three-phase-card ${c.critical ? 'critical' : ''} ${c.switch && isOn ? 'is-on' : ''}">
