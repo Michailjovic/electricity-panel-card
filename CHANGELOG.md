@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.1] - 2026-06-04
+
+### Fixed
+- **Daily cost: consistent display** — `_calcDailyCost` no longer falls back to a current-rate estimate (`X.XX Kč/h`) when history is unavailable. All circuits now show either an accurate accumulated daily cost (`X.XX Kč`) or nothing. Costs below 0.005 Kč are suppressed to avoid displaying `0.00 Kč`.
+- **Daily cost: correct NT/VT split** — `_isNTAt` now only trusts the HDO switch history for timestamps that fall within the recorded period. For any earlier timestamp it falls through to the tariff schedule, which is authoritative. Previously a single history entry (e.g. the state at midnight) caused the entire day to be classified as one tariff, producing inaccurate NT/VT cost splits.
+
 ---
 
 ## [4.3.0] - 2026-06-04
