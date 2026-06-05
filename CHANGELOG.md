@@ -7,6 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [5.0.0] - 2026-06-05
+
+This release consolidates all development since the v4.0.0 dark-theme foundation
+into a single major version. The card gains live power history graphs, real-time
+cost tracking, per-phase voltage monitoring, a last-updated staleness indicator,
+improved mobile layout, and a significantly expanded GUI editor.
+
+### Added
+
+- **Sparkline power history graphs** — phase cells on the main meter and 3-phase
+  circuits display a smooth SVG power history graph fetched from the HA history
+  API (compressed format, HA 2023.3+). The history window is configurable
+  (1–24 h, default 3 h). Options: line colour, min/max label position
+  (left / right / hidden), dashed min/max reference lines with configurable colour.
+
+- **Single-phase circuit sparkline** — single-phase breaker cards can optionally
+  show the same power history graph below the metrics row, wrapped in a styled
+  dark container matching the phase-cell design. Off by default; enabled in
+  Graph settings.
+
+- **Sparkline visibility toggles** — individual on/off switches in Graph settings
+  for main meter graphs, 3-phase circuit graphs, and single-phase circuit graphs.
+
+- **Daily cost tracking** — each circuit and the main meter show accumulated cost
+  for the current day (e.g. `1.93 Kč`), computed by integrating power history and
+  splitting NT / VT tariff periods using HDO switch history with schedule fallback.
+  Requires `nt_price` / `vt_price` configured under HDO.
+
+- **Per-phase voltage — main meter** — `voltage_l1`, `voltage_l2`, `voltage_l3`
+  entity fields on the main meter; shown in each phase cell below the current
+  reading. Legacy single `voltage` entity still supported.
+
+- **Per-phase voltage — 3-phase circuits** — `voltage_l1`, `voltage_l2`,
+  `voltage_l3` fields on individual 3-phase circuit breakers, displayed the same
+  way as on the main meter.
+
+- **Voltage — single-phase circuits** — existing `voltage` field now shown in the
+  circuit footer alongside current and energy.
+
+- **Last-updated age badge** — each circuit card and the main meter display a
+  `↻ Xs / Xm / Xh` indicator showing how long ago the primary entity was last
+  updated. Colour transitions through three configurable thresholds (short /
+  medium / long). Globally toggled in Graph settings.
+
+- **Entity validation in editor** — entity_id input fields turn amber and show a
+  warning when the configured entity does not exist in Home Assistant's state
+  machine, helping catch typos before saving.
+
+### Changed
+
+- **Mobile layout** — single-phase circuit grid switches to one column at 480 px
+  container width (was 360 px). Phase cells reduce gap at 480 px and stack
+  vertically at 360 px.
+
+- **Graph settings section** — the editor's "Sparkline graphs" section is renamed
+  to "Graph settings" and now also contains the history period field and age badge
+  controls, grouped into subsections.
+
+- **Main meter — optional label** — the editor section is labelled
+  "Main meter (optional)" to clarify that the whole section can be left
+  unconfigured.
+
+### Fixed
+
+- **History API format** — parser now supports both the legacy HA history format
+  (`state` / `last_changed`) and the compressed format introduced in HA 2023.3
+  (`s` / `lu` / `lc` as Unix float seconds). Previously, all power sensor values
+  were discarded as NaN.
+
+- **kW unit conversion in history cache** — power entities reporting in kW were
+  stored raw and divided by 1000 again during cost integration, producing cost
+  values ~1000× too small. The history fetcher now normalises all cached values
+  to watts using the entity's `unit_of_measurement`.
+
+- **Daily cost — multi-phase summation** — `_calcDailyCost` now sums energy
+  across all supplied phase entities independently. 3-phase circuits and the
+  main meter pass all three phase entities, so cost reflects total consumption
+  rather than just L1.
+
+- **NT/VT split accuracy** — `_isNTAt` now uses HDO switch history only for
+  timestamps within the recorded window, falling back to the tariff schedule for
+  earlier timestamps. A single history entry at midnight no longer causes the
+  entire preceding day to be misclassified.
+
+- **`setConfig` race condition** — history cache was cleared unconditionally in
+  `setConfig`. If called mid-fetch, freshly fetched data was erased. Cache is
+  now only cleared when no fetch is in progress.
+
+- **Sparkline reference lines** — `sparkline_ref_line: true` now correctly shows
+  both min and max reference lines regardless of `sparkline_labels` setting.
+
+- **Single-phase device list column layout** — devices under single-phase breakers
+  were incorrectly rendered in the 3-column grid intended for 3-phase circuits.
+
+---
+
 ## [4.10.0] - 2026-06-05
 
 ### Added
