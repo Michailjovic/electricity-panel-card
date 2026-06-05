@@ -92,7 +92,8 @@ export class ElectricityPanelCard extends LitElement {
     if (hdo) ids.push(hdo.switch, hdo.next_high, hdo.next_low, hdo.workday_sensor);
     const mm = this._config.main_meter;
     if (mm) ids.push(mm.power_l1, mm.power_l2, mm.power_l3,
-                     mm.current_l1, mm.current_l2, mm.current_l3, mm.energy_today);
+                     mm.current_l1, mm.current_l2, mm.current_l3, mm.energy_today,
+                     mm.voltage, mm.voltage_l1, mm.voltage_l2, mm.voltage_l3);
     for (const c of this._config.circuits ?? []) {
       ids.push(c.switch, c.power, c.current, c.energy, c.voltage,
                c.power_l1, c.power_l2, c.power_l3, c.current_l1, c.current_l2, c.current_l3,
@@ -703,9 +704,9 @@ export class ElectricityPanelCard extends LitElement {
     const totalW = this._watts(m.power_l1) + this._watts(m.power_l2) + this._watts(m.power_l3);
     const voltage = this._num(m.voltage);
     const phases = [
-      { label: 'L1', power: m.power_l1, current: m.current_l1 },
-      { label: 'L2', power: m.power_l2, current: m.current_l2 },
-      { label: 'L3', power: m.power_l3, current: m.current_l3 },
+      { label: 'L1', power: m.power_l1, current: m.current_l1, voltage: m.voltage_l1 ?? (m.voltage && !m.voltage_l2 ? m.voltage : undefined) },
+      { label: 'L2', power: m.power_l2, current: m.current_l2, voltage: m.voltage_l2 },
+      { label: 'L3', power: m.power_l3, current: m.current_l3, voltage: m.voltage_l3 },
     ];
     return html`
       <div class="ep-meter">
@@ -732,7 +733,10 @@ export class ElectricityPanelCard extends LitElement {
             <div class="phase-cell">
               <div class="phase-label">${p.label}</div>
               <div class="phase-power">${(this._watts(p.power) / 1000).toFixed(2)} kW</div>
-              <div class="phase-detail">${this._num(p.current).toFixed(1)} A</div>
+              <div class="phase-detail">
+                ${this._num(p.current).toFixed(1)} A
+                ${p.voltage ? html`<span class="metric-sep">·</span>${this._num(p.voltage).toFixed(0)} V` : nothing}
+              </div>
               ${this._config.sparkline_main_meter !== false ? this._renderSparkline(p.power) : nothing}
             </div>
           `)}
@@ -800,7 +804,9 @@ export class ElectricityPanelCard extends LitElement {
         ${expanded && hasDevices
           ? html`<div class="devices-list">${c.devices!.map(d => this._renderDevice(d))}</div>`
           : nothing}
-        ${this._config.sparkline_1phase ? this._renderSparkline(c.power) : nothing}
+        ${this._config.sparkline_1phase ? html`
+          <div class="circuit-spark-wrap">${this._renderSparkline(c.power)}</div>
+        ` : nothing}
       </div>
     `;
   }
@@ -1096,6 +1102,7 @@ export class ElectricityPanelCard extends LitElement {
     .meter-total { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
     .phases-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; }
     .phase-cell { background: #111318; border-radius: 6px; padding: 8px 10px; border: 0.5px solid #252a35; }
+    .circuit-spark-wrap { background: #111318; border-radius: 6px; padding: 6px 10px; border: 0.5px solid #252a35; margin-top: 6px; }
     .phase-label { font-size: 10px; color: #4b5568; font-weight: 500; margin-bottom: 3px; }
     .phase-power { font-size: 14px; font-weight: 500; color: #a0aec0; }
     .phase-detail { font-size: 11px; color: #4b5568; margin-top: 1px; }

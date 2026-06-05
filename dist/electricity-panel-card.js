@@ -983,9 +983,14 @@ let ElectricityPanelEditor = class extends i {
           ${this._entityField("L1 current", m2.current_l1, s2("current_l1"))}
           ${this._entityField("L2 current", m2.current_l2, s2("current_l2"))}
           ${this._entityField("L3 current", m2.current_l3, s2("current_l3"))}
-          <div class="group-label">Energy & voltage</div>
+          <div class="group-label">Energy</div>
           ${this._entityField("Energy today (kWh)", m2.energy_today, s2("energy_today"))}
-          ${this._entityField("Voltage (V)", m2.voltage, s2("voltage"))}
+          <div class="group-label" style="margin-top:10px;">Voltage (V per phase)</div>
+          ${this._entityField("L1 voltage (V)", m2.voltage_l1, s2("voltage_l1"))}
+          ${this._entityField("L2 voltage (V)", m2.voltage_l2, s2("voltage_l2"))}
+          ${this._entityField("L3 voltage (V)", m2.voltage_l3, s2("voltage_l3"))}
+          <span class="field-hint">Or use a single entity for all phases:</span>
+          ${this._entityField("Voltage single (V)", m2.voltage, s2("voltage"))}
         </div>
       </details>`;
   }
@@ -1416,7 +1421,11 @@ let ElectricityPanelCard = class extends i {
       mm.current_l1,
       mm.current_l2,
       mm.current_l3,
-      mm.energy_today
+      mm.energy_today,
+      mm.voltage,
+      mm.voltage_l1,
+      mm.voltage_l2,
+      mm.voltage_l3
     );
     for (const c2 of this._config.circuits ?? []) {
       ids.push(
@@ -1975,9 +1984,9 @@ let ElectricityPanelCard = class extends i {
     const totalW = this._watts(m2.power_l1) + this._watts(m2.power_l2) + this._watts(m2.power_l3);
     const voltage = this._num(m2.voltage);
     const phases = [
-      { label: "L1", power: m2.power_l1, current: m2.current_l1 },
-      { label: "L2", power: m2.power_l2, current: m2.current_l2 },
-      { label: "L3", power: m2.power_l3, current: m2.current_l3 }
+      { label: "L1", power: m2.power_l1, current: m2.current_l1, voltage: m2.voltage_l1 ?? (m2.voltage && !m2.voltage_l2 ? m2.voltage : void 0) },
+      { label: "L2", power: m2.power_l2, current: m2.current_l2, voltage: m2.voltage_l2 },
+      { label: "L3", power: m2.power_l3, current: m2.current_l3, voltage: m2.voltage_l3 }
     ];
     return b`
       <div class="ep-meter">
@@ -2007,7 +2016,10 @@ let ElectricityPanelCard = class extends i {
             <div class="phase-cell">
               <div class="phase-label">${p2.label}</div>
               <div class="phase-power">${(this._watts(p2.power) / 1e3).toFixed(2)} kW</div>
-              <div class="phase-detail">${this._num(p2.current).toFixed(1)} A</div>
+              <div class="phase-detail">
+                ${this._num(p2.current).toFixed(1)} A
+                ${p2.voltage ? b`<span class="metric-sep">·</span>${this._num(p2.voltage).toFixed(0)} V` : A}
+              </div>
               ${this._config.sparkline_main_meter !== false ? this._renderSparkline(p2.power) : A}
             </div>
           `)}
@@ -2063,7 +2075,9 @@ let ElectricityPanelCard = class extends i {
         </div>
 
         ${expanded && hasDevices ? b`<div class="devices-list">${c2.devices.map((d2) => this._renderDevice(d2))}</div>` : A}
-        ${this._config.sparkline_1phase ? this._renderSparkline(c2.power) : A}
+        ${this._config.sparkline_1phase ? b`
+          <div class="circuit-spark-wrap">${this._renderSparkline(c2.power)}</div>
+        ` : A}
       </div>
     `;
   }
@@ -2322,6 +2336,7 @@ ElectricityPanelCard.styles = i$3`
     .meter-total { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
     .phases-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; }
     .phase-cell { background: #111318; border-radius: 6px; padding: 8px 10px; border: 0.5px solid #252a35; }
+    .circuit-spark-wrap { background: #111318; border-radius: 6px; padding: 6px 10px; border: 0.5px solid #252a35; margin-top: 6px; }
     .phase-label { font-size: 10px; color: #4b5568; font-weight: 500; margin-bottom: 3px; }
     .phase-power { font-size: 14px; font-weight: 500; color: #a0aec0; }
     .phase-detail { font-size: 11px; color: #4b5568; margin-top: 1px; }

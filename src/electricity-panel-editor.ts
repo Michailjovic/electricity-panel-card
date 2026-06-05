@@ -345,9 +345,14 @@ export class ElectricityPanelEditor extends LitElement {
           ${this._entityField('L1 current', m.current_l1, s('current_l1'))}
           ${this._entityField('L2 current', m.current_l2, s('current_l2'))}
           ${this._entityField('L3 current', m.current_l3, s('current_l3'))}
-          <div class="group-label">Energy & voltage</div>
+          <div class="group-label">Energy</div>
           ${this._entityField('Energy today (kWh)', m.energy_today, s('energy_today'))}
-          ${this._entityField('Voltage (V)', m.voltage, s('voltage'))}
+          <div class="group-label" style="margin-top:10px;">Voltage (V per phase)</div>
+          ${this._entityField('L1 voltage (V)', m.voltage_l1, s('voltage_l1'))}
+          ${this._entityField('L2 voltage (V)', m.voltage_l2, s('voltage_l2'))}
+          ${this._entityField('L3 voltage (V)', m.voltage_l3, s('voltage_l3'))}
+          <span class="field-hint">Or use a single entity for all phases:</span>
+          ${this._entityField('Voltage single (V)', m.voltage, s('voltage'))}
         </div>
       </details>`;
   }

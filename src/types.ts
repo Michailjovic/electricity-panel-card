@@ -81,7 +81,10 @@ export interface MainMeter {
   current_l2?: string;
   current_l3?: string;
   energy_today?: string; // kWh
-  voltage?: string;      // V — displayed per phase if present
+  voltage?: string;      // V — single value (backward compat)
+  voltage_l1?: string;   // V phase 1
+  voltage_l2?: string;
+  voltage_l3?: string;
 }
 
 /** One day's NT windows — list of start times (HH:MM) + durations in minutes */
