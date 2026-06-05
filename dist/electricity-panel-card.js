@@ -1710,9 +1710,13 @@ let ElectricityPanelCard = class extends i {
       const y3 = H2 - pad - (p2.v - vMin) / vRange * (H2 - pad * 2);
       return `${x2.toFixed(1)},${y3.toFixed(1)}`;
     }).join(" ");
+    const labelMax = this._fmtW(vMax);
+    const labelMin = this._fmtW(vMin);
     return b`<svg viewBox="0 0 ${W} ${H2}" preserveAspectRatio="none" class="sparkline">
       <polyline points="${pts}" fill="none" stroke="#ef4444" stroke-width="1.5"
         stroke-linejoin="round" stroke-linecap="round"/>
+      <text x="99" y="9" text-anchor="end" class="spark-label">${labelMax}</text>
+      <text x="99" y="${H2 - 2}" text-anchor="end" class="spark-label spark-label-min">${labelMin}</text>
     </svg>`;
   }
   // ── Render: HDO schedule ───────────────────────────────────────────────────
@@ -2225,6 +2229,8 @@ ElectricityPanelCard.styles = i$3`
     .note-row .device-name { font-style: italic; }
 
     .sparkline { width: 100%; height: 34px; display: block; margin-top: 5px; overflow: visible; }
+    .spark-label { font-size: 7px; fill: rgba(255,255,255,.45); font-family: inherit; }
+    .spark-label-min { fill: rgba(255,255,255,.28); }
   `;
 __decorateClass([
   r()

@@ -515,9 +515,13 @@ export class ElectricityPanelCard extends LitElement {
       const y = (H - pad) - ((p.v - vMin) / vRange) * (H - pad * 2);
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ');
+    const labelMax = this._fmtW(vMax);
+    const labelMin = this._fmtW(vMin);
     return html`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="sparkline">
       <polyline points="${pts}" fill="none" stroke="#ef4444" stroke-width="1.5"
         stroke-linejoin="round" stroke-linecap="round"/>
+      <text x="99" y="9" text-anchor="end" class="spark-label">${labelMax}</text>
+      <text x="99" y="${H - 2}" text-anchor="end" class="spark-label spark-label-min">${labelMin}</text>
     </svg>`;
   }
 
@@ -1085,6 +1089,8 @@ export class ElectricityPanelCard extends LitElement {
     .note-row .device-name { font-style: italic; }
 
     .sparkline { width: 100%; height: 34px; display: block; margin-top: 5px; overflow: visible; }
+    .spark-label { font-size: 7px; fill: rgba(255,255,255,.45); font-family: inherit; }
+    .spark-label-min { fill: rgba(255,255,255,.28); }
   `;
 }
 
