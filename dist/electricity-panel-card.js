@@ -656,7 +656,7 @@ const PRE_TARIFFS = {
     holiday: { starts: ["02:20", "07:00", "15:20"], offsets: [240, 80, 160] }
   }
 };
-const EP_VERSION = "5.0.7";
+const EP_VERSION = "5.0.8";
 var __defProp$1 = Object.defineProperty;
 var __getOwnPropDesc$1 = Object.getOwnPropertyDescriptor;
 var __decorateClass$1 = (decorators, target, key, kind) => {
@@ -1865,9 +1865,14 @@ let ElectricityPanelCard = class extends i {
     const yMin = (H2 - pad).toFixed(1);
     const hideLabels = noLabels || labelPos === "none";
     const refColor = this._config.sparkline_ref_color ?? "rgba(255,255,255,0.35)";
-    const wrapPad = hideLabels ? "" : ` spark-pad-${labelPos}`;
+    const lblEl = hideLabels ? A : b`
+      <div class="spark-lbls spark-lbls-${labelPos}">
+        <span class="spark-lbl-max">${this._fmtW(vMax)}</span>
+        <span class="spark-lbl-min">${this._fmtW(vMin)}</span>
+      </div>`;
     return b`
-      <div class="sparkline-wrap${wrapPad}">
+      <div class="sparkline-wrap">
+        ${labelPos === "left" ? lblEl : A}
         <svg viewBox="0 0 ${W} ${H2}" preserveAspectRatio="none" class="sparkline">
           <defs>
             <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
@@ -1884,11 +1889,7 @@ let ElectricityPanelCard = class extends i {
           <line x1="0" y1="${yMin}" x2="${W}" y2="${yMin}"
             class="spark-ref${showRef ? "" : " spark-hidden"}" style="stroke:${refColor}"/>
         </svg>
-        ${!hideLabels ? b`
-          <div class="spark-lbls spark-lbls-${labelPos}">
-            <span class="spark-lbl-max">${this._fmtW(vMax)}</span>
-            <span class="spark-lbl-min">${this._fmtW(vMin)}</span>
-          </div>` : A}
+        ${labelPos === "right" ? lblEl : A}
       </div>`;
   }
   // ── Render: HDO schedule ───────────────────────────────────────────────────
@@ -2417,13 +2418,11 @@ ElectricityPanelCard.styles = i$3`
     .note-icon { --mdc-icon-size: 12px; color: #4b5568; flex-shrink: 0; }
     .note-row .device-name { font-style: italic; }
 
-    .sparkline-wrap { position: relative; width: 100%; height: 38px; display: block; margin-top: 6px; }
-    .sparkline { position: absolute; top: 0; bottom: 0; left: 0; right: 0; width: auto; height: auto; display: block; overflow: visible; }
-    .sparkline-wrap.spark-pad-left  .sparkline { left: 40px; }
-    .sparkline-wrap.spark-pad-right .sparkline { right: 40px; }
-    .spark-lbls { position: absolute; top: 0; bottom: 0; width: 40px; display: flex; flex-direction: column; justify-content: space-between; padding: 2px 2px; pointer-events: none; }
-    .spark-lbls-left { left: 0; align-items: flex-start; }
-    .spark-lbls-right { right: 0; align-items: flex-end; }
+    .sparkline-wrap { display: flex; align-items: stretch; width: 100%; height: 38px; margin-top: 6px; }
+    .sparkline { flex: 1; min-width: 0; display: block; overflow: visible; }
+    .spark-lbls { width: 40px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 2px 2px; pointer-events: none; }
+    .spark-lbls-left { align-items: flex-start; }
+    .spark-lbls-right { align-items: flex-end; }
     .spark-lbl-max { font-size: 8px; color: rgba(255,255,255,.75); text-shadow: 0 0 3px #111318, 0 0 3px #111318; white-space: nowrap; font-family: inherit; }
     .spark-lbl-min { font-size: 8px; color: rgba(255,255,255,.45); text-shadow: 0 0 3px #111318, 0 0 3px #111318; white-space: nowrap; font-family: inherit; }
     .spark-ref { stroke-width: 1px; stroke-dasharray: 3 3; }

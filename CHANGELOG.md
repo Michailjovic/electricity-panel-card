@@ -5,6 +5,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.0.8] — 2026-06-05
+*Third and final sparkline label fix — flex layout, labels always 40 px, no overlap.*
+
+### 🐛 Fixed
+
+- **Sparkline label sizing** — replaced all previous approaches (SVG user-unit reservation,
+  CSS padding, absolute SVG positioning) with a flex layout: the `.sparkline-wrap` is now
+  `display: flex`, the label `<div>` is a fixed `width: 40px` flex sibling placed before
+  or after the SVG in DOM order depending on `sparkline_labels`, and the SVG takes
+  `flex: 1`. This gives the label exactly 40 CSS px at every card width without any
+  coordinate tricks, and the graph fills the remaining space without overlap.
+
+---
+
 ## [5.0.7] — 2026-06-05
 *Sparkline labels correctly overlaid on graph; version badge in GUI editor.*
 

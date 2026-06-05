@@ -1,4 +1,4 @@
-export const EP_VERSION = '5.0.7';
+export const EP_VERSION = '5.0.8';
 
 // ── Home Assistant types ────────────────────────────────────────────────────
 
