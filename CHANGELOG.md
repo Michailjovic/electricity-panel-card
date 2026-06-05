@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.7.1] - 2026-06-05
+
+### Fixed
+
+- **Sparkline font restored** — a file truncation during development caused the
+  `.toggle`, `.status-dot`, `.expand-btn`, `.device-row`, `.sparkline`,
+  `.spark-label` and related CSS rules to be silently dropped from the bundle,
+  breaking sparkline label text and several other card styles. All rules restored.
+
+- **Age badge GUI labels** — the colour-picker labels in the "Last-updated badge"
+  editor section are now "Short / Medium / Long" instead of "Fresh / Amber / Red",
+  matching the intent of the thresholds (duration since last update).
+
+---
+
 ## [4.7.0] - 2026-06-05
 
 ### Added

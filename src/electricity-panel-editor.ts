@@ -287,22 +287,22 @@ export class ElectricityPanelEditor extends LitElement {
             <label for="age-badge">Show ↻ age badge on circuits and main meter</label>
           </div>
           ${age ? html`
-            ${this._numField('Amber threshold (minutes)', this._config.age_warn_minutes,
+            ${this._numField('Medium threshold (minutes)', this._config.age_warn_minutes,
               (v) => this._set(['age_warn_minutes'], parseFloat(v) || 5), '5')}
-            ${this._numField('Red threshold (minutes)', this._config.age_stale_minutes,
+            ${this._numField('Long threshold (minutes)', this._config.age_stale_minutes,
               (v) => this._set(['age_stale_minutes'], parseFloat(v) || 15), '15')}
             <div class="field">
-              <label>Fresh colour</label>
+              <label>Short colour</label>
               <input type="color" .value=${this._config.age_ok_color ?? '#374151'}
                 @input=${(e: Event) => this._set(['age_ok_color'], (e.target as HTMLInputElement).value)} />
             </div>
             <div class="field">
-              <label>Amber colour</label>
+              <label>Medium colour</label>
               <input type="color" .value=${this._config.age_warn_color ?? '#f59e0b'}
                 @input=${(e: Event) => this._set(['age_warn_color'], (e.target as HTMLInputElement).value)} />
             </div>
             <div class="field">
-              <label>Red colour</label>
+              <label>Long colour</label>
               <input type="color" .value=${this._config.age_stale_color ?? '#ef4444'}
                 @input=${(e: Event) => this._set(['age_stale_color'], (e.target as HTMLInputElement).value)} />
             </div>` : nothing}
