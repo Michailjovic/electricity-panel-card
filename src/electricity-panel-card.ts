@@ -66,11 +66,23 @@ export class ElectricityPanelCard extends LitElement {
 
   setConfig(config: ElectricityPanelConfig): void {
     if (!config) throw new Error('Invalid configuration');
+    const prev = this._config;
     this._config = config;
     this._trackedIds = this._buildTrackedIds();
-    // Avoid clearing cache while a fetch is in progress (race condition)
-    if (!this._historyFetching) this._historyCache.clear();
-    void this._fetchHistory();
+    // Appearance-only changes (color, label position, reference line) need just a
+    // re-render — no cache clear or re-fetch needed.
+    const appearanceOnly = prev && (
+      prev.graph_hours === config.graph_hours &&
+      JSON.stringify(prev.circuits) === JSON.stringify(config.circuits) &&
+      JSON.stringify(prev.hdo) === JSON.stringify(config.hdo) &&
+      JSON.stringify(prev.main_meter) === JSON.stringify(config.main_meter)
+    );
+    if (!appearanceOnly) {
+      if (!this._historyFetching) this._historyCache.clear();
+      void this._fetchHistory();
+    }
+    // For appearance-only changes requestUpdate is triggered automatically
+    // because _config is @state().
   }
 
   private _buildTrackedIds(): string[] {

@@ -1328,10 +1328,14 @@ let ElectricityPanelCard = class extends i {
   // ── HA card API ────────────────────────────────────────────────────────────
   setConfig(config) {
     if (!config) throw new Error("Invalid configuration");
+    const prev = this._config;
     this._config = config;
     this._trackedIds = this._buildTrackedIds();
-    if (!this._historyFetching) this._historyCache.clear();
-    void this._fetchHistory();
+    const appearanceOnly = prev && (prev.graph_hours === config.graph_hours && JSON.stringify(prev.circuits) === JSON.stringify(config.circuits) && JSON.stringify(prev.hdo) === JSON.stringify(config.hdo) && JSON.stringify(prev.main_meter) === JSON.stringify(config.main_meter));
+    if (!appearanceOnly) {
+      if (!this._historyFetching) this._historyCache.clear();
+      void this._fetchHistory();
+    }
   }
   _buildTrackedIds() {
     if (!this._config) return [];
