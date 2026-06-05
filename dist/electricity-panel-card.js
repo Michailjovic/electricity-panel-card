@@ -1762,6 +1762,7 @@ let ElectricityPanelCard = class extends i {
     const refY = coords[coords.length - 1].y.toFixed(1);
     const lx = labelPos === "right" ? "98" : "2";
     const anchor = labelPos === "right" ? "end" : "start";
+    const hideLabels = labelPos === "none";
     return b`<svg viewBox="0 0 ${W} ${H2}" preserveAspectRatio="none" class="sparkline">
       <defs>
         <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
@@ -1771,13 +1772,14 @@ let ElectricityPanelCard = class extends i {
         </linearGradient>
       </defs>
       <path d="${areaPath}" fill="url(#${gid})"/>
-      ${showRef ? b`<line x1="0" y1="${refY}" x2="${W}" y2="${refY}" class="spark-ref"/>` : A}
+      <line x1="0" y1="${refY}" x2="${W}" y2="${refY}"
+        class="spark-ref${showRef ? "" : " spark-hidden"}"/>
       <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.5"
         stroke-linejoin="round" stroke-linecap="round"/>
-      ${labelPos !== "none" ? b`
-        <text x="${lx}" y="10" text-anchor="${anchor}" class="spark-label">${this._fmtW(vMax)}</text>
-        <text x="${lx}" y="${H2 - 2}" text-anchor="${anchor}" class="spark-label spark-label-min">${this._fmtW(vMin)}</text>
-      ` : A}
+      <text x="${lx}" y="10" text-anchor="${anchor}"
+        class="spark-label${hideLabels ? " spark-hidden" : ""}">${this._fmtW(vMax)}</text>
+      <text x="${lx}" y="${H2 - 2}" text-anchor="${anchor}"
+        class="spark-label spark-label-min${hideLabels ? " spark-hidden" : ""}">${this._fmtW(vMin)}</text>
     </svg>`;
   }
   // ── Render: HDO schedule ───────────────────────────────────────────────────
@@ -2293,6 +2295,7 @@ ElectricityPanelCard.styles = i$3`
     .spark-label { font-size: 8px; fill: rgba(255,255,255,.75); font-family: inherit; stroke: #111318; stroke-width: 3px; paint-order: stroke fill; }
     .spark-label-min { fill: rgba(255,255,255,.45); }
     .spark-ref { stroke: rgba(255,255,255,.25); stroke-width: 0.8; stroke-dasharray: 2 3; }
+    .spark-hidden { display: none; }
   `;
 __decorateClass([
   r()

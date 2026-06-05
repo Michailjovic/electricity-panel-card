@@ -541,6 +541,10 @@ export class ElectricityPanelCard extends LitElement {
     const refY = coords[coords.length - 1].y.toFixed(1);
     const lx = labelPos === 'right' ? '98' : '2';
     const anchor = labelPos === 'right' ? 'end' : 'start';
+    // All SVG children must be in the main svg template so Lit uses SVG namespace.
+    // Conditional sub-templates (html``) create elements in HTML namespace, making
+    // <text> and <line> invisible inside SVG. Visibility is controlled via CSS class.
+    const hideLabels = labelPos === 'none';
     return html`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="sparkline">
       <defs>
         <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
@@ -550,13 +554,14 @@ export class ElectricityPanelCard extends LitElement {
         </linearGradient>
       </defs>
       <path d="${areaPath}" fill="url(#${gid})"/>
-      ${showRef ? html`<line x1="0" y1="${refY}" x2="${W}" y2="${refY}" class="spark-ref"/>` : nothing}
+      <line x1="0" y1="${refY}" x2="${W}" y2="${refY}"
+        class="spark-ref${showRef ? '' : ' spark-hidden'}"/>
       <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.5"
         stroke-linejoin="round" stroke-linecap="round"/>
-      ${labelPos !== 'none' ? html`
-        <text x="${lx}" y="10" text-anchor="${anchor}" class="spark-label">${this._fmtW(vMax)}</text>
-        <text x="${lx}" y="${H - 2}" text-anchor="${anchor}" class="spark-label spark-label-min">${this._fmtW(vMin)}</text>
-      ` : nothing}
+      <text x="${lx}" y="10" text-anchor="${anchor}"
+        class="spark-label${hideLabels ? ' spark-hidden' : ''}">${this._fmtW(vMax)}</text>
+      <text x="${lx}" y="${H - 2}" text-anchor="${anchor}"
+        class="spark-label spark-label-min${hideLabels ? ' spark-hidden' : ''}">${this._fmtW(vMin)}</text>
     </svg>`;
   }
 
@@ -1127,6 +1132,7 @@ export class ElectricityPanelCard extends LitElement {
     .spark-label { font-size: 8px; fill: rgba(255,255,255,.75); font-family: inherit; stroke: #111318; stroke-width: 3px; paint-order: stroke fill; }
     .spark-label-min { fill: rgba(255,255,255,.45); }
     .spark-ref { stroke: rgba(255,255,255,.25); stroke-width: 0.8; stroke-dasharray: 2 3; }
+    .spark-hidden { display: none; }
   `;
 }
 
