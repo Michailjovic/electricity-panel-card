@@ -1832,7 +1832,7 @@ let ElectricityPanelCard = class extends i {
     const cur = hdo.currency ?? "Kč";
     return `${cost.toFixed(2)} ${cur}`;
   }
-  _renderSparkline(entityId) {
+  _renderSparkline(entityId, noLabels = false) {
     if (!entityId) return A;
     const data = this._historyCache.get(entityId);
     if (!data || data.length < 2) return A;
@@ -1865,7 +1865,7 @@ let ElectricityPanelCard = class extends i {
     const anchor = labelPos === "right" ? "end" : "start";
     const yMax = pad.toFixed(1);
     const yMin = (H2 - pad).toFixed(1);
-    const hideLabels = labelPos === "none";
+    const hideLabels = noLabels || labelPos === "none";
     const refColor = this._config.sparkline_ref_color ?? "rgba(255,255,255,0.35)";
     return b`<svg viewBox="0 0 ${W} ${H2}" preserveAspectRatio="none" class="sparkline">
       <defs>
@@ -2076,7 +2076,7 @@ let ElectricityPanelCard = class extends i {
 
         ${expanded && hasDevices ? b`<div class="devices-list">${c2.devices.map((d2) => this._renderDevice(d2))}</div>` : A}
         ${this._config.sparkline_1phase ? b`
-          <div class="circuit-spark-wrap">${this._renderSparkline(c2.power)}</div>
+          <div class="circuit-spark-wrap">${this._renderSparkline(c2.power, true)}</div>
         ` : A}
       </div>
     `;

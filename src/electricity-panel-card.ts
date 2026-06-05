@@ -539,7 +539,7 @@ export class ElectricityPanelCard extends LitElement {
     return `${cost.toFixed(2)} ${cur}`;
   }
 
-  private _renderSparkline(entityId: string | undefined): TemplateResult | typeof nothing {
+  private _renderSparkline(entityId: string | undefined, noLabels = false): TemplateResult | typeof nothing {
     if (!entityId) return nothing;
     const data = this._historyCache.get(entityId);
     if (!data || data.length < 2) return nothing;
@@ -576,7 +576,7 @@ export class ElectricityPanelCard extends LitElement {
     // so the dashed lines cross the entire graph. Independent of label visibility.
     const yMax = pad.toFixed(1);
     const yMin = (H - pad).toFixed(1);
-    const hideLabels = labelPos === 'none';
+    const hideLabels = noLabels || labelPos === 'none';
     const refColor = this._config.sparkline_ref_color ?? 'rgba(255,255,255,0.35)';
     return html`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="sparkline">
       <defs>
@@ -805,7 +805,7 @@ export class ElectricityPanelCard extends LitElement {
           ? html`<div class="devices-list">${c.devices!.map(d => this._renderDevice(d))}</div>`
           : nothing}
         ${this._config.sparkline_1phase ? html`
-          <div class="circuit-spark-wrap">${this._renderSparkline(c.power)}</div>
+          <div class="circuit-spark-wrap">${this._renderSparkline(c.power, true)}</div>
         ` : nothing}
       </div>
     `;
