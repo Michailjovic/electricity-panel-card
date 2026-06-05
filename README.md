@@ -6,6 +6,16 @@ Configured entirely through a built-in GUI editor. No YAML editing required.
 
 ---
 
+## Screenshots
+
+![Electricity Panel Card — overview](docs/screenshot-overview.png)
+*Main meter, HDO tariff bar, 3-phase circuits with sparkline graphs and single-phase breakers*
+
+![Electricity Panel Card — circuit detail](docs/screenshot-circuit.png)
+*Expanded circuit with device list, load bar and last-updated badge*
+
+---
+
 ## Features
 
 - **Panel overview** — main 3-phase meter plus all circuit breakers in one view
