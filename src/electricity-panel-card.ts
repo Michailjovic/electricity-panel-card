@@ -552,13 +552,13 @@ export class ElectricityPanelCard extends LitElement {
     const vals = data.map(p => p.v);
     const vMin = Math.min(...vals), vMax = Math.max(...vals);
     const vRange = vMax - vMin || 0.01;
-    // Reserve space for HTML labels so graph data doesn't overlap them
-    const xPad = labelPos === 'none' ? 0 : 40;
-    const xStart = labelPos === 'left' ? xPad : 0;
-    const xEnd   = labelPos === 'right' ? W - xPad : W;
-    const xRange = xEnd - xStart || 1;
+    // Graph always fills full SVG width; label area is reserved via CSS padding
+    // on the wrapper so pixel width of label == pixel width of padding regardless
+    // of how wide the SVG stretches (preserveAspectRatio="none" makes SVG user
+    // units != CSS pixels, so reserving space in SVG units was broken).
+    const xRange = W;
     const coords = data.map(p => ({
-      x: xStart + ((p.t - tMin) / tRange) * xRange,
+      x: ((p.t - tMin) / tRange) * xRange,
       y: (H - pad) - ((p.v - vMin) / vRange) * (H - pad * 2),
     }));
     let linePath = `M ${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}`;
@@ -573,8 +573,9 @@ export class ElectricityPanelCard extends LitElement {
     const yMin = (H - pad).toFixed(1);
     const hideLabels = noLabels || labelPos === 'none';
     const refColor = this._config.sparkline_ref_color ?? 'rgba(255,255,255,0.35)';
+    const wrapPad = hideLabels ? '' : ` spark-pad-${labelPos}`;
     return html`
-      <div class="sparkline-wrap">
+      <div class="sparkline-wrap${wrapPad}">
         <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="sparkline">
           <defs>
             <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
@@ -1180,6 +1181,8 @@ export class ElectricityPanelCard extends LitElement {
     .note-row .device-name { font-style: italic; }
 
     .sparkline-wrap { position: relative; width: 100%; height: 38px; display: block; margin-top: 6px; }
+    .sparkline-wrap.spark-pad-left  { padding-left:  40px; }
+    .sparkline-wrap.spark-pad-right { padding-right: 40px; }
     .sparkline { width: 100%; height: 100%; display: block; overflow: visible; }
     .spark-lbls { position: absolute; top: 0; bottom: 0; width: 40px; display: flex; flex-direction: column; justify-content: space-between; padding: 2px 2px; pointer-events: none; }
     .spark-lbls-left { left: 0; align-items: flex-start; }
@@ -1193,11 +1196,15 @@ export class ElectricityPanelCard extends LitElement {
 }
 
 (window as unknown as Record<string, unknown>)['customCards'] ??= [];
-const _EP_VERSION = '5.0.4';
+const _EP_VERSION = '5.0.5';
 ((window as unknown as Record<string, unknown[]>)['customCards']).push({
   type: 'electricity-panel-card',
   name: 'Electricity Panel Card',
   description: `Circuit breaker panel — power, current, daily energy, HDO tariff (v${_EP_VERSION})`,
+  preview: false,
+});
+console.info(`%c electricity-panel-card %c v${_EP_VERSION} `, 'background:#22c55e;color:#fff;font-weight:bold', 'background:#1f2937;color:#22c55e');
+: `Circuit breaker panel — power, current, daily energy, HDO tariff (v${_EP_VERSION})`,
   preview: false,
 });
 console.info(`%c electricity-panel-card %c v${_EP_VERSION} `, 'background:#22c55e;color:#fff;font-weight:bold', 'background:#1f2937;color:#22c55e');

@@ -4,8 +4,8 @@ node_modules/
 # Local dev config — contains HA token, never commit
 .env
 
-# Vite build cache
-*.mjs
+# Vite build cache and dev server temp files
+*.timestamp-*.mjs
 .vite/
 
 # Build output — dist/ IS committed (required for HACS)

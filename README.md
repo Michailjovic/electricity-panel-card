@@ -121,6 +121,8 @@ See the [`examples/`](examples/) folder for a standalone HDO dashboard YAML view
 npm install
 npm run build      # build to dist/
 npm run watch      # rebuild on file changes
+npm run deploy     # build + bump HA resource URL (dev workflow)
+npm run bump       # bump HA resource URL only, no rebuild (after HACS update)
 ```
 
 The output `dist/electricity-panel-card.js` is committed to the repository — HACS requires this.

@@ -1,372 +1,350 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
-## [5.0.4] - 2026-06-05
+## [5.0.5] — 2026-06-05
+*Sparkline labels no longer overlap the graph on wide cards; new `npm run bump` for post-HACS cache-busting.*
 
-### 🔧 Fixed
+### 🐛 Fixed
 
-- **Sparkline labels overlapping graph** — the graph path now reserves horizontal
-  space for HTML labels the same way the old SVG text approach did. With
-  `sparkline_labels: 'left'` the graph starts at x=40, with `'right'` it ends at
-  x=60, so the label area and graph data never overlap.
+- **Sparkline label overlap on wide cards** — the graph now always fills its full
+  SVG content box. The wrapper uses CSS `padding-left/right: 40 px` to reserve label
+  space instead of SVG user units. With `preserveAspectRatio="none"` those SVG units
+  scale with card width, so on wide single-phase cards the reserved area spanned
+  hundreds of CSS pixels while the label stayed 40 px — wasting space and still
+  overlapping on some widths.
 
----
+### ⚙️ Tooling
 
-## [5.0.3] - 2026-06-05
-
-### 🔧 Fixed
-
-- **Sparkline labels — consistent font size on all card widths** — min/max labels
-  are now rendered as HTML elements overlaid on the SVG instead of SVG `<text>`
-  nodes. With `preserveAspectRatio="none"`, Chromium scaled the SVG transform
-  (including stroke-width and font metrics) with the horizontal axis, making
-  labels on wide single-phase cards appear significantly larger than those on
-  narrow 3-phase phase cells. HTML labels are controlled purely by CSS and are
-  immune to SVG transforms — font size is identical on all sparklines regardless
-  of card width.
+- **`npm run bump`** — skips the build and only updates the Lovelace resource URL
+  (`?v=<timestamp>`) via the HA REST API. Run once after a HACS update to force
+  the browser to fetch the new file without a hard reload.
 
 ---
 
-## [5.0.2] - 2026-06-05
+## [5.0.4] — 2026-06-05
+*Patch: sparkline label/graph overlap (previous approach, superseded by 5.0.5).*
 
-### 🔧 Fixed
+### 🐛 Fixed
+
+- **Sparkline labels overlapping graph** — the graph path reserved horizontal space
+  for HTML labels in SVG user units (`x=40` for left, `x=60` end for right). This
+  partially fixed overlap but was still sensitive to card width; fully replaced in 5.0.5.
+
+---
+
+## [5.0.3] — 2026-06-05
+*Sparkline min/max labels rendered as HTML elements — immune to SVG horizontal scaling.*
+
+### 🐛 Fixed
+
+- **Inconsistent label font size across card widths** — min/max labels switched from
+  SVG `<text>` nodes to HTML elements overlaid on the SVG. With `preserveAspectRatio="none"`
+  Chromium scaled SVG font metrics with the horizontal axis, making labels on wide
+  single-phase cards appear significantly larger than on narrow 3-phase phase cells.
+  HTML labels are controlled purely by CSS and scale identically everywhere.
+
+---
+
+## [5.0.2] — 2026-06-05
+*Version logging added to console; single-phase sparkline labels re-enabled.*
+
+### 🐛 Fixed
 
 - **Single-phase sparkline font size** — min/max labels now use `font-size="8"` as
-  an SVG presentation attribute (user units) instead of CSS `font-size: 8px`. With
-  `preserveAspectRatio="none"` the SVG Y-scale is always 1:1 (viewBox height 38 =
-  38 px), so SVG user units give a consistent 8 px text height on any card width.
-  Labels are fully restored on single-phase sparklines.
+  an SVG presentation attribute (user units) instead of CSS `font-size: 8px`. SVG
+  Y-scale is always 1:1 (viewBox height 38 = 38 px), so user units give consistent
+  8 px text on any card width. Labels are fully restored on single-phase sparklines.
 
-- **Version logging** — the card now prints its version to the browser console on
-  load (`electricity-panel-card v5.0.2`). This makes it easy to confirm which
-  version is actually cached in the browser without opening DevTools network tab.
-
----
-
-## [5.0.1] - 2026-06-05
-
-### 🔧 Fixed
-
-- **Single-phase sparkline font scaling** — min/max labels are now hidden on
-  single-phase circuit sparklines. The SVG with `preserveAspectRatio="none"`
-  stretches across the full card width, causing browsers to scale CSS `font-size`
-  proportionally with the X transform — making labels appear far larger than on
-  narrow 3-phase phase cells. The graph shape is unaffected; labels remain
-  available on main meter and 3-phase phase cells where the SVG width is
-  constrained.
+- **Version logging** — the card prints its version to the browser console on load
+  (`electricity-panel-card v5.0.2`), making it easy to confirm which version is
+  actually cached without opening DevTools network tab.
 
 ---
 
-## [5.0.0] - 2026-06-05
+## [5.0.1] — 2026-06-05
+*Hotfix: hidden labels on single-phase sparklines to avoid scaling artefacts.*
 
-This release consolidates all development since the v4.0.0 dark-theme foundation
-into a single major version. The card gains live power history graphs, real-time
-cost tracking, per-phase voltage monitoring, a last-updated staleness indicator,
-improved mobile layout, and a significantly expanded GUI editor.
+### 🐛 Fixed
 
-### Added
+- **Single-phase sparkline font scaling** — min/max labels hidden on single-phase
+  circuit sparklines. The SVG stretches across the full card width with
+  `preserveAspectRatio="none"`, causing browsers to scale CSS `font-size`
+  proportionally with the X transform — labels appeared far larger than on narrow
+  3-phase cells. Labels remain available on main meter and 3-phase cards where SVG
+  width is constrained. *(Fully fixed in 5.0.3.)*
 
-- **Sparkline power history graphs** — phase cells on the main meter and 3-phase
-  circuits display a smooth SVG power history graph fetched from the HA history
-  API (compressed format, HA 2023.3+). The history window is configurable
-  (1–24 h, default 3 h). Options: line colour, min/max label position
-  (left / right / hidden), dashed min/max reference lines with configurable colour.
+---
 
-- **Single-phase circuit sparkline** — single-phase breaker cards can optionally
-  show the same power history graph below the metrics row, wrapped in a styled
-  dark container matching the phase-cell design. Off by default; enabled in
-  Graph settings.
+## [5.0.0] — 2026-06-05
 
-- **Sparkline visibility toggles** — individual on/off switches in Graph settings
-  for main meter graphs, 3-phase circuit graphs, and single-phase circuit graphs.
+> **Major release** — live power history graphs, real-time cost tracking, per-phase voltage,
+> last-updated staleness badge, improved mobile layout, and a significantly expanded GUI editor.
+> Consolidates all development since the v4.0.0 dark-theme foundation.
 
-- **Daily cost tracking** — each circuit and the main meter show accumulated cost
-  for the current day (e.g. `1.93 Kč`), computed by integrating power history and
-  splitting NT / VT tariff periods using HDO switch history with schedule fallback.
-  Requires `nt_price` / `vt_price` configured under HDO.
+### ✨ Added
 
-- **Per-phase voltage — main meter** — `voltage_l1`, `voltage_l2`, `voltage_l3`
-  entity fields on the main meter; shown in each phase cell below the current
-  reading. Legacy single `voltage` entity still supported.
+- **Sparkline power history graphs** — phase cells on the main meter and 3-phase circuits
+  display smooth SVG graphs from the HA history API (compressed format, HA 2023.3+).
+  Configurable window (1–24 h, default 3 h), line colour, min/max label position
+  (left / right / hidden), and dashed reference lines with configurable colour.
 
-- **Per-phase voltage — 3-phase circuits** — `voltage_l1`, `voltage_l2`,
-  `voltage_l3` fields on individual 3-phase circuit breakers, displayed the same
-  way as on the main meter.
+- **Single-phase circuit sparkline** — breaker cards can optionally show a full-width
+  power history graph below the metrics row. Off by default; enabled in Graph settings.
 
-- **Voltage — single-phase circuits** — existing `voltage` field now shown in the
-  circuit footer alongside current and energy.
+- **Sparkline visibility toggles** — independent on/off switches for main meter graphs,
+  3-phase circuit graphs, and single-phase circuit graphs.
 
-- **Last-updated age badge** — each circuit card and the main meter display a
-  `↻ Xs / Xm / Xh` indicator showing how long ago the primary entity was last
-  updated. Colour transitions through three configurable thresholds (short /
-  medium / long). Globally toggled in Graph settings.
+- **Daily cost tracking** — each circuit and the main meter show accumulated cost for the
+  current day (e.g. `1.93 Kč`), computed by integrating power history and splitting
+  NT / VT tariff periods using HDO switch history with schedule fallback.
+  Requires `nt_price` / `vt_price` under HDO.
 
-- **Entity validation in editor** — entity_id input fields turn amber and show a
-  warning when the configured entity does not exist in Home Assistant's state
-  machine, helping catch typos before saving.
+- **Per-phase voltage — main meter** — `voltage_l1/2/3` entity fields; shown in each phase
+  cell below the current reading. Legacy single `voltage` entity still supported.
 
-### Changed
+- **Per-phase voltage — 3-phase circuits** — same `voltage_l1/2/3` fields on individual
+  3-phase circuit breakers, displayed identically to the main meter.
+
+- **Voltage — single-phase circuits** — `voltage` field now shown in the circuit footer
+  alongside current and energy.
+
+- **Last-updated age badge** — `↻ Xs / Xm / Xh` indicator on each circuit and the main
+  meter, showing how long ago the primary entity was last updated. Three configurable
+  colour thresholds. Globally toggled in Graph settings.
+
+- **Entity validation in editor** — entity_id fields turn amber with a warning when the
+  entity does not exist in HA's state machine.
+
+### 🔄 Changed
+
+- **Mobile layout** — single-phase grid switches to one column at 480 px (was 360 px).
+  Phase cells reduce gap at 480 px and stack vertically at 360 px.
+
+- **Editor: "Graph settings" section** — renamed from "Sparkline graphs"; now also contains
+  history period and age badge controls, grouped into subsections.
+
+- **Editor: "Main meter (optional)"** — label updated to clarify the section is optional.
+
+### 🐛 Fixed
+
+- **History API format** — parser now supports both legacy (`state` / `last_changed`) and
+  compressed HA 2023.3+ format (`s` / `lu` / `lc` as Unix float seconds). Previously all
+  power sensor values were discarded as NaN.
+
+- **kW unit conversion in history cache** — power entities in kW were stored raw and
+  divided by 1000 again during integration, producing costs ~1000× too small. The fetcher
+  now normalises all cached values to watts using `unit_of_measurement`.
+
+- **Daily cost — multi-phase summation** — `_calcDailyCost` now sums all supplied phase
+  entities independently. Cost reflects total consumption, not just L1.
+
+- **NT/VT split accuracy** — `_isNTAt` uses HDO switch history only within the recorded
+  window; falls back to the tariff schedule for earlier timestamps.
+
+- **`setConfig` race condition** — cache was cleared unconditionally in `setConfig`. Now
+  only cleared when no fetch is in progress.
+
+- **Sparkline reference lines** — `sparkline_ref_line: true` now shows both lines
+  regardless of `sparkline_labels` setting.
+
+- **Single-phase device list layout** — devices under single-phase breakers are now
+  rendered single-column instead of the 3-column grid intended for 3-phase circuits.
+
+---
+
+## [4.10.0] — 2026-06-05
+*Per-phase voltage on main meter; styled sparkline background on single-phase cards.*
+
+### ✨ Added
+
+- **Per-phase voltage on main meter** — `voltage_l1/2/3` entity fields. Each phase cell
+  shows voltage below the current value. Legacy single `voltage` entity still supported
+  (shown on L1 when no per-phase entities are set).
+
+- **Single-phase circuit sparkline background** — sparkline wrapped in a dark container
+  matching the visual style of phase cells in 3-phase and main meter cards.
+
+---
+
+## [4.9.0] — 2026-06-05
+*Per-phase voltage on 3-phase circuits; single-phase sparkline; sparkline visibility toggles.*
+
+### ✨ Added
+
+- **Per-phase voltage on 3-phase circuits** — `voltage_l1/2/3` fields added to circuit
+  config. Each phase cell shows voltage below the current value.
+
+- **Single-phase circuit sparkline** — full-width power history graph below the metrics
+  row. Disabled by default; enable via Graph settings → Sparkline visibility.
+
+- **Sparkline visibility toggles** — three independent checkboxes: main meter cells,
+  3-phase circuit cells, single-phase cards.
+
+---
+
+## [4.8.0] — 2026-06-05
+*Voltage on main meter, entity validation in editor, mobile layout improvements.*
+
+### ✨ Added
+
+- **Voltage on main meter** — `voltage` entity displayed in the meter header next to
+  energy and cost.
+
+- **Entity validation in editor** — entity_id fields turn amber with a warning when the
+  configured entity does not exist in HA.
+
+### 🔄 Changed
 
 - **Mobile layout** — single-phase circuit grid switches to one column at 480 px
-  container width (was 360 px). Phase cells reduce gap at 480 px and stack
-  vertically at 360 px.
+  (previously 360 px). Phase cells grid reduces gap at 480 px, stacks at 360 px.
 
-- **Graph settings section** — the editor's "Sparkline graphs" section is renamed
-  to "Graph settings" and now also contains the history period field and age badge
-  controls, grouped into subsections.
-
-- **Main meter — optional label** — the editor section is labelled
-  "Main meter (optional)" to clarify that the whole section can be left
-  unconfigured.
-
-### Fixed
-
-- **History API format** — parser now supports both the legacy HA history format
-  (`state` / `last_changed`) and the compressed format introduced in HA 2023.3
-  (`s` / `lu` / `lc` as Unix float seconds). Previously, all power sensor values
-  were discarded as NaN.
-
-- **kW unit conversion in history cache** — power entities reporting in kW were
-  stored raw and divided by 1000 again during cost integration, producing cost
-  values ~1000× too small. The history fetcher now normalises all cached values
-  to watts using the entity's `unit_of_measurement`.
-
-- **Daily cost — multi-phase summation** — `_calcDailyCost` now sums energy
-  across all supplied phase entities independently. 3-phase circuits and the
-  main meter pass all three phase entities, so cost reflects total consumption
-  rather than just L1.
-
-- **NT/VT split accuracy** — `_isNTAt` now uses HDO switch history only for
-  timestamps within the recorded window, falling back to the tariff schedule for
-  earlier timestamps. A single history entry at midnight no longer causes the
-  entire preceding day to be misclassified.
-
-- **`setConfig` race condition** — history cache was cleared unconditionally in
-  `setConfig`. If called mid-fetch, freshly fetched data was erased. Cache is
-  now only cleared when no fetch is in progress.
-
-- **Sparkline reference lines** — `sparkline_ref_line: true` now correctly shows
-  both min and max reference lines regardless of `sparkline_labels` setting.
-
-- **Single-phase device list column layout** — devices under single-phase breakers
-  were incorrectly rendered in the 3-column grid intended for 3-phase circuits.
+- **Editor: "Main meter (optional)"** — section label updated for clarity.
 
 ---
 
-## [4.10.0] - 2026-06-05
+## [4.7.1] — 2026-06-05
+*Hotfix: CSS truncation restored sparklines and several other styles.*
 
-### Added
+### 🐛 Fixed
 
-- **Per-phase voltage on main meter** — `voltage_l1`, `voltage_l2`, `voltage_l3`
-  entity fields added to the main meter. Each phase cell now shows voltage below
-  the current value, identical to 3-phase circuit cards. A legacy single `voltage`
-  entity is still supported for backward compatibility (shown on L1 when no
-  per-phase entities are set). Configurable in the editor under Main meter →
-  Voltage (V per phase).
+- **Sparkline font and card styles restored** — a file truncation silently dropped
+  `.toggle`, `.status-dot`, `.expand-btn`, `.device-row`, `.sparkline`, `.spark-label`
+  and related CSS rules from the bundle. All rules restored.
 
-- **Single-phase circuit sparkline background** — the sparkline on single-phase
-  circuit cards is now wrapped in a dark container matching the visual style of
-  phase cells in 3-phase circuit and main meter cards.
+- **Age badge GUI labels** — colour-picker labels in the editor are now
+  "Short / Medium / Long" instead of "Fresh / Amber / Red".
 
 ---
 
-## [4.9.0] - 2026-06-05
+## [4.7.0] — 2026-06-05
+*Age badge on main meter; full GUI controls for badge thresholds and colours.*
 
-### Added
+### ✨ Added
 
-- **Per-phase voltage on 3-phase circuits** — `voltage_l1`, `voltage_l2`,
-  `voltage_l3` entity fields added to circuit configuration. When set, each
-  phase cell in a 3-phase circuit card shows voltage below the current value.
-  Configurable via the GUI editor under each circuit's per-phase entity section.
+- **Age badge — main meter** — last-updated badge appears on the main meter, using the
+  first available phase power entity as the timestamp source.
 
-- **Single-phase circuit sparkline** — circuit cards can now show a power history
-  graph (full-width, below the metrics row). Enable in the editor: Graph settings
-  → Sparkline visibility → "Single-phase circuit graph". Disabled by default.
+- **Age badge — GUI controls** — global on/off toggle, configurable amber and red
+  thresholds (minutes, default 5 / 15), and colour pickers for all three states.
 
-- **Sparkline visibility toggles** — three independent checkboxes in Graph settings
-  control which sparklines are shown: main meter phase cells, 3-phase circuit phase
-  cells, and single-phase circuit cards.
+### 🔄 Changed
 
----
-
-## [4.8.0] - 2026-06-05
-
-### Added
-
-- **Voltage on main meter** — the `voltage` entity field is now displayed in the
-  main meter header next to energy and cost. The field is configured in the editor
-  under Main meter → Energy & voltage.
-
-- **Entity validation in editor** — entity_id fields now turn amber and show a
-  warning when the configured entity does not exist in Home Assistant. Useful for
-  catching typos or renamed entities without having to inspect the card.
-
-### Changed
-
-- **Mobile layout** — the single-phase circuit grid switches to one column at
-  480 px container width (previously 360 px), covering most phone screen sizes.
-  The phase cells grid reduces gap at 480 px and stacks to one column at 360 px
-  for very narrow containers.
-
-- **Editor: Main meter (optional)** — the section label now reads
-  "Main meter (optional)" to make clear that the section can be left unconfigured.
+- **Editor: "Graph settings" section** — renamed from "Sparkline graphs". History period
+  and age badge controls moved here, grouped as subsections.
 
 ---
 
-## [4.7.1] - 2026-06-05
+## [4.6.0] — 2026-06-05
+*New: last-updated age badge on all circuit cards.*
 
-### Fixed
+### ✨ Added
 
-- **Sparkline font restored** — a file truncation during development caused the
-  `.toggle`, `.status-dot`, `.expand-btn`, `.device-row`, `.sparkline`,
-  `.spark-label` and related CSS rules to be silently dropped from the bundle,
-  breaking sparkline label text and several other card styles. All rules restored.
-
-- **Age badge GUI labels** — the colour-picker labels in the "Last-updated badge"
-  editor section are now "Short / Medium / Long" instead of "Fresh / Amber / Red",
-  matching the intent of the thresholds (duration since last update).
+- **Last-updated badge** — `↻ 30s / 2m / 1h` indicator in the footer of every circuit
+  card. Colour: grey < 5 min, amber > 5 min, red > 15 min. Hidden when no entity is
+  configured.
 
 ---
 
-## [4.7.0] - 2026-06-05
+## [4.5.1] — 2026-06-05
+*Fix: sparkline reference lines now independent of label position.*
 
-### Added
+### 🐛 Fixed
 
-- **Age badge — main meter** — the last-updated badge now also appears on the
-  main meter, using the first available phase power entity as the timestamp source.
-
-- **Age badge — GUI controls** — the card editor now exposes full control over
-  the age badge: a global on/off toggle, configurable amber and red thresholds
-  (in minutes, default 5 / 15), and individual colour pickers for all three
-  states (fresh / amber / red).
-
-### Changed
-
-- **Editor: Graph settings section** — the "Sparkline graphs" editor section has
-  been renamed to "Graph settings". The history period field (`graph_hours`) has
-  been moved into this section. Sparkline options and the new age badge controls
-  are grouped within it as subsections.
+- **Sparkline reference lines** — `sparkline_ref_line: true` shows both min and max
+  lines regardless of `sparkline_labels`. Previously hidden whenever labels were `none`.
 
 ---
 
-## [4.6.0] - 2026-06-05
+## [4.4.0] — 2026-06-04
+*Major cost tracking fixes: kW unit conversion, multi-phase summation, NT/VT accuracy.*
 
-### Added
+### 🐛 Fixed
 
-- **Last-updated badge** — each circuit card now shows how long ago its primary
-  entity was last updated by Home Assistant (e.g. `↻ 30s`, `↻ 2m`, `↻ 1h`).
-  The badge appears in the footer of single-phase breakers and next to the total
-  power of three-phase breakers. Colour indicates data freshness: muted grey
-  under 5 minutes, amber above 5 minutes, red above 15 minutes. The badge is
-  hidden when no power, current, or switch entity is configured for the circuit.
+- **Daily cost: kW unit conversion** — power entities reporting in kW were stored raw
+  and divided by 1000 again during integration (costs ~1000× too small). Fetcher now
+  normalises to watts via `unit_of_measurement`.
 
----
+- **Daily cost: multi-phase summation** — `_calcDailyCost` accepts variadic entity IDs
+  and sums across all phases. Cost now reflects total consumption, not just L1.
 
-## [4.5.1] - 2026-06-05
+- **Daily cost: consistent display** — removed the `Kč/h` live-rate fallback; all
+  circuits show either `X.XX Kč` (today so far) or nothing. Results below `0.005 Kč`
+  are suppressed.
 
-### Fixed
-
-- **Sparkline reference lines** — `sparkline_ref_line: true` now correctly shows
-  both the max and min reference lines regardless of the `sparkline_labels` setting.
-  Previously the lines were hidden whenever `sparkline_labels` was set to `none`,
-  even though reference lines and labels are independent features.
+- **NT/VT split accuracy** — `_isNTAt` uses HDO switch history only within the recorded
+  window, falling back to the tariff schedule for earlier timestamps.
 
 ---
 
-## [4.4.0] - 2026-06-04
+## [4.3.0] — 2026-06-04
+*Root cause fix: HA 2023.3+ compressed history format now parsed correctly.*
 
-### Fixed
-
-- **Daily cost: unit conversion for kW sensors** — power entities that report in kW
-  (e.g. `0.223 kW`) were stored raw in the history cache and divided by 1000 again
-  during cost integration, producing values ~1000x too small (e.g. `0.01 Kč` instead
-  of `9 Kč`). The history fetcher now reads `unit_of_measurement` from the current
-  entity state and scales every cached value to watts. `_watts()` already did this for
-  live display; the history cache now matches.
-
-- **Daily cost: multi-phase summation** — `_calcDailyCost` now accepts variadic entity
-  IDs and sums energy across all of them. Main meter and 3-phase circuits pass all three
-  phase entities so cost reflects total consumption, not just L1 (which is often near
-  0 W while L3 carries most of the load).
-
-- **Daily cost: consistent Kč display** — removed the `Kč/h` fallback that appeared on
-  circuits without sufficient history. All circuits now show either `X.XX Kč` (today so
-  far) or nothing. Results below `0.005 Kč` are suppressed.
-
-- **NT/VT split accuracy** — `_isNTAt` now uses HDO switch history only for timestamps
-  within the recorded window. For earlier timestamps it falls back to the tariff
-  schedule, which is always authoritative. A single history entry at midnight previously
-  caused the entire preceding day to be classified as one tariff.
-
----
-
-## [4.3.0] - 2026-06-04
-
-### Fixed
+### 🐛 Fixed
 
 - **Sparkline graphs and daily cost not showing** — `processEntries` used the old HA
-  history format (`e.state`, `e.last_changed`) but HA 2023.3+ returns a compressed
-  format (`e.s` for state, `e.lu`/`e.lc` as Unix float seconds). All power sensor
-  values were parsed as `NaN` and discarded; only the HDO switch survived because its
-  boolean check (`=== 'on'`) returned `0` rather than `NaN`. Updated parser supports
-  both formats with fallback.
+  history format (`e.state` / `e.last_changed`) but HA 2023.3+ returns a compressed
+  format (`e.s` / `e.lu` / `e.lc` as Unix float seconds). All power sensor values were
+  parsed as NaN. Updated parser supports both formats.
 
-- **`setConfig` race condition** — `_historyCache` was cleared unconditionally in
-  `setConfig`. If called while a fetch was in progress (between the two `await` points),
-  it erased freshly fetched data. Cache is now only cleared when no fetch is running.
+- **`setConfig` race condition** — history cache cleared unconditionally in `setConfig`
+  could erase freshly fetched data mid-fetch. Cache now only cleared when no fetch is
+  in progress.
 
-### Changed
+### 🔄 Changed
 
-- `processEntries` emits a `console.warn` per entity when 0 valid data points survive
-  filtering, including a raw sample to make regressions immediately visible.
+- `processEntries` emits a `console.warn` with a raw sample when 0 valid data points
+  survive filtering, making regressions immediately visible in DevTools.
 
 ---
 
-## [4.2.2] - 2026-06-03
+## [4.2.2] — 2026-06-03
+*Fix: device list under single-phase breakers uses correct single-column layout.*
 
-### Fixed
+### 🐛 Fixed
 
-- **Devices under single-phase breakers shown in three columns** — single-phase breaker
-  device lists were rendered in the `.tp-devices-grid` (3-column) intended for 3-phase
-  circuits. Now uses `.devices-list` — full width, single column.
+- **Devices under single-phase breakers in 3 columns** — device lists were rendered in
+  the `.tp-devices-grid` (3-column) intended for 3-phase circuits. Now uses
+  `.devices-list` — full width, single column.
 
 ---
 
-## [4.0.0] - 2026-06-03
+## [4.0.0] — 2026-06-03
 
-### Changed — Dark visual redesign
+> **Major release** — complete dark visual redesign. Card background locked to `#111318`;
+> every component updated to the dark palette.
 
-- Card background locked to `#111318` regardless of HA theme.
+### 🎨 Design
+
 - HDO bar: dark green/red tint, pulsing dot, large countdown, inline progress bar.
-- Main meter: dark surface, icon, uppercase label, phase cells on darker background.
-- Circuit cards: muted name, prominent power value, thin 2 px left border accent
+- Main meter: dark surface, icon, uppercase label, phase cells on a darker background.
+- Circuit cards: muted name, prominent 22 px power value, 2 px left border accent
   (green for active, amber for critical).
 - 3-phase circuits: dedicated `.three-phase-card` class, consistent with single-phase.
-- Schedule, timeline, devices: all updated to dark palette.
+- Schedule, timeline, devices: all updated to the dark palette.
 - Toggles: 32 px, dark-off (`#374151`), dark-green-on (`#16a34a`).
-- Load bar: 3 px, dark track (`#1f2937`), solid colour fill.
+- Load bar: 3 px height, dark track (`#1f2937`), solid colour fill.
 
 ---
 
-## [3.0.4] - 2026-06-03
+## [3.0.4] — 2026-06-03
+*Fix: dashboard freeze caused by non-standard `shouldUpdate` override.*
 
-### Fixed
+### 🐛 Fixed
 
 - **Dashboard freeze** — replaced the non-standard `shouldUpdate` override with a custom
-  `hass` getter/setter. `requestUpdate` is now called only when a tracked entity
-  actually changes, following the standard HA pattern for performance-sensitive cards.
+  `hass` getter/setter. `requestUpdate` is now called only when a tracked entity actually
+  changes, following the standard HA pattern for performance-sensitive cards.
 
 ---
 
-## [3.0.3] - 2026-06-03
+## [3.0.3] — 2026-06-03
+*Reverted Lit externalisation; Lit is bundled again.*
 
-### Fixed
+### 🐛 Fixed
 
 - **"Custom element doesn't exist"** — reverted Lit externalisation from 3.0.1. HA's
   import map does not reliably resolve `lit/decorators.js` as a bare specifier. Lit is
@@ -374,29 +352,31 @@ improved mobile layout, and a significantly expanded GUI editor.
 
 ---
 
-## [3.0.2] - 2026-06-03
+## [3.0.2] — 2026-06-03
+*Root cause fix: removed `shouldUpdate` override that froze all dashboards.*
 
-### Fixed
+### 🐛 Fixed
 
-- **All dashboards freezing (root cause)** — removed the custom `shouldUpdate` override.
-  It corrupted Lit's internal reactive-element update cycle, stalling every card on the
-  page.
-
----
-
-## [3.0.1] - 2026-06-03
-
-### Fixed
-
-- **All dashboards freezing** — externalised Lit from the bundle so the card uses HA's
-  built-in Lit instance instead of shipping its own copy. *(Superseded by 3.0.2,
-  reverted in 3.0.3.)*
+- **All dashboards freezing** — removed the custom `shouldUpdate` override that corrupted
+  Lit's internal reactive-element update cycle, stalling every card on the page.
 
 ---
 
-## [3.0.0] - 2026-06-03
+## [3.0.1] — 2026-06-03
+*Attempted fix: externalised Lit — superseded by 3.0.2 / reverted in 3.0.3.*
 
-### Changed — Visual redesign (light-theme iteration, superseded by 4.0.0)
+### 🐛 Fixed
+
+- **All dashboards freezing** — externalised Lit so the card uses HA's built-in instance.
+  *(Superseded by 3.0.2, reverted in 3.0.3.)*
+
+---
+
+## [3.0.0] — 2026-06-03
+
+> **Major release** — light-theme visual redesign. Superseded by the dark redesign in 4.0.0.
+
+### 🎨 Design
 
 - HDO hero card with gradient background, pulsing dot, large countdown.
 - Circuit cards: green glow on active, 22 px power value.
@@ -405,48 +385,48 @@ improved mobile layout, and a significantly expanded GUI editor.
 
 ---
 
-## [2.7.1] - 2026-06-03
+## [2.7.1] — 2026-06-03
 
-### Fixed
+### 🐛 Fixed
 
-- Removed confusing "NT remaining" total from collapsed schedule header.
+- Removed confusing "NT remaining" total from the collapsed schedule header.
 
 ---
 
-## [2.7.0] - 2026-06-03
+## [2.7.0] — 2026-06-03
 
-### Changed
+### 🔄 Changed
 
 - Collapsed schedule shows current tariff badge and time range inline.
 - Timeline bar shows a white marker at the current time position.
 
 ---
 
-## [2.6.0] - 2026-06-03
+## [2.6.0] — 2026-06-03
 
-### Added
+### ✨ Added
 
 - Current NT/VT slot visible in collapsed schedule header.
 - Channel group header shows summed watts and amperes.
 
 ---
 
-## [2.5.0] - 2026-06-03
+## [2.5.0] — 2026-06-03
 
-### Added
+### ✨ Added
 
 - Collapsible daily schedule (collapsed by default).
 - 3-phase device column layout: one column per phase under each circuit.
 
-### Fixed
+### 🐛 Fixed
 
 - Drag & drop reordering in the GUI editor restored.
 
 ---
 
-## [2.4.0] - 2026-06-02
+## [2.4.0] — 2026-06-02
 
-### Fixed
+### 🐛 Fixed
 
 - **Midnight VT bug** — PRE 605/606 presets were missing `00:00–01:00` and
   `22:00–00:00` NT windows. Data re-sourced from the official PRE HDO Excel.

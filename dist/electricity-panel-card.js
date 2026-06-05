@@ -1845,12 +1845,9 @@ let ElectricityPanelCard = class extends i {
     const vals = data.map((p2) => p2.v);
     const vMin = Math.min(...vals), vMax = Math.max(...vals);
     const vRange = vMax - vMin || 0.01;
-    const xPad = labelPos === "none" ? 0 : 40;
-    const xStart = labelPos === "left" ? xPad : 0;
-    const xEnd = labelPos === "right" ? W - xPad : W;
-    const xRange = xEnd - xStart || 1;
+    const xRange = W;
     const coords = data.map((p2) => ({
-      x: xStart + (p2.t - tMin) / tRange * xRange,
+      x: (p2.t - tMin) / tRange * xRange,
       y: H2 - pad - (p2.v - vMin) / vRange * (H2 - pad * 2)
     }));
     let linePath = `M ${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}`;
@@ -1865,8 +1862,9 @@ let ElectricityPanelCard = class extends i {
     const yMin = (H2 - pad).toFixed(1);
     const hideLabels = noLabels || labelPos === "none";
     const refColor = this._config.sparkline_ref_color ?? "rgba(255,255,255,0.35)";
+    const wrapPad = hideLabels ? "" : ` spark-pad-${labelPos}`;
     return b`
-      <div class="sparkline-wrap">
+      <div class="sparkline-wrap${wrapPad}">
         <svg viewBox="0 0 ${W} ${H2}" preserveAspectRatio="none" class="sparkline">
           <defs>
             <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
@@ -2417,6 +2415,8 @@ ElectricityPanelCard.styles = i$3`
     .note-row .device-name { font-style: italic; }
 
     .sparkline-wrap { position: relative; width: 100%; height: 38px; display: block; margin-top: 6px; }
+    .sparkline-wrap.spark-pad-left  { padding-left:  40px; }
+    .sparkline-wrap.spark-pad-right { padding-right: 40px; }
     .sparkline { width: 100%; height: 100%; display: block; overflow: visible; }
     .spark-lbls { position: absolute; top: 0; bottom: 0; width: 40px; display: flex; flex-direction: column; justify-content: space-between; padding: 2px 2px; pointer-events: none; }
     .spark-lbls-left { left: 0; align-items: flex-start; }
@@ -2443,7 +2443,7 @@ ElectricityPanelCard = __decorateClass([
   t("electricity-panel-card")
 ], ElectricityPanelCard);
 window["customCards"] ?? (window["customCards"] = []);
-const _EP_VERSION = "5.0.4";
+const _EP_VERSION = "5.0.5";
 window["customCards"].push({
   type: "electricity-panel-card",
   name: "Electricity Panel Card",
