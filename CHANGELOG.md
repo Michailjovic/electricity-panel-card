@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.8.0] - 2026-06-05
+
+### Added
+
+- **Voltage on main meter** — the `voltage` entity field is now displayed in the
+  main meter header next to energy and cost. The field is configured in the editor
+  under Main meter → Energy & voltage.
+
+- **Entity validation in editor** — entity_id fields now turn amber and show a
+  warning when the configured entity does not exist in Home Assistant. Useful for
+  catching typos or renamed entities without having to inspect the card.
+
+### Changed
+
+- **Mobile layout** — the single-phase circuit grid switches to one column at
+  480 px container width (previously 360 px), covering most phone screen sizes.
+  The phase cells grid reduces gap at 480 px and stacks to one column at 360 px
+  for very narrow containers.
+
+- **Editor: Main meter (optional)** — the section label now reads
+  "Main meter (optional)" to make clear that the section can be left unconfigured.
+
+---
+
 ## [4.7.1] - 2026-06-05
 
 ### Fixed

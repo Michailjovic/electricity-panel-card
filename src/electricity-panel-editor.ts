@@ -213,11 +213,14 @@ export class ElectricityPanelEditor extends LitElement {
   // ── Render helpers ─────────────────────────────────────────────────────────
 
   private _entityField(label: string, value: string | undefined, onChange: (v: string) => void): TemplateResult {
+    const missing = !!(value && value.trim() && this.hass && !this.hass.states[value.trim()]);
     return html`
       <div class="field">
         <label>${label}</label>
         <input list="ep-entities" .value=${value ?? ''} placeholder="entity_id"
+          class=${missing ? 'input-warn' : ''}
           @change=${(e: Event) => onChange((e.target as HTMLInputElement).value)} />
+        ${missing ? html`<span class="field-hint warn-hint">⚠ Entity not found in Home Assistant</span>` : nothing}
       </div>`;
   }
 
@@ -315,7 +318,7 @@ export class ElectricityPanelEditor extends LitElement {
     const s = (f: string) => (v: string) => this._set(['main_meter', f], v);
     return html`
       <details class="section">
-        <summary>Main meter</summary>
+        <summary>Main meter (optional)</summary>
         <div class="section-body">
           <div class="group-label">Power (W per phase)</div>
           ${this._entityField('L1 power', m.power_l1, s('power_l1'))}
@@ -325,8 +328,9 @@ export class ElectricityPanelEditor extends LitElement {
           ${this._entityField('L1 current', m.current_l1, s('current_l1'))}
           ${this._entityField('L2 current', m.current_l2, s('current_l2'))}
           ${this._entityField('L3 current', m.current_l3, s('current_l3'))}
-          <div class="group-label">Energy</div>
+          <div class="group-label">Energy & voltage</div>
           ${this._entityField('Energy today (kWh)', m.energy_today, s('energy_today'))}
+          ${this._entityField('Voltage (V)', m.voltage, s('voltage'))}
         </div>
       </details>`;
   }
@@ -566,6 +570,11 @@ export class ElectricityPanelEditor extends LitElement {
       margin-top: 4px;
       line-height: 1.4;
     }
+    .warn-hint { color: var(--warning-color, #f57c00); }
+    .input-warn {
+      border-color: var(--warning-color, #f57c00) !important;
+      background: rgba(245,124,0,0.05) !important;
+    }
     .group-label {
       font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;
       color: var(--disabled-text-color); margin-bottom: 6px;
@@ -628,7 +637,7 @@ export class ElectricityPanelEditor extends LitElement {
     .btn-icon.danger:hover { color: var(--error-color, #e53935); }
     .btn-icon ha-icon { --mdc-icon-size: 18px; }
     .btn-add {
-      display: flex; align-items: center; gap: 6px;
+display: flex; align-items: center; gap: 6px;
       background: none; border: 1px dashed var(--divider-color, rgba(0,0,0,0.2));
       border-radius: 6px; padding: 7px 12px; font-size: 13px;
       color: var(--secondary-text-color); cursor: pointer; width: 100%; margin-top: 4px;

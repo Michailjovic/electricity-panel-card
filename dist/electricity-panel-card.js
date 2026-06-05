@@ -844,11 +844,14 @@ let ElectricityPanelEditor = class extends i {
   }
   // ── Render helpers ─────────────────────────────────────────────────────────
   _entityField(label, value, onChange) {
+    const missing = !!(value && value.trim() && this.hass && !this.hass.states[value.trim()]);
     return b`
       <div class="field">
         <label>${label}</label>
         <input list="ep-entities" .value=${value ?? ""} placeholder="entity_id"
+          class=${missing ? "input-warn" : ""}
           @change=${(e2) => onChange(e2.target.value)} />
+        ${missing ? b`<span class="field-hint warn-hint">⚠ Entity not found in Home Assistant</span>` : A}
       </div>`;
   }
   _textField(label, value, onChange, ph = "") {
@@ -953,7 +956,7 @@ let ElectricityPanelEditor = class extends i {
     const s2 = (f2) => (v2) => this._set(["main_meter", f2], v2);
     return b`
       <details class="section">
-        <summary>Main meter</summary>
+        <summary>Main meter (optional)</summary>
         <div class="section-body">
           <div class="group-label">Power (W per phase)</div>
           ${this._entityField("L1 power", m2.power_l1, s2("power_l1"))}
@@ -963,8 +966,9 @@ let ElectricityPanelEditor = class extends i {
           ${this._entityField("L1 current", m2.current_l1, s2("current_l1"))}
           ${this._entityField("L2 current", m2.current_l2, s2("current_l2"))}
           ${this._entityField("L3 current", m2.current_l3, s2("current_l3"))}
-          <div class="group-label">Energy</div>
+          <div class="group-label">Energy & voltage</div>
           ${this._entityField("Energy today (kWh)", m2.energy_today, s2("energy_today"))}
+          ${this._entityField("Voltage (V)", m2.voltage, s2("voltage"))}
         </div>
       </details>`;
   }
@@ -1228,6 +1232,11 @@ ElectricityPanelEditor.styles = i$3`
       margin-top: 4px;
       line-height: 1.4;
     }
+    .warn-hint { color: var(--warning-color, #f57c00); }
+    .input-warn {
+      border-color: var(--warning-color, #f57c00) !important;
+      background: rgba(245,124,0,0.05) !important;
+    }
     .group-label {
       font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;
       color: var(--disabled-text-color); margin-bottom: 6px;
@@ -1290,7 +1299,7 @@ ElectricityPanelEditor.styles = i$3`
     .btn-icon.danger:hover { color: var(--error-color, #e53935); }
     .btn-icon ha-icon { --mdc-icon-size: 18px; }
     .btn-add {
-      display: flex; align-items: center; gap: 6px;
+display: flex; align-items: center; gap: 6px;
       background: none; border: 1px dashed var(--divider-color, rgba(0,0,0,0.2));
       border-radius: 6px; padding: 7px 12px; font-size: 13px;
       color: var(--secondary-text-color); cursor: pointer; width: 100%; margin-top: 4px;
@@ -1940,6 +1949,7 @@ let ElectricityPanelCard = class extends i {
     const m2 = this._config.main_meter;
     if (!m2) return A;
     const totalW = this._watts(m2.power_l1) + this._watts(m2.power_l2) + this._watts(m2.power_l3);
+    const voltage = this._num(m2.voltage);
     const phases = [
       { label: "L1", power: m2.power_l1, current: m2.current_l1 },
       { label: "L2", power: m2.power_l2, current: m2.current_l2 },
@@ -1963,6 +1973,7 @@ let ElectricityPanelCard = class extends i {
       const cr = this._calcDailyCost(m2.power_l1, m2.power_l2, m2.power_l3);
       return cr ? b`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : A;
     })()}
+              ${m2.voltage && voltage > 0 ? b`<span class="metric-sep">·</span>${voltage.toFixed(0)} V` : A}
               ${this._ageBadge(m2.power_l1 ?? m2.power_l2 ?? m2.power_l3 ?? m2.energy_today)}
             </span>
           </div>
@@ -2288,7 +2299,9 @@ ElectricityPanelCard.styles = i$3`
     .phase-detail { font-size: 11px; color: #4b5568; margin-top: 1px; }
 
     .circuit-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; }
-    @container (max-width: 360px) { .circuit-grid { grid-template-columns: 1fr; } }
+    @container (max-width: 480px) { .circuit-grid { grid-template-columns: 1fr; } }
+    @container (max-width: 480px) { .phases-grid { gap: 4px; } }
+    @container (max-width: 360px) { .phases-grid { grid-template-columns: 1fr; } }
     .three-phase-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
 
     .circuit-card { background: #181c24; border-radius: 8px; padding: 12px 14px; border: 0.5px solid #252a35; }

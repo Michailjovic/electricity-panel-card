@@ -700,6 +700,7 @@ export class ElectricityPanelCard extends LitElement {
     const m = this._config.main_meter;
     if (!m) return nothing;
     const totalW = this._watts(m.power_l1) + this._watts(m.power_l2) + this._watts(m.power_l3);
+    const voltage = this._num(m.voltage);
     const phases = [
       { label: 'L1', power: m.power_l1, current: m.current_l1 },
       { label: 'L2', power: m.power_l2, current: m.current_l2 },
@@ -720,6 +721,7 @@ export class ElectricityPanelCard extends LitElement {
             <span class="metric-small">
               ${m.energy_today ? html`${this._kwh(m.energy_today).toFixed(1)} kWh today` : nothing}
               ${(() => { const cr = this._calcDailyCost(m.power_l1, m.power_l2, m.power_l3); return cr ? html`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : nothing; })()}
+              ${m.voltage && voltage > 0 ? html`<span class="metric-sep">·</span>${voltage.toFixed(0)} V` : nothing}
               ${this._ageBadge(m.power_l1 ?? m.power_l2 ?? m.power_l3 ?? m.energy_today)}
             </span>
           </div>
@@ -1094,7 +1096,9 @@ export class ElectricityPanelCard extends LitElement {
     .phase-detail { font-size: 11px; color: #4b5568; margin-top: 1px; }
 
     .circuit-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; }
-    @container (max-width: 360px) { .circuit-grid { grid-template-columns: 1fr; } }
+    @container (max-width: 480px) { .circuit-grid { grid-template-columns: 1fr; } }
+    @container (max-width: 480px) { .phases-grid { gap: 4px; } }
+    @container (max-width: 360px) { .phases-grid { grid-template-columns: 1fr; } }
     .three-phase-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
 
     .circuit-card { background: #181c24; border-radius: 8px; padding: 12px 14px; border: 0.5px solid #252a35; }
