@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.6.0] - 2026-06-05
+
+### Added
+
+- **Last-updated badge** — each circuit card now shows how long ago its primary
+  entity was last updated by Home Assistant (e.g. `↻ 30s`, `↻ 2m`, `↻ 1h`).
+  The badge appears in the footer of single-phase breakers and next to the total
+  power of three-phase breakers. Colour indicates data freshness: muted grey
+  under 5 minutes, amber above 5 minutes, red above 15 minutes. The badge is
+  hidden when no power, current, or switch entity is configured for the circuit.
+
+---
+
 ## [4.5.1] - 2026-06-05
 
 ### Fixed

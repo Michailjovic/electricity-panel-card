@@ -237,6 +237,24 @@ export class ElectricityPanelCard extends LitElement {
     return `${((watts / 1000) * price).toFixed(2)} ${cur}/h`;
   }
 
+  // ── Age badge ─────────────────────────────────────────────────────────────
+
+  /** Returns "↻ Xs / Xm / Xh" badge showing time since entity was last updated.
+   *  Colour: muted < 5 min · amber 5–15 min · red > 15 min */
+  private _ageBadge(entityId?: string): TemplateResult | typeof nothing {
+    if (!entityId) return nothing;
+    const entity = this.hass?.states[entityId];
+    if (!entity?.last_updated) return nothing;
+    const diffMs = Date.now() - new Date(entity.last_updated).getTime();
+    const diffS = Math.floor(diffMs / 1000);
+    let label: string;
+    if (diffS < 60) label = `${diffS}s`;
+    else if (diffS < 3600) label = `${Math.floor(diffS / 60)}m`;
+    else label = `${Math.floor(diffS / 3600)}h`;
+    const cls = diffMs > 900_000 ? 'age-stale' : diffMs > 300_000 ? 'age-warn' : 'age-ok';
+    return html`<span class="metric-sep">·</span><span class="age-badge ${cls}">↻ ${label}</span>`;
+  }
+
   // ── Full-day schedule builder ──────────────────────────────────────────────
 
   private _buildFullDaySlots(
@@ -758,6 +776,7 @@ export class ElectricityPanelCard extends LitElement {
               ${c.voltage ? html`<span class="metric-sep">·</span>${this._num(c.voltage).toFixed(0)} V` : nothing}
               ${energy > 0 ? html`<span class="metric-sep">·</span>${energy.toFixed(2)} kWh` : nothing}
               ${costRate ? html`<span class="metric-sep">·</span><span class="cost-rate">${costRate}</span>` : nothing}
+              ${this._ageBadge(c.power ?? c.current ?? c.switch)}
             </span>
           </div>
           ${hasDevices
@@ -899,6 +918,7 @@ export class ElectricityPanelCard extends LitElement {
             <span class="metric-small">
               ${energy > 0 ? html`${energy.toFixed(2)} kWh` : nothing}
               ${costRate ? html`<span class="metric-sep">·</span><span class="cost-rate">${costRate}</span>` : nothing}
+              ${this._ageBadge(c.power ?? c.power_l1 ?? c.current_l1 ?? c.switch)}
             </span>
           </div>
         </div>
@@ -1095,6 +1115,10 @@ export class ElectricityPanelCard extends LitElement {
     .metric-small { font-size: 11px; color: #4b5568; display: flex; flex-wrap: wrap; align-items: center; gap: 1px 2px; }
     .metric-sep { opacity: .4; margin: 0 1px; }
     .cost-rate { color: #f59e0b; font-weight: 500; }
+    .age-badge { font-size: 10px; font-variant-numeric: tabular-nums; }
+    .age-ok    { color: #374151; }
+    .age-warn  { color: #f59e0b; }
+    .age-stale { color: #ef4444; }
 
     .badge { font-size: 9px; padding: 2px 5px; border-radius: 4px; font-weight: 500; flex-shrink: 0; letter-spacing: .3px; }
     .badge-info  { background: #1e2a4a; color: #6b9bdb; }
@@ -1143,6 +1167,10 @@ export class ElectricityPanelCard extends LitElement {
     .spark-label-min { fill: rgba(255,255,255,.45); }
     .spark-ref { stroke-width: 1px; stroke-dasharray: 3 3; }
     .spark-hidden { display: none; }
+    .age-badge { font-size: 10px; font-variant-numeric: tabular-nums; }
+    .age-ok    { color: #374151; }
+    .age-warn  { color: #f59e0b; }
+    .age-stale { color: #ef4444; }
   `;
 }
 

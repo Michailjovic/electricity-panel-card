@@ -4,6 +4,8 @@ export interface HassEntity {
   state: string;
   attributes: Record<string, unknown>;
   entity_id: string;
+  last_updated?: string;  // ISO 8601 — when any attribute or state changed
+  last_changed?: string;  // ISO 8601 — when state value changed
 }
 
 export interface HomeAssistant {

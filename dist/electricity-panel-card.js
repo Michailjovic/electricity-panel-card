@@ -1499,6 +1499,23 @@ let ElectricityPanelCard = class extends i {
     const cur = hdo.currency ?? "Kč";
     return `${(watts / 1e3 * price).toFixed(2)} ${cur}/h`;
   }
+  // ── Age badge ─────────────────────────────────────────────────────────────
+  /** Returns "↻ Xs / Xm / Xh" badge showing time since entity was last updated.
+   *  Colour: muted < 5 min · amber 5–15 min · red > 15 min */
+  _ageBadge(entityId) {
+    var _a2;
+    if (!entityId) return A;
+    const entity = (_a2 = this.hass) == null ? void 0 : _a2.states[entityId];
+    if (!(entity == null ? void 0 : entity.last_updated)) return A;
+    const diffMs = Date.now() - new Date(entity.last_updated).getTime();
+    const diffS = Math.floor(diffMs / 1e3);
+    let label;
+    if (diffS < 60) label = `${diffS}s`;
+    else if (diffS < 3600) label = `${Math.floor(diffS / 60)}m`;
+    else label = `${Math.floor(diffS / 3600)}h`;
+    const cls = diffMs > 9e5 ? "age-stale" : diffMs > 3e5 ? "age-warn" : "age-ok";
+    return b`<span class="metric-sep">·</span><span class="age-badge ${cls}">↻ ${label}</span>`;
+  }
   // ── Full-day schedule builder ──────────────────────────────────────────────
   _buildFullDaySlots(starts, offsets, base, showing) {
     const fmt = (ms) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
@@ -1969,6 +1986,7 @@ let ElectricityPanelCard = class extends i {
               ${c2.voltage ? b`<span class="metric-sep">·</span>${this._num(c2.voltage).toFixed(0)} V` : A}
               ${energy > 0 ? b`<span class="metric-sep">·</span>${energy.toFixed(2)} kWh` : A}
               ${costRate ? b`<span class="metric-sep">·</span><span class="cost-rate">${costRate}</span>` : A}
+              ${this._ageBadge(c2.power ?? c2.current ?? c2.switch)}
             </span>
           </div>
           ${hasDevices ? b`<button class="expand-btn" @click=${() => this._toggleExpanded(c2.id)}>
@@ -2081,6 +2099,7 @@ let ElectricityPanelCard = class extends i {
             <span class="metric-small">
               ${energy > 0 ? b`${energy.toFixed(2)} kWh` : A}
               ${costRate ? b`<span class="metric-sep">·</span><span class="cost-rate">${costRate}</span>` : A}
+              ${this._ageBadge(c2.power ?? c2.power_l1 ?? c2.current_l1 ?? c2.switch)}
             </span>
           </div>
         </div>
@@ -2265,6 +2284,10 @@ ElectricityPanelCard.styles = i$3`
     .metric-small { font-size: 11px; color: #4b5568; display: flex; flex-wrap: wrap; align-items: center; gap: 1px 2px; }
     .metric-sep { opacity: .4; margin: 0 1px; }
     .cost-rate { color: #f59e0b; font-weight: 500; }
+    .age-badge { font-size: 10px; font-variant-numeric: tabular-nums; }
+    .age-ok    { color: #374151; }
+    .age-warn  { color: #f59e0b; }
+    .age-stale { color: #ef4444; }
 
     .badge { font-size: 9px; padding: 2px 5px; border-radius: 4px; font-weight: 500; flex-shrink: 0; letter-spacing: .3px; }
     .badge-info  { background: #1e2a4a; color: #6b9bdb; }
@@ -2313,6 +2336,10 @@ ElectricityPanelCard.styles = i$3`
     .spark-label-min { fill: rgba(255,255,255,.45); }
     .spark-ref { stroke-width: 1px; stroke-dasharray: 3 3; }
     .spark-hidden { display: none; }
+    .age-badge { font-size: 10px; font-variant-numeric: tabular-nums; }
+    .age-ok    { color: #374151; }
+    .age-warn  { color: #f59e0b; }
+    .age-stale { color: #ef4444; }
   `;
 __decorateClass([
   r()
