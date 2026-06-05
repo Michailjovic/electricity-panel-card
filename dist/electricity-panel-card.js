@@ -1699,23 +1699,38 @@ let ElectricityPanelCard = class extends i {
     if (!entityId) return A;
     const data = this._historyCache.get(entityId);
     if (!data || data.length < 2) return A;
-    const W = 100, H2 = 34, pad = 2;
+    const W = 100, H2 = 38, pad = 3;
     const tMin = data[0].t, tMax = data[data.length - 1].t;
     const tRange = tMax - tMin || 1;
     const vals = data.map((p2) => p2.v);
     const vMin = Math.min(...vals), vMax = Math.max(...vals);
     const vRange = vMax - vMin || 0.01;
-    const pts = data.map((p2) => {
-      const x2 = (p2.t - tMin) / tRange * W;
-      const y3 = H2 - pad - (p2.v - vMin) / vRange * (H2 - pad * 2);
-      return `${x2.toFixed(1)},${y3.toFixed(1)}`;
-    }).join(" ");
+    const coords = data.map((p2) => ({
+      x: (p2.t - tMin) / tRange * W,
+      y: H2 - pad - (p2.v - vMin) / vRange * (H2 - pad * 2)
+    }));
+    let linePath = `M ${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}`;
+    for (let i2 = 1; i2 < coords.length; i2++) {
+      const p0 = coords[i2 - 1], p1 = coords[i2];
+      const cx = ((p0.x + p1.x) / 2).toFixed(1);
+      linePath += ` C ${cx},${p0.y.toFixed(1)} ${cx},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
+    }
+    const areaPath = `${linePath} L ${coords[coords.length - 1].x.toFixed(1)},${H2} L ${coords[0].x.toFixed(1)},${H2} Z`;
+    const gid = `sg_${entityId.replace(/[^a-z0-9]/gi, "_")}`;
     const labelMax = this._fmtW(vMax);
     const labelMin = this._fmtW(vMin);
     return b`<svg viewBox="0 0 ${W} ${H2}" preserveAspectRatio="none" class="sparkline">
-      <polyline points="${pts}" fill="none" stroke="#ef4444" stroke-width="1.5"
+      <defs>
+        <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ef4444" stop-opacity="0.3"/>
+          <stop offset="85%" stop-color="#ef4444" stop-opacity="0.05"/>
+          <stop offset="100%" stop-color="#ef4444" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <path d="${areaPath}" fill="url(#${gid})"/>
+      <path d="${linePath}" fill="none" stroke="#ef4444" stroke-width="1.5"
         stroke-linejoin="round" stroke-linecap="round"/>
-      <text x="2" y="9" text-anchor="start" class="spark-label">${labelMax}</text>
+      <text x="2" y="10" text-anchor="start" class="spark-label">${labelMax}</text>
       <text x="2" y="${H2 - 2}" text-anchor="start" class="spark-label spark-label-min">${labelMin}</text>
     </svg>`;
   }
@@ -2228,7 +2243,7 @@ ElectricityPanelCard.styles = i$3`
     .note-icon { --mdc-icon-size: 12px; color: #4b5568; flex-shrink: 0; }
     .note-row .device-name { font-style: italic; }
 
-    .sparkline { width: 100%; height: 34px; display: block; margin-top: 5px; overflow: visible; }
+    .sparkline { width: 100%; height: 38px; display: block; margin-top: 6px; overflow: visible; }
     .spark-label { font-size: 8px; fill: rgba(255,255,255,.75); font-family: inherit; stroke: #111318; stroke-width: 3px; paint-order: stroke fill; }
     .spark-label-min { fill: rgba(255,255,255,.45); }
   `;

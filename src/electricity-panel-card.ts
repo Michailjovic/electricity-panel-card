@@ -504,23 +504,39 @@ export class ElectricityPanelCard extends LitElement {
     if (!entityId) return nothing;
     const data = this._historyCache.get(entityId);
     if (!data || data.length < 2) return nothing;
-    const W = 100, H = 34, pad = 2;
+    const W = 100, H = 38, pad = 3;
     const tMin = data[0].t, tMax = data[data.length - 1].t;
     const tRange = tMax - tMin || 1;
     const vals = data.map(p => p.v);
     const vMin = Math.min(...vals), vMax = Math.max(...vals);
     const vRange = vMax - vMin || 0.01;
-    const pts = data.map(p => {
-      const x = ((p.t - tMin) / tRange) * W;
-      const y = (H - pad) - ((p.v - vMin) / vRange) * (H - pad * 2);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(' ');
+    // Smooth cubic-bezier path (midpoint control points)
+    const coords = data.map(p => ({
+      x: ((p.t - tMin) / tRange) * W,
+      y: (H - pad) - ((p.v - vMin) / vRange) * (H - pad * 2),
+    }));
+    let linePath = `M ${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}`;
+    for (let i = 1; i < coords.length; i++) {
+      const p0 = coords[i - 1], p1 = coords[i];
+      const cx = ((p0.x + p1.x) / 2).toFixed(1);
+      linePath += ` C ${cx},${p0.y.toFixed(1)} ${cx},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
+    }
+    const areaPath = `${linePath} L ${coords[coords.length - 1].x.toFixed(1)},${H} L ${coords[0].x.toFixed(1)},${H} Z`;
+    const gid = `sg_${entityId.replace(/[^a-z0-9]/gi, '_')}`;
     const labelMax = this._fmtW(vMax);
     const labelMin = this._fmtW(vMin);
     return html`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="sparkline">
-      <polyline points="${pts}" fill="none" stroke="#ef4444" stroke-width="1.5"
+      <defs>
+        <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ef4444" stop-opacity="0.3"/>
+          <stop offset="85%" stop-color="#ef4444" stop-opacity="0.05"/>
+          <stop offset="100%" stop-color="#ef4444" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <path d="${areaPath}" fill="url(#${gid})"/>
+      <path d="${linePath}" fill="none" stroke="#ef4444" stroke-width="1.5"
         stroke-linejoin="round" stroke-linecap="round"/>
-      <text x="2" y="9" text-anchor="start" class="spark-label">${labelMax}</text>
+      <text x="2" y="10" text-anchor="start" class="spark-label">${labelMax}</text>
       <text x="2" y="${H - 2}" text-anchor="start" class="spark-label spark-label-min">${labelMin}</text>
     </svg>`;
   }
@@ -1088,7 +1104,7 @@ export class ElectricityPanelCard extends LitElement {
     .note-icon { --mdc-icon-size: 12px; color: #4b5568; flex-shrink: 0; }
     .note-row .device-name { font-style: italic; }
 
-    .sparkline { width: 100%; height: 34px; display: block; margin-top: 5px; overflow: visible; }
+    .sparkline { width: 100%; height: 38px; display: block; margin-top: 6px; overflow: visible; }
     .spark-label { font-size: 8px; fill: rgba(255,255,255,.75); font-family: inherit; stroke: #111318; stroke-width: 3px; paint-order: stroke fill; }
     .spark-label-min { fill: rgba(255,255,255,.45); }
   `;
