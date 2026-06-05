@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [5.0.1] - 2026-06-05
+
+### 🔧 Fixed
+
+- **Single-phase sparkline font scaling** — min/max labels are now hidden on
+  single-phase circuit sparklines. The SVG with `preserveAspectRatio="none"`
+  stretches across the full card width, causing browsers to scale CSS `font-size`
+  proportionally with the X transform — making labels appear far larger than on
+  narrow 3-phase phase cells. The graph shape is unaffected; labels remain
+  available on main meter and 3-phase phase cells where the SVG width is
+  constrained.
+
+---
+
 ## [5.0.0] - 2026-06-05
 
 This release consolidates all development since the v4.0.0 dark-theme foundation
