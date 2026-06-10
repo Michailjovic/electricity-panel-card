@@ -6,26 +6,22 @@ Configured entirely through a built-in GUI editor. No YAML editing required.
 
 ---
 
-## Screenshots
-
-![Electricity Panel Card — overview](docs/screenshot-overview.png)
-*Main meter, HDO tariff bar, 3-phase circuits with sparkline graphs and single-phase breakers*
-
-![Electricity Panel Card — circuit detail](docs/screenshot-circuit.png)
-*Expanded circuit with device list, load bar and last-updated badge*
-
----
-
 ## Features
 
 - **Panel overview** — main 3-phase meter plus all circuit breakers in one view
 - **Per-circuit metrics** — live watts (W), amperes (A), and kWh today
-- **Load bar** — visual load indicator relative to the breaker's rated current
-- **Remote toggle** — turn individual circuits on/off directly from the card
+- **Daily cost tracking** — NT/VT-split cost since midnight per circuit and for the main meter
+- **Load bar** — visual load indicator relative to the breaker's rated current, with an overload pulse at 95 %
+- **Remote toggle** — turn individual circuits on/off directly from the card, with optional confirmation dialog
 - **Critical circuit protection** — lock icon replaces the toggle for circuits that must never be switched off accidentally
-- **3-phase circuits** — rendered in their own row with a 3φ badge
+- **3-phase circuits** — rendered in their own row with a 3φ badge and per-phase cells
 - **Device hierarchy** — expand any circuit to see the devices wired behind it, including Shelly multi-channel support (4PM, 2PM)
 - **HDO tariff bar** — optional NT/VT status with countdown to the next switch
+- **Holiday-aware schedule** — workday sensor + public holiday sensor (e.g. `calendar.czechia`) pick the correct weekday/weekend/holiday NT programme, including tomorrow's view
+- **"Wait for NT" hint** (opt-in) — during VT, running circuits show the next NT start and the percentage saving
+- **Sparkline power graphs** — time-aligned history graphs on main meter and circuit phase cells
+- **Localized** — English and Czech, following the HA profile language
+- **Theming** — built-in dark design, or `follow_theme: true` to adapt to the active HA theme
 - **GUI config editor** — full visual editor with entity searchboxes; no manual YAML required
 
 ---
@@ -77,18 +73,23 @@ Install the card through [HACS](https://hacs.xyz) as a **Frontend** resource, or
 
 All configuration is done through the built-in card editor — click **Edit** on the card in the dashboard.
 
-The editor has three sections:
+The editor sections:
 
-**Main meter** — entity pickers for L1/L2/L3 power, L1/L2/L3 current, and energy today. Leave empty if you don't have a smart main meter.
+**Appearance & behaviour** — follow HA theme colours, language (auto / en / cs), debug logging.
 
-**HDO** — entity pickers for the tariff switch, next-high and next-low sensors, and the workday sensor. The HDO bar is hidden if no switch is configured.
+**Graph settings** — history window (1–24 h), sparkline colour/labels/reference lines, per-area visibility toggles, last-updated age badge.
+
+**Main meter** — entity pickers for L1/L2/L3 power, L1/L2/L3 current, per-phase voltage, and energy today. Leave empty if you don't have a smart main meter.
+
+**HDO** — entity pickers for the tariff switch, next-high and next-low sensors, the workday sensor, and a public holiday sensor (e.g. a national holiday calendar such as `calendar.czechia` — for calendar entities the card also detects whether *tomorrow* is a holiday). PRE tariff presets, NT/VT prices, and the optional "wait for NT" hint with a power threshold.
 
 **Circuits** — add and configure breakers. For each circuit:
 - Name and ID
 - 1-phase or 3-phase selector
 - Critical flag (replaces toggle with lock icon)
+- Confirmation flag (ask before toggling)
 - Rated current in A (used for the load bar)
-- Entity pickers for switch, power (W), current (A), energy (kWh today), voltage (V)
+- Entity pickers for switch, power (W), current (A), energy (kWh today), voltage (V) — plus per-phase entities for 3φ circuits
 - **Devices** — sub-list of devices behind the breaker. Each device can optionally have a switch and measurement entities. Multi-channel devices (Shelly 4PM etc.) support individual channels.
 
 ---

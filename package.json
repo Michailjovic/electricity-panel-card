@@ -1,13 +1,14 @@
 {
   "name": "electricity-panel-card",
-  "version": "2.0.0",
+  "version": "5.1.0",
   "description": "Home Assistant custom Lovelace card for electricity panel management",
   "keywords": ["home-assistant", "lovelace", "custom-card", "electricity", "hdo"],
   "license": "MIT",
   "type": "module",
   "main": "dist/electricity-panel-card.js",
   "scripts": {
-    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
     "watch": "vite build --watch",
     "dev": "vite",
     "deploy": "node deploy.mjs",

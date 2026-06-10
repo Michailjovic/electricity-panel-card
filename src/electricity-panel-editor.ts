@@ -11,7 +11,7 @@ import type {
 } from './types.js';
 
 function deepClone<T>(obj: T): T {
-  return JSON.parse(JSON.stringify(obj));
+  return structuredClone(obj);
 }
 
 function slugify(name: string): string {
@@ -86,10 +86,6 @@ export class ElectricityPanelEditor extends LitElement {
     this._fire(cfg);
   }
 
-  private _inputHandler(path: string[]): (e: Event) => void {
-    return (e: Event) => this._set(path, (e.target as HTMLInputElement).value);
-  }
-
   // ── Circuit management ─────────────────────────────────────────────────────
 
   private _addCircuit(): void {
@@ -138,21 +134,33 @@ export class ElectricityPanelEditor extends LitElement {
   private _setCircuitField(idx: number, field: keyof Circuit, val: string): void {
     const cfg = deepClone(this._config);
     const c = cfg.circuits![idx];
+    const prevName = c.name;
     if (val === '') {
-      delete (c as Record<string, unknown>)[field];
+      delete (c as unknown as Record<string, unknown>)[field];
     } else {
-      (c as Record<string, unknown>)[field] =
+      (c as unknown as Record<string, unknown>)[field] =
         field === 'phases' ? (parseInt(val) as 1 | 3) :
         field === 'max_current' ? parseFloat(val) : val;
     }
-    if (field === 'name' && val) c.id = slugify(val);
+    // Auto-derive id from name only when the id was itself auto-generated —
+    // never overwrite a manually set custom id.
+    if (field === 'name' && val) {
+      const autoId = !c.id || /^c\d+$/.test(c.id) || c.id === slugify(prevName ?? '');
+      if (autoId) c.id = slugify(val);
+    }
+    // Switching 3φ → 1φ: drop per-phase entities so they don't linger in config
+    if (field === 'phases' && val === '1') {
+      delete c.power_l1; delete c.power_l2; delete c.power_l3;
+      delete c.current_l1; delete c.current_l2; delete c.current_l3;
+      delete c.voltage_l1; delete c.voltage_l2; delete c.voltage_l3;
+    }
     this._config = cfg;
     this._fire(cfg);
   }
 
   private _setCircuitCheck(idx: number, field: keyof Circuit, val: boolean): void {
     const cfg = deepClone(this._config);
-    (cfg.circuits![idx] as Record<string, unknown>)[field] = val;
+    (cfg.circuits![idx] as unknown as Record<string, unknown>)[field] = val;
     this._config = cfg;
     this._fire(cfg);
   }
@@ -179,8 +187,8 @@ export class ElectricityPanelEditor extends LitElement {
   private _setDeviceField(ci: number, di: number, field: keyof CircuitDevice, val: string): void {
     const cfg = deepClone(this._config);
     const d = cfg.circuits![ci].devices![di];
-    if (val === '') delete (d as Record<string, unknown>)[field];
-    else (d as Record<string, unknown>)[field] = val;
+    if (val === '') delete (d as unknown as Record<string, unknown>)[field];
+    else (d as unknown as Record<string, unknown>)[field] = val;
     this._config = cfg;
     this._fire(cfg);
   }
@@ -205,8 +213,8 @@ export class ElectricityPanelEditor extends LitElement {
   private _setChannelField(ci: number, di: number, chi: number, field: keyof DeviceChannel, val: string): void {
     const cfg = deepClone(this._config);
     const ch = cfg.circuits![ci].devices![di].channels![chi];
-    if (val === '') delete (ch as Record<string, unknown>)[field];
-    else (ch as Record<string, unknown>)[field] = val;
+    if (val === '') delete (ch as unknown as Record<string, unknown>)[field];
+    else (ch as unknown as Record<string, unknown>)[field] = val;
     this._config = cfg;
     this._fire(cfg);
   }
@@ -331,6 +339,37 @@ export class ElectricityPanelEditor extends LitElement {
       </details>`;
   }
 
+  private _renderAppearanceSection(): TemplateResult {
+    const lang = this._config.language ?? 'auto';
+    return html`
+      <details class="section">
+        <summary>Appearance & behaviour</summary>
+        <div class="section-body">
+          <div class="field checkbox">
+            <input type="checkbox" id="follow-theme" .checked=${this._config.follow_theme ?? false}
+              @change=${(e: Event) => this._set(['follow_theme'], (e.target as HTMLInputElement).checked)} />
+            <label for="follow-theme">Follow Home Assistant theme colours</label>
+          </div>
+          <span class="field-hint">
+            Off = built-in dark design. On = card adapts to the active HA theme (light/dark).
+          </span>
+          <div class="field" style="margin-top:8px;">
+            <label>Language</label>
+            <select @change=${(e: Event) => this._set(['language'], (e.target as HTMLSelectElement).value === 'auto' ? '' : (e.target as HTMLSelectElement).value)}>
+              <option value="auto" ?selected=${lang === 'auto'}>Auto (from HA profile)</option>
+              <option value="en" ?selected=${lang === 'en'}>English</option>
+              <option value="cs" ?selected=${lang === 'cs'}>Čeština</option>
+            </select>
+          </div>
+          <div class="field checkbox" style="margin-top:8px;">
+            <input type="checkbox" id="ep-debug" .checked=${this._config.debug ?? false}
+              @change=${(e: Event) => this._set(['debug'], (e.target as HTMLInputElement).checked)} />
+            <label for="ep-debug">Debug logging to browser console</label>
+          </div>
+        </div>
+      </details>`;
+  }
+
   private _renderMeterSection(): TemplateResult {
     const m = this._config.main_meter ?? {};
     const s = (f: string) => (v: string) => this._set(['main_meter', f], v);
@@ -361,6 +400,10 @@ export class ElectricityPanelEditor extends LitElement {
   private _renderHdoSection(): TemplateResult {
     const h = this._config.hdo ?? {};
     const s = (f: string) => (v: string) => this._set(['hdo', f], v);
+    // Prices must be stored as numbers — string prices in YAML are a config smell
+    const sNum = (f: string) => (v: string) =>
+      this._set(['hdo', f], v === '' ? '' : parseFloat(v));
+    const hint = this._config.show_nt_hint ?? false;
     return html`
       <details class="section">
         <summary>HDO (time-of-use tariff)</summary>
@@ -369,6 +412,16 @@ export class ElectricityPanelEditor extends LitElement {
           ${this._entityField('Next high tariff start', h.next_high, s('next_high'))}
           ${this._entityField('Next low tariff start', h.next_low, s('next_low'))}
           ${this._entityField('Workday sensor', h.workday_sensor, s('workday_sensor'))}
+          <span class="field-hint">
+            binary_sensor from the Workday integration — on = working day.
+            Used to pick the weekday/weekend/holiday schedule.
+          </span>
+          ${this._entityField('Public holiday sensor', h.holiday_sensor, s('holiday_sensor'))}
+          <span class="field-hint">
+            Entity that is «on» on public holidays — e.g. a holiday calendar
+            (calendar.czechia). For calendar entities the next-event attributes
+            are also used to detect whether tomorrow is a holiday.
+          </span>
           <div class="field">
             <label>PRE tariff preset (NT schedule)</label>
             <select @change=${(e: Event) => s('tariff_preset')((e.target as HTMLSelectElement).value)}>
@@ -385,9 +438,22 @@ export class ElectricityPanelEditor extends LitElement {
             </span>
           </div>
           <div class="group-label" style="margin-top:12px;">Tariff prices (optional)</div>
-          ${this._numField('NT price per kWh (low tariff)', h.nt_price as number | undefined, s('nt_price'), '0.00')}
-          ${this._numField('VT price per kWh (high tariff)', h.vt_price as number | undefined, s('vt_price'), '0.00')}
+          ${this._numField('NT price per kWh (low tariff)', h.nt_price as number | undefined, sNum('nt_price'), '0.00')}
+          ${this._numField('VT price per kWh (high tariff)', h.vt_price as number | undefined, sNum('vt_price'), '0.00')}
           ${this._textField('Currency symbol', h.currency, s('currency'), 'Kč')}
+          <div class="group-label" style="margin-top:12px;">"Wait for NT" hint</div>
+          <div class="field checkbox">
+            <input type="checkbox" id="nt-hint" .checked=${hint}
+              @change=${(e: Event) => this._set(['show_nt_hint'], (e.target as HTMLInputElement).checked)} />
+            <label for="nt-hint">During VT, show next NT start + saving on running circuits</label>
+          </div>
+          ${hint ? html`
+            ${this._numField('Minimum power draw (W)', this._config.nt_hint_min_watts,
+              (v) => this._set(['nt_hint_min_watts'], parseFloat(v) || 100), '100')}
+            <span class="field-hint">
+              Hint appears only on circuits drawing at least this much power.
+              Requires NT and VT prices to be set.
+            </span>` : nothing}
         </div>
       </details>`;
   }
@@ -486,6 +552,14 @@ export class ElectricityPanelEditor extends LitElement {
             ${c.critical ? html`<span class="badge warn">critical</span>` : nothing}
           </div>
           <div class="row-acts" @click=${(e: Event) => e.stopPropagation()}>
+            <button class="btn-icon" title="Move up" ?disabled=${idx === 0}
+              @click=${() => this._moveCircuit(idx, -1)}>
+              <ha-icon icon="mdi:arrow-up"></ha-icon>
+            </button>
+            <button class="btn-icon" title="Move down" ?disabled=${idx === total - 1}
+              @click=${() => this._moveCircuit(idx, 1)}>
+              <ha-icon icon="mdi:arrow-down"></ha-icon>
+            </button>
             <button class="btn-icon danger" @click=${() => this._removeCircuit(idx)}>
               <ha-icon icon="mdi:minus-circle-outline"></ha-icon>
             </button>
@@ -507,6 +581,11 @@ export class ElectricityPanelEditor extends LitElement {
               <input type="checkbox" id="crit-${idx}" .checked=${c.critical ?? false}
                 @change=${(e: Event) => this._setCircuitCheck(idx, 'critical', (e.target as HTMLInputElement).checked)} />
               <label for="crit-${idx}">Critical circuit (disables remote toggle)</label>
+            </div>
+            <div class="field checkbox">
+              <input type="checkbox" id="conf-${idx}" .checked=${c.confirm_toggle ?? false}
+                @change=${(e: Event) => this._setCircuitCheck(idx, 'confirm_toggle', (e.target as HTMLInputElement).checked)} />
+              <label for="conf-${idx}">Ask for confirmation before toggling</label>
             </div>
             ${this._numField('Max current A (breaker rating)', c.max_current, sf('max_current'), c.phases === 3 ? '63' : '16')}
             <div class="group-label" style="margin-top:10px;">Breaker entities</div>
@@ -546,6 +625,7 @@ export class ElectricityPanelEditor extends LitElement {
       <div class="editor">
         ${this._textField('Card title (optional)', this._config.title,
           (v) => this._set(['title'], v), 'Electricity panel')}
+        ${this._renderAppearanceSection()}
         ${this._renderGraphSection()}
         ${this._renderMeterSection()}
         ${this._renderHdoSection()}
@@ -661,6 +741,7 @@ export class ElectricityPanelEditor extends LitElement {
       border-top: 2px solid var(--primary-color, #2196f3);
     }
     .btn-icon { background: none; border: none; cursor: pointer; color: var(--secondary-text-color); padding: 2px; border-radius: 4px; display: flex; align-items: center; }
+    .btn-icon:disabled { opacity: .3; cursor: default; }
     .btn-icon:hover { background: var(--secondary-background-color); }
     .btn-icon.danger:hover { color: var(--error-color, #e53935); }
     .btn-icon ha-icon { --mdc-icon-size: 18px; }
@@ -676,3 +757,4 @@ display: flex; align-items: center; gap: 6px;
     .ep-ver { font-size: 10px; color: var(--disabled-text-color); text-align: center; padding: 8px 0 2px; opacity: 0.6; }
   `;
 }
+

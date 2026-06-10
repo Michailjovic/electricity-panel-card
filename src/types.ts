@@ -1,4 +1,4 @@
-export const EP_VERSION = '5.0.8';
+export const EP_VERSION = '5.1.0';
 
 // ── Home Assistant types ────────────────────────────────────────────────────
 
@@ -12,6 +12,7 @@ export interface HassEntity {
 
 export interface HomeAssistant {
   states: Record<string, HassEntity>;
+  locale?: { language?: string };
   callService(
     domain: string,
     service: string,
@@ -51,6 +52,8 @@ export interface Circuit {
   phases?: 1 | 3;
   /** Mark circuit as critical — hides the toggle, shows a lock icon */
   critical?: boolean;
+  /** Ask for confirmation before toggling the breaker switch */
+  confirm_toggle?: boolean;
   /** Breaker rating in Amperes, used for the load bar (default: 16 A single-phase, 63 A three-phase) */
   max_current?: number;
   // ── Tuya / smart breaker entities ──
@@ -106,6 +109,13 @@ export interface HdoConfig {
   /** Workday sensor for weekday/weekend schedule switching */
   workday_sensor?: string;
   /**
+   * Public holiday sensor — `on` means today is a public holiday.
+   * Supports `calendar.*` entities (e.g. the Czechia holiday calendar):
+   * besides today's state, the calendar's next-event attributes are used
+   * to detect whether TOMORROW is a holiday for the tomorrow schedule view.
+   */
+  holiday_sensor?: string;
+  /**
    * PRE tariff preset code — e.g. '605'. When set, the card loads the
    * built-in schedule for that tariff. Takes precedence over `schedule`.
    */
@@ -151,6 +161,16 @@ export interface ElectricityPanelConfig {
   sparkline_1phase?: boolean;
   /** Show last-updated age badge on all circuits and main meter */
   show_age_badge?: boolean;
+  /** Follow the active HA theme colours instead of the built-in dark palette (default: false) */
+  follow_theme?: boolean;
+  /** UI language: 'auto' (from HA profile), 'en' or 'cs' (default: auto) */
+  language?: 'auto' | 'en' | 'cs';
+  /** Enable verbose console logging for history fetch debugging (default: false) */
+  debug?: boolean;
+  /** During VT, show a per-circuit hint with next NT start and potential saving (default: false) */
+  show_nt_hint?: boolean;
+  /** Minimum circuit power draw (W) for the NT hint to appear (default: 100) */
+  nt_hint_min_watts?: number;
   /** Minutes since last update before badge turns amber (default: 5) */
   age_warn_minutes?: number;
   /** Minutes since last update before badge turns red (default: 15) */

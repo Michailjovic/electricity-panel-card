@@ -656,7 +656,7 @@ const PRE_TARIFFS = {
     holiday: { starts: ["02:20", "07:00", "15:20"], offsets: [240, 80, 160] }
   }
 };
-const EP_VERSION = "5.0.8";
+const EP_VERSION = "5.1.0";
 var __defProp$1 = Object.defineProperty;
 var __getOwnPropDesc$1 = Object.getOwnPropertyDescriptor;
 var __decorateClass$1 = (decorators, target, key, kind) => {
@@ -668,7 +668,7 @@ var __decorateClass$1 = (decorators, target, key, kind) => {
   return result;
 };
 function deepClone(obj) {
-  return JSON.parse(JSON.stringify(obj));
+  return structuredClone(obj);
 }
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
@@ -731,9 +731,6 @@ let ElectricityPanelEditor = class extends i {
     this._config = cfg;
     this._fire(cfg);
   }
-  _inputHandler(path) {
-    return (e2) => this._set(path, e2.target.value);
-  }
   // ── Circuit management ─────────────────────────────────────────────────────
   _addCircuit() {
     const cfg = deepClone(this._config);
@@ -778,12 +775,27 @@ let ElectricityPanelEditor = class extends i {
   _setCircuitField(idx, field, val) {
     const cfg = deepClone(this._config);
     const c2 = cfg.circuits[idx];
+    const prevName = c2.name;
     if (val === "") {
       delete c2[field];
     } else {
       c2[field] = field === "phases" ? parseInt(val) : field === "max_current" ? parseFloat(val) : val;
     }
-    if (field === "name" && val) c2.id = slugify(val);
+    if (field === "name" && val) {
+      const autoId = !c2.id || /^c\d+$/.test(c2.id) || c2.id === slugify(prevName ?? "");
+      if (autoId) c2.id = slugify(val);
+    }
+    if (field === "phases" && val === "1") {
+      delete c2.power_l1;
+      delete c2.power_l2;
+      delete c2.power_l3;
+      delete c2.current_l1;
+      delete c2.current_l2;
+      delete c2.current_l3;
+      delete c2.voltage_l1;
+      delete c2.voltage_l2;
+      delete c2.voltage_l3;
+    }
     this._config = cfg;
     this._fire(cfg);
   }
@@ -969,6 +981,36 @@ let ElectricityPanelEditor = class extends i {
         </div>
       </details>`;
   }
+  _renderAppearanceSection() {
+    const lang = this._config.language ?? "auto";
+    return b`
+      <details class="section">
+        <summary>Appearance & behaviour</summary>
+        <div class="section-body">
+          <div class="field checkbox">
+            <input type="checkbox" id="follow-theme" .checked=${this._config.follow_theme ?? false}
+              @change=${(e2) => this._set(["follow_theme"], e2.target.checked)} />
+            <label for="follow-theme">Follow Home Assistant theme colours</label>
+          </div>
+          <span class="field-hint">
+            Off = built-in dark design. On = card adapts to the active HA theme (light/dark).
+          </span>
+          <div class="field" style="margin-top:8px;">
+            <label>Language</label>
+            <select @change=${(e2) => this._set(["language"], e2.target.value === "auto" ? "" : e2.target.value)}>
+              <option value="auto" ?selected=${lang === "auto"}>Auto (from HA profile)</option>
+              <option value="en" ?selected=${lang === "en"}>English</option>
+              <option value="cs" ?selected=${lang === "cs"}>Čeština</option>
+            </select>
+          </div>
+          <div class="field checkbox" style="margin-top:8px;">
+            <input type="checkbox" id="ep-debug" .checked=${this._config.debug ?? false}
+              @change=${(e2) => this._set(["debug"], e2.target.checked)} />
+            <label for="ep-debug">Debug logging to browser console</label>
+          </div>
+        </div>
+      </details>`;
+  }
   _renderMeterSection() {
     const m2 = this._config.main_meter ?? {};
     const s2 = (f2) => (v2) => this._set(["main_meter", f2], v2);
@@ -998,6 +1040,8 @@ let ElectricityPanelEditor = class extends i {
   _renderHdoSection() {
     const h2 = this._config.hdo ?? {};
     const s2 = (f2) => (v2) => this._set(["hdo", f2], v2);
+    const sNum = (f2) => (v2) => this._set(["hdo", f2], v2 === "" ? "" : parseFloat(v2));
+    const hint = this._config.show_nt_hint ?? false;
     return b`
       <details class="section">
         <summary>HDO (time-of-use tariff)</summary>
@@ -1006,6 +1050,16 @@ let ElectricityPanelEditor = class extends i {
           ${this._entityField("Next high tariff start", h2.next_high, s2("next_high"))}
           ${this._entityField("Next low tariff start", h2.next_low, s2("next_low"))}
           ${this._entityField("Workday sensor", h2.workday_sensor, s2("workday_sensor"))}
+          <span class="field-hint">
+            binary_sensor from the Workday integration — on = working day.
+            Used to pick the weekday/weekend/holiday schedule.
+          </span>
+          ${this._entityField("Public holiday sensor", h2.holiday_sensor, s2("holiday_sensor"))}
+          <span class="field-hint">
+            Entity that is «on» on public holidays — e.g. a holiday calendar
+            (calendar.czechia). For calendar entities the next-event attributes
+            are also used to detect whether tomorrow is a holiday.
+          </span>
           <div class="field">
             <label>PRE tariff preset (NT schedule)</label>
             <select @change=${(e2) => s2("tariff_preset")(e2.target.value)}>
@@ -1022,9 +1076,26 @@ let ElectricityPanelEditor = class extends i {
             </span>
           </div>
           <div class="group-label" style="margin-top:12px;">Tariff prices (optional)</div>
-          ${this._numField("NT price per kWh (low tariff)", h2.nt_price, s2("nt_price"), "0.00")}
-          ${this._numField("VT price per kWh (high tariff)", h2.vt_price, s2("vt_price"), "0.00")}
+          ${this._numField("NT price per kWh (low tariff)", h2.nt_price, sNum("nt_price"), "0.00")}
+          ${this._numField("VT price per kWh (high tariff)", h2.vt_price, sNum("vt_price"), "0.00")}
           ${this._textField("Currency symbol", h2.currency, s2("currency"), "Kč")}
+          <div class="group-label" style="margin-top:12px;">"Wait for NT" hint</div>
+          <div class="field checkbox">
+            <input type="checkbox" id="nt-hint" .checked=${hint}
+              @change=${(e2) => this._set(["show_nt_hint"], e2.target.checked)} />
+            <label for="nt-hint">During VT, show next NT start + saving on running circuits</label>
+          </div>
+          ${hint ? b`
+            ${this._numField(
+      "Minimum power draw (W)",
+      this._config.nt_hint_min_watts,
+      (v2) => this._set(["nt_hint_min_watts"], parseFloat(v2) || 100),
+      "100"
+    )}
+            <span class="field-hint">
+              Hint appears only on circuits drawing at least this much power.
+              Requires NT and VT prices to be set.
+            </span>` : A}
         </div>
       </details>`;
   }
@@ -1104,7 +1175,7 @@ let ElectricityPanelEditor = class extends i {
   _renderCircuitRow(c2, idx) {
     var _a2;
     const open = this._openCircuit === idx;
-    ((_a2 = this._config.circuits) == null ? void 0 : _a2.length) ?? 0;
+    const total = ((_a2 = this._config.circuits) == null ? void 0 : _a2.length) ?? 0;
     const sf = (f2) => (v2) => this._setCircuitField(idx, f2, v2);
     return b`
       <div class="sub-item ${open ? "open" : ""}"
@@ -1146,6 +1217,14 @@ let ElectricityPanelEditor = class extends i {
             ${c2.critical ? b`<span class="badge warn">critical</span>` : A}
           </div>
           <div class="row-acts" @click=${(e2) => e2.stopPropagation()}>
+            <button class="btn-icon" title="Move up" ?disabled=${idx === 0}
+              @click=${() => this._moveCircuit(idx, -1)}>
+              <ha-icon icon="mdi:arrow-up"></ha-icon>
+            </button>
+            <button class="btn-icon" title="Move down" ?disabled=${idx === total - 1}
+              @click=${() => this._moveCircuit(idx, 1)}>
+              <ha-icon icon="mdi:arrow-down"></ha-icon>
+            </button>
             <button class="btn-icon danger" @click=${() => this._removeCircuit(idx)}>
               <ha-icon icon="mdi:minus-circle-outline"></ha-icon>
             </button>
@@ -1167,6 +1246,11 @@ let ElectricityPanelEditor = class extends i {
               <input type="checkbox" id="crit-${idx}" .checked=${c2.critical ?? false}
                 @change=${(e2) => this._setCircuitCheck(idx, "critical", e2.target.checked)} />
               <label for="crit-${idx}">Critical circuit (disables remote toggle)</label>
+            </div>
+            <div class="field checkbox">
+              <input type="checkbox" id="conf-${idx}" .checked=${c2.confirm_toggle ?? false}
+                @change=${(e2) => this._setCircuitCheck(idx, "confirm_toggle", e2.target.checked)} />
+              <label for="conf-${idx}">Ask for confirmation before toggling</label>
             </div>
             ${this._numField("Max current A (breaker rating)", c2.max_current, sf("max_current"), c2.phases === 3 ? "63" : "16")}
             <div class="group-label" style="margin-top:10px;">Breaker entities</div>
@@ -1208,6 +1292,7 @@ let ElectricityPanelEditor = class extends i {
       (v2) => this._set(["title"], v2),
       "Electricity panel"
     )}
+        ${this._renderAppearanceSection()}
         ${this._renderGraphSection()}
         ${this._renderMeterSection()}
         ${this._renderHdoSection()}
@@ -1323,6 +1408,7 @@ ElectricityPanelEditor.styles = i$3`
       border-top: 2px solid var(--primary-color, #2196f3);
     }
     .btn-icon { background: none; border: none; cursor: pointer; color: var(--secondary-text-color); padding: 2px; border-radius: 4px; display: flex; align-items: center; }
+    .btn-icon:disabled { opacity: .3; cursor: default; }
     .btn-icon:hover { background: var(--secondary-background-color); }
     .btn-icon.danger:hover { color: var(--error-color, #e53935); }
     .btn-icon ha-icon { --mdc-icon-size: 18px; }
@@ -1355,6 +1441,74 @@ __decorateClass$1([
 ElectricityPanelEditor = __decorateClass$1([
   t("electricity-panel-editor")
 ], ElectricityPanelEditor);
+const STRINGS = {
+  en: {
+    nt_low: "NT — low tariff",
+    vt_high: "VT — high tariff",
+    hdo_unavailable: "HDO — state unavailable",
+    ends_in: "ends in",
+    switching: "switching…",
+    today: "Today",
+    tomorrow: "Tomorrow",
+    weekday: "weekday",
+    weekend: "weekend",
+    holiday: "holiday",
+    nt_left: "NT left",
+    total: "total",
+    now: "Now",
+    main_meter: "Main meter",
+    three_phase_section: "3-phase circuits",
+    single_phase_section: "Single-phase breakers",
+    devices: "devices",
+    hide: "hide",
+    kwh_today: "kWh today",
+    turn_on: "Turn on",
+    turn_off: "Turn off",
+    confirm_turn_on: 'Turn ON circuit "{name}"?',
+    confirm_turn_off: 'Turn OFF circuit "{name}"?',
+    nt_in: "NT in",
+    save_pct: "save"
+  },
+  cs: {
+    nt_low: "NT — nízký tarif",
+    vt_high: "VT — vysoký tarif",
+    hdo_unavailable: "HDO — stav nedostupný",
+    ends_in: "konec za",
+    switching: "přepíná se…",
+    today: "Dnes",
+    tomorrow: "Zítra",
+    weekday: "všední den",
+    weekend: "víkend",
+    holiday: "svátek",
+    nt_left: "zbývá NT",
+    total: "celkem",
+    now: "Teď",
+    main_meter: "Hlavní elektroměr",
+    three_phase_section: "Třífázové okruhy",
+    single_phase_section: "Jednofázové jističe",
+    devices: "zařízení",
+    hide: "skrýt",
+    kwh_today: "kWh dnes",
+    turn_on: "Zapnout",
+    turn_off: "Vypnout",
+    confirm_turn_on: 'Opravdu ZAPNOUT okruh „{name}"?',
+    confirm_turn_off: 'Opravdu VYPNOUT okruh „{name}"?',
+    nt_in: "NT za",
+    save_pct: "úspora"
+  }
+};
+function resolveLang(config, hass) {
+  var _a2;
+  const cfg = config == null ? void 0 : config.language;
+  if (cfg === "en" || cfg === "cs") return cfg;
+  const haLang = ((_a2 = hass == null ? void 0 : hass.locale) == null ? void 0 : _a2.language) ?? "";
+  return haLang.startsWith("cs") ? "cs" : "en";
+}
+function localize(lang, key, vars) {
+  let str = STRINGS[lang][key] ?? STRINGS.en[key] ?? key;
+  if (vars) for (const [k2, v2] of Object.entries(vars)) str = str.replace(`{${k2}}`, v2);
+  return str;
+}
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __decorateClass = (decorators, target, key, kind) => {
@@ -1374,6 +1528,9 @@ let ElectricityPanelCard = class extends i {
     this._trackedIds = [];
     this._historyCache = /* @__PURE__ */ new Map();
     this._historyFetching = false;
+    this._refetchQueued = false;
+    this._historyWindowEnd = 0;
+    this._sparkCache = /* @__PURE__ */ new Map();
   }
   get hass() {
     return this._hass;
@@ -1381,8 +1538,12 @@ let ElectricityPanelCard = class extends i {
   set hass(value) {
     const old = this._hass;
     this._hass = value;
-    if (!old) void this._fetchHistory();
-    if (!old || !this._trackedIds.length || this._trackedIds.some((id) => value.states[id] !== old.states[id])) {
+    if (!old) {
+      void this._fetchHistory();
+      this.requestUpdate("hass", old);
+      return;
+    }
+    if (this._trackedIds.length && this._trackedIds.some((id) => value.states[id] !== old.states[id])) {
       this.requestUpdate("hass", old);
     }
   }
@@ -1398,6 +1559,7 @@ let ElectricityPanelCard = class extends i {
     super.disconnectedCallback();
     clearInterval(this._timer);
     clearInterval(this._historyTimer);
+    clearTimeout(this._refetchDebounce);
   }
   // ── HA card API ────────────────────────────────────────────────────────────
   setConfig(config) {
@@ -1407,15 +1569,19 @@ let ElectricityPanelCard = class extends i {
     this._trackedIds = this._buildTrackedIds();
     const appearanceOnly = prev && (prev.graph_hours === config.graph_hours && JSON.stringify(prev.circuits) === JSON.stringify(config.circuits) && JSON.stringify(prev.hdo) === JSON.stringify(config.hdo) && JSON.stringify(prev.main_meter) === JSON.stringify(config.main_meter));
     if (!appearanceOnly) {
-      if (!this._historyFetching) this._historyCache.clear();
-      void this._fetchHistory();
+      this._historyCache.clear();
+      this._sparkCache.clear();
+      clearTimeout(this._refetchDebounce);
+      this._refetchDebounce = window.setTimeout(() => {
+        void this._fetchHistory();
+      }, 300);
     }
   }
   _buildTrackedIds() {
     if (!this._config) return [];
     const ids = [];
     const hdo = this._config.hdo;
-    if (hdo) ids.push(hdo.switch, hdo.next_high, hdo.next_low, hdo.workday_sensor);
+    if (hdo) ids.push(hdo.switch, hdo.next_high, hdo.next_low, hdo.workday_sensor, hdo.holiday_sensor);
     const mm = this._config.main_meter;
     if (mm) ids.push(
       mm.power_l1,
@@ -1461,8 +1627,12 @@ let ElectricityPanelCard = class extends i {
     return { type: "custom:electricity-panel-card", circuits: [] };
   }
   getCardSize() {
-    var _a2;
-    return 4 + Math.ceil((((_a2 = this._config.circuits) == null ? void 0 : _a2.length) ?? 0) / 2);
+    var _a2, _b;
+    return 4 + Math.ceil((((_b = (_a2 = this._config) == null ? void 0 : _a2.circuits) == null ? void 0 : _b.length) ?? 0) / 2);
+  }
+  /** Sizing hint for HA sections (grid) layout */
+  getGridOptions() {
+    return { columns: "full" };
   }
   // ── Entity helpers ─────────────────────────────────────────────────────────
   _state(id) {
@@ -1477,9 +1647,38 @@ let ElectricityPanelCard = class extends i {
   _isOn(id) {
     return this._state(id) === "on";
   }
-  _toggle(entityId) {
-    const svc = this._isOn(entityId) ? "turn_off" : "turn_on";
-    this.hass.callService("switch", svc, { entity_id: entityId });
+  /** Entity exists and is not unavailable/unknown */
+  _isAvail(id) {
+    var _a2, _b;
+    if (!id) return false;
+    const st = (_b = (_a2 = this.hass) == null ? void 0 : _a2.states[id]) == null ? void 0 : _b.state;
+    return st !== void 0 && st !== "unavailable" && st !== "unknown";
+  }
+  _lang() {
+    return resolveLang(this._config, this._hass);
+  }
+  _t(key, vars) {
+    return localize(this._lang(), key, vars);
+  }
+  _log(...args) {
+    var _a2;
+    if ((_a2 = this._config) == null ? void 0 : _a2.debug) console.info("[ep-card]", ...args);
+  }
+  _toggle(entityId, name = "", confirm = false) {
+    const isOn = this._isOn(entityId);
+    if (confirm) {
+      const msg = this._t(isOn ? "confirm_turn_off" : "confirm_turn_on", { name });
+      if (!window.confirm(msg)) return;
+    }
+    this.hass.callService("homeassistant", isOn ? "turn_off" : "turn_on", { entity_id: entityId });
+  }
+  _moreInfo(entityId) {
+    if (!entityId) return;
+    this.dispatchEvent(new CustomEvent("hass-more-info", {
+      detail: { entityId },
+      bubbles: true,
+      composed: true
+    }));
   }
   _toggleExpanded(id) {
     const s2 = new Set(this._expanded);
@@ -1528,33 +1727,77 @@ let ElectricityPanelCard = class extends i {
     const raw = this._state(sensor);
     if (!raw || ["unavailable", "unknown", ""].includes(raw)) return "";
     const diff = Math.floor((new Date(raw).getTime() - Date.now()) / 1e3);
-    if (diff <= 0) return "switching…";
+    if (diff <= 0) return this._t("switching");
     const h2 = Math.floor(diff / 3600);
     const m2 = Math.floor(diff % 3600 / 60);
     return h2 > 0 ? `${h2} h ${String(m2).padStart(2, "0")} min` : `${m2} min`;
   }
+  _isHolidayToday() {
+    var _a2;
+    const hs = (_a2 = this._config.hdo) == null ? void 0 : _a2.holiday_sensor;
+    return !!hs && this._state(hs) === "on";
+  }
+  /** For calendar.* holiday sensors: detect whether tomorrow is a public holiday
+   *  from the calendar's next-event attributes (start_time / end_time). */
+  _isHolidayTomorrow() {
+    var _a2, _b;
+    const hs = (_a2 = this._config.hdo) == null ? void 0 : _a2.holiday_sensor;
+    if (!hs || !hs.startsWith("calendar.")) return false;
+    const ent = (_b = this.hass) == null ? void 0 : _b.states[hs];
+    const start = ent == null ? void 0 : ent.attributes["start_time"];
+    if (!start) return false;
+    const end = ent == null ? void 0 : ent.attributes["end_time"];
+    const probe = /* @__PURE__ */ new Date();
+    probe.setDate(probe.getDate() + 1);
+    probe.setHours(12, 0, 0, 0);
+    const s2 = new Date(start.replace(" ", "T")).getTime();
+    const e2 = end ? new Date(end.replace(" ", "T")).getTime() : s2 + 864e5;
+    return s2 <= probe.getTime() && probe.getTime() < e2;
+  }
   _dayType() {
     var _a2;
-    const isWorkday = this._isOn((_a2 = this._config.hdo) == null ? void 0 : _a2.workday_sensor);
+    if (this._isHolidayToday()) return "holiday";
     const d2 = (/* @__PURE__ */ new Date()).getDay();
-    if (isWorkday) return "weekday";
-    if (d2 === 0 || d2 === 6) return "weekend";
-    return "holiday";
+    const isWeekendDay = d2 === 0 || d2 === 6;
+    const ws = (_a2 = this._config.hdo) == null ? void 0 : _a2.workday_sensor;
+    if (ws) {
+      const st = this._state(ws);
+      if (st === "on") return "weekday";
+      if (st === "off") return isWeekendDay ? "weekend" : "holiday";
+    }
+    return isWeekendDay ? "weekend" : "weekday";
   }
   _tomorrowDayType() {
+    if (this._isHolidayTomorrow()) return "holiday";
     const d2 = ((/* @__PURE__ */ new Date()).getDay() + 1) % 7;
     return d2 === 0 || d2 === 6 ? "weekend" : "weekday";
+  }
+  /** Wall-clock "HH:MM" on the day starting at `base` — DST-safe
+   *  (unlike base + minutes*60000 on 23/25-hour days). */
+  _slotTimeMs(base, hm) {
+    const [h2, m2] = hm.split(":").map(Number);
+    const d2 = new Date(base);
+    d2.setHours(h2, m2, 0, 0);
+    return d2.getTime();
+  }
+  /** Midnight of the following day — DST-safe day end. */
+  _dayEndMs(base) {
+    const d2 = new Date(base);
+    d2.setDate(d2.getDate() + 1);
+    d2.setHours(0, 0, 0, 0);
+    return d2.getTime();
   }
   _ntRemainingMins(starts, offsets) {
     const now = Date.now();
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
+    const base = midnight.getTime();
+    const dayEnd = this._dayEndMs(base);
     let rem = 0;
     starts.forEach((s2, i2) => {
-      const [h2, m2] = s2.split(":").map(Number);
-      const st = midnight.getTime() + (h2 * 60 + m2) * 6e4;
-      const en = st + offsets[i2] * 6e4;
-      if (now < en) rem += (en - Math.max(now, st)) / 6e4;
+      const st = this._slotTimeMs(base, s2);
+      const en = Math.min(st + offsets[i2] * 6e4, dayEnd);
+      if (en > st && now < en) rem += (en - Math.max(now, st)) / 6e4;
     });
     return rem;
   }
@@ -1563,15 +1806,21 @@ let ElectricityPanelCard = class extends i {
     const m2 = Math.floor(mins % 60);
     return h2 > 0 ? `${h2}h ${m2}m` : `${m2}m`;
   }
-  _fmtCostRate(watts) {
-    const hdo = this._config.hdo;
-    if (!(hdo == null ? void 0 : hdo.nt_price) && !(hdo == null ? void 0 : hdo.vt_price)) return "";
-    const isNT = this._isOn(hdo.switch);
-    const ntPrice = parseFloat(hdo.nt_price) || 0;
-    const vtPrice = parseFloat(hdo.vt_price) || 0;
-    const price = isNT ? ntPrice : vtPrice;
-    const cur = hdo.currency ?? "Kč";
-    return `${(watts / 1e3 * price).toFixed(2)} ${cur}/h`;
+  /** During VT: "NT in 1h 23m · save 58 %" — per-circuit hint that deferring the
+   *  load to the next NT window saves money. Opt-in via show_nt_hint. */
+  _ntHint(powerW) {
+    const cfg = this._config;
+    const hdo = cfg.hdo;
+    if (!cfg.show_nt_hint || !(hdo == null ? void 0 : hdo.switch)) return "";
+    if (!this._isAvail(hdo.switch) || this._isOn(hdo.switch)) return "";
+    if (powerW < (cfg.nt_hint_min_watts ?? 100)) return "";
+    const ntP = parseFloat(hdo.nt_price) || 0;
+    const vtP = parseFloat(hdo.vt_price) || 0;
+    if (!(vtP > 0) || ntP >= vtP) return "";
+    const cd = this._hdoCountdown();
+    if (!cd) return "";
+    const pct = Math.round((vtP - ntP) / vtP * 100);
+    return `${this._t("nt_in")} ${cd} · ${this._t("save_pct")} ${pct} %`;
   }
   // ── Age badge ─────────────────────────────────────────────────────────────
   /** Returns "↻ Xs / Xm / Xh" badge showing time since entity was last updated.
@@ -1595,15 +1844,15 @@ let ElectricityPanelCard = class extends i {
   }
   // ── Full-day schedule builder ──────────────────────────────────────────────
   _buildFullDaySlots(starts, offsets, base, showing) {
-    const fmt = (ms) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    const loc = this._lang() === "cs" ? "cs-CZ" : "en-GB";
+    const fmt = (ms) => new Date(ms).toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" });
     const fmtDur = (m2) => m2 >= 60 ? `${Math.floor(m2 / 60)}h${m2 % 60 ? ` ${m2 % 60}m` : ""}` : `${m2}m`;
     const now = Date.now();
-    const dayEnd = base + 864e5;
+    const dayEnd = this._dayEndMs(base);
     const ntWindows = starts.map((start, i2) => {
-      const [h2, m2] = start.split(":").map(Number);
-      const s2 = base + (h2 * 60 + m2) * 6e4;
-      return { s: s2, e: s2 + offsets[i2] * 6e4, durMins: offsets[i2] };
-    });
+      const s2 = this._slotTimeMs(base, start);
+      return { s: s2, e: Math.min(s2 + offsets[i2] * 6e4, dayEnd) };
+    }).filter((w) => w.e > w.s && w.s < dayEnd).sort((a2, b2) => a2.s - b2.s);
     const makeSlot = (type, slotStart, slotEnd, durMins) => {
       const isPast = !showing && now >= slotEnd;
       const isCurrent = !showing && now >= slotStart && now < slotEnd;
@@ -1621,10 +1870,12 @@ let ElectricityPanelCard = class extends i {
     const slots = [];
     let cursor = base;
     for (const nt of ntWindows) {
-      if (nt.s > cursor) {
-        slots.push(makeSlot("vt", cursor, nt.s, Math.round((nt.s - cursor) / 6e4)));
+      const s2 = Math.max(nt.s, cursor);
+      if (s2 >= nt.e) continue;
+      if (s2 > cursor) {
+        slots.push(makeSlot("vt", cursor, s2, Math.round((s2 - cursor) / 6e4)));
       }
-      slots.push(makeSlot("nt", nt.s, nt.e, nt.durMins));
+      slots.push(makeSlot("nt", s2, nt.e, Math.round((nt.e - s2) / 6e4)));
       cursor = nt.e;
     }
     if (cursor < dayEnd) {
@@ -1664,36 +1915,58 @@ let ElectricityPanelCard = class extends i {
     `;
   }
   // ── History & sparklines ──────────────────────────────────────────────────
+  _hasPrices() {
+    var _a2;
+    const hdo = (_a2 = this._config) == null ? void 0 : _a2.hdo;
+    return !!(hdo && (hdo.nt_price || hdo.vt_price));
+  }
+  /** Entity IDs whose history is actually needed — driven by sparkline
+   *  visibility and by cost tracking (prices configured). */
   _graphEntityIds() {
     if (!this._config) return [];
+    const cfg = this._config;
+    const hasPrices = this._hasPrices();
+    const spark3 = cfg.sparkline_3phase !== false;
+    const sparkMm = cfg.sparkline_main_meter !== false;
+    const spark1 = cfg.sparkline_1phase ?? false;
     const ids = [];
-    for (const circ of this._config.circuits ?? []) {
+    for (const circ of cfg.circuits ?? []) {
       if (circ.phases === 3) {
-        [circ.power_l1, circ.power_l2, circ.power_l3].forEach((id) => {
-          if (id) ids.push(id);
-        });
-      } else if (circ.power) {
+        if (spark3 || hasPrices && !circ.power) {
+          [circ.power_l1, circ.power_l2, circ.power_l3].forEach((id) => {
+            if (id) ids.push(id);
+          });
+        }
+        if (hasPrices && circ.power) ids.push(circ.power);
+      } else if (circ.power && (spark1 || hasPrices)) {
         ids.push(circ.power);
       }
-      if (circ.phases === 3 && circ.power) ids.push(circ.power);
     }
-    const mm = this._config.main_meter;
-    if (mm) [mm.power_l1, mm.power_l2, mm.power_l3].forEach((id) => {
-      if (id) ids.push(id);
-    });
+    const mm = cfg.main_meter;
+    if (mm && (sparkMm || hasPrices)) {
+      [mm.power_l1, mm.power_l2, mm.power_l3].forEach((id) => {
+        if (id) ids.push(id);
+      });
+    }
     return [...new Set(ids)];
   }
   async _fetchHistory() {
     var _a2, _b, _c, _d;
-    if (!this._hass || !this._config || this._historyFetching) return;
+    if (!this._hass || !this._config) return;
+    if (this._historyFetching) {
+      this._refetchQueued = true;
+      return;
+    }
     const graphIds = this._graphEntityIds();
     const hdoSwitch = (_a2 = this._config.hdo) == null ? void 0 : _a2.switch;
     if (graphIds.length === 0 && !hdoSwitch) return;
     this._historyFetching = true;
     const hours = this._config.graph_hours ?? 3;
-    const graphStart = new Date(Date.now() - hours * 36e5).toISOString();
+    const nowMs = Date.now();
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
+    const startMs = this._hasPrices() ? Math.min(nowMs - hours * 36e5, midnight.getTime()) : nowMs - hours * 36e5;
+    const graphStart = new Date(startMs).toISOString();
     const midnightStr = midnight.toISOString();
     const wattsMul = /* @__PURE__ */ new Map();
     for (const id of graphIds) {
@@ -1705,7 +1978,7 @@ let ElectricityPanelCard = class extends i {
       let written = 0;
       for (const [id, entries] of Object.entries(raw)) {
         if (!Array.isArray(entries)) {
-          console.warn(`[ep-card] ${id}: entries not Array (${typeof entries})`);
+          this._log(`${id}: entries not Array (${typeof entries})`);
           continue;
         }
         const isSwitch = switchIds.includes(id);
@@ -1722,10 +1995,10 @@ let ElectricityPanelCard = class extends i {
           written++;
         } else {
           const s2 = JSON.stringify(entries.slice(0, 2).map((e2) => ({ s: e2.s, state: e2.state, lu: e2.lu, lc: e2.lc })));
-          console.warn(`[ep-card] ${id}: 0 pts from ${entries.length} entries, sample: ${s2}`);
+          this._log(`${id}: 0 pts from ${entries.length} entries, sample: ${s2}`);
         }
       }
-      console.log(`[ep-card] processEntries: ${written}/${Object.keys(raw).length} written, cache=${cacheRef.size}`);
+      this._log(`processEntries: ${written}/${Object.keys(raw).length} written, cache=${cacheRef.size}`);
     };
     if (typeof this._hass.callWS !== "function") {
       console.error("[ep-card] hass.callWS is not available on this HA version");
@@ -1734,24 +2007,15 @@ let ElectricityPanelCard = class extends i {
     }
     try {
       if (graphIds.length > 0) {
-        console.log(`[ep-card] fetching history: ${graphIds.length} entities, start=${graphStart}`);
+        this._log(`fetching history: ${graphIds.length} entities, start=${graphStart}`);
         const raw = await this._hass.callWS({
           type: "history/history_during_period",
           start_time: graphStart,
           entity_ids: graphIds,
+          minimal_response: true,
           no_attributes: true,
           significant_changes_only: false
         });
-        const keys = Object.keys(raw ?? {});
-        const totalPts = keys.reduce((s2, k2) => {
-          var _a3;
-          return s2 + (((_a3 = raw[k2]) == null ? void 0 : _a3.length) ?? 0);
-        }, 0);
-        console.log(`[ep-card] history result: ${keys.length} entities, ${totalPts} total points`);
-        if (keys.length > 0) {
-          const sample = raw[keys[0]];
-          console.log(`[ep-card] sample entry (${keys[0]}):`, JSON.stringify(sample == null ? void 0 : sample[0]));
-        }
         processEntries(raw, []);
       }
       if (hdoSwitch) {
@@ -1759,18 +2023,25 @@ let ElectricityPanelCard = class extends i {
           type: "history/history_during_period",
           start_time: midnightStr,
           entity_ids: [hdoSwitch],
+          minimal_response: true,
           no_attributes: true,
           significant_changes_only: false
         });
-        console.log(`[ep-card] HDO switch history: ${((_d = hdoRaw == null ? void 0 : hdoRaw[hdoSwitch]) == null ? void 0 : _d.length) ?? 0} entries`);
+        this._log(`HDO switch history: ${((_d = hdoRaw == null ? void 0 : hdoRaw[hdoSwitch]) == null ? void 0 : _d.length) ?? 0} entries`);
         processEntries(hdoRaw, [hdoSwitch]);
       }
-      console.log(`[ep-card] cache now has ${this._historyCache.size} entities`);
+      this._log(`cache now has ${this._historyCache.size} entities`);
+      this._historyWindowEnd = nowMs;
+      this._sparkCache.clear();
       this.requestUpdate();
     } catch (err) {
       console.warn("[ep-card] history fetch failed:", err);
     } finally {
       this._historyFetching = false;
+      if (this._refetchQueued) {
+        this._refetchQueued = false;
+        void this._fetchHistory();
+      }
     }
   }
   _isNTAt(t2) {
@@ -1795,8 +2066,7 @@ let ElectricityPanelCard = class extends i {
       const dt = this._dayType();
       const day = dt === "holiday" && src.holiday ? src.holiday : dt === "weekend" ? src.weekend : src.weekday;
       return day.starts.some((start, i2) => {
-        const [h2, m2] = start.split(":").map(Number);
-        const s2 = midnight.getTime() + (h2 * 60 + m2) * 6e4;
+        const s2 = this._slotTimeMs(midnight.getTime(), start);
         return t2 >= s2 && t2 < s2 + day.offsets[i2] * 6e4;
       });
     }
@@ -1822,7 +2092,7 @@ let ElectricityPanelCard = class extends i {
       hasData = true;
       for (let i2 = 1; i2 < todayPts.length; i2++) {
         const dtMs = todayPts[i2].t - todayPts[i2 - 1].t;
-        const avgW = (todayPts[i2].v + todayPts[i2 - 1].v) / 2;
+        const avgW = Math.max(0, (todayPts[i2].v + todayPts[i2 - 1].v) / 2);
         const wh = avgW * (dtMs / 36e5);
         const midT = (todayPts[i2].t + todayPts[i2 - 1].t) / 2;
         if (this._isNTAt(midT)) ntWh += wh;
@@ -1843,23 +2113,41 @@ let ElectricityPanelCard = class extends i {
     const color = this._config.sparkline_color ?? "#ef4444";
     const labelPos = this._config.sparkline_labels ?? "left";
     const showRef = this._config.sparkline_ref_line ?? false;
-    const tMin = data[0].t, tMax = data[data.length - 1].t;
-    const tRange = tMax - tMin || 1;
-    const vals = data.map((p2) => p2.v);
-    const vMin = Math.min(...vals), vMax = Math.max(...vals);
-    const vRange = vMax - vMin || 0.01;
-    const xRange = W;
-    const coords = data.map((p2) => ({
-      x: (p2.t - tMin) / tRange * xRange,
-      y: H2 - pad - (p2.v - vMin) / vRange * (H2 - pad * 2)
-    }));
-    let linePath = `M ${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}`;
-    for (let i2 = 1; i2 < coords.length; i2++) {
-      const p0 = coords[i2 - 1], p1 = coords[i2];
-      const cx = ((p0.x + p1.x) / 2).toFixed(1);
-      linePath += ` C ${cx},${p0.y.toFixed(1)} ${cx},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
+    let cached = this._sparkCache.get(entityId);
+    if (!cached || cached.data !== data || cached.windowEnd !== this._historyWindowEnd) {
+      const hours = this._config.graph_hours ?? 3;
+      const windowEnd = this._historyWindowEnd || data[data.length - 1].t;
+      const windowStart = windowEnd - hours * 36e5;
+      const pts = [];
+      let carry;
+      for (const p2 of data) {
+        if (p2.t < windowStart) carry = p2;
+        else pts.push(p2);
+      }
+      if (carry) pts.unshift({ t: windowStart, v: carry.v });
+      if (pts.length === 0) return A;
+      pts.push({ t: windowEnd, v: pts[pts.length - 1].v });
+      const tRange = windowEnd - windowStart || 1;
+      let vMin = Infinity, vMax = -Infinity;
+      for (const p2 of pts) {
+        if (p2.v < vMin) vMin = p2.v;
+        if (p2.v > vMax) vMax = p2.v;
+      }
+      const vRange = vMax - vMin || 0.01;
+      const coords = pts.map((p2) => ({
+        x: (p2.t - windowStart) / tRange * W,
+        y: H2 - pad - (p2.v - vMin) / vRange * (H2 - pad * 2)
+      }));
+      let line = `M ${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}`;
+      for (let i2 = 1; i2 < coords.length; i2++) {
+        const p0 = coords[i2 - 1], p1 = coords[i2];
+        const cx = ((p0.x + p1.x) / 2).toFixed(1);
+        line += ` C ${cx},${p0.y.toFixed(1)} ${cx},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
+      }
+      const area = `${line} L ${coords[coords.length - 1].x.toFixed(1)},${H2} L ${coords[0].x.toFixed(1)},${H2} Z`;
+      cached = { data, windowEnd: this._historyWindowEnd, line, area, vMin, vMax };
+      this._sparkCache.set(entityId, cached);
     }
-    const areaPath = `${linePath} L ${coords[coords.length - 1].x.toFixed(1)},${H2} L ${coords[0].x.toFixed(1)},${H2} Z`;
     const gid = `sg_${entityId.replace(/[^a-z0-9]/gi, "_")}`;
     const yMax = pad.toFixed(1);
     const yMin = (H2 - pad).toFixed(1);
@@ -1867,8 +2155,8 @@ let ElectricityPanelCard = class extends i {
     const refColor = this._config.sparkline_ref_color ?? "rgba(255,255,255,0.35)";
     const lblEl = hideLabels ? A : b`
       <div class="spark-lbls spark-lbls-${labelPos}">
-        <span class="spark-lbl-max">${this._fmtW(vMax)}</span>
-        <span class="spark-lbl-min">${this._fmtW(vMin)}</span>
+        <span class="spark-lbl-max">${this._fmtW(cached.vMax)}</span>
+        <span class="spark-lbl-min">${this._fmtW(cached.vMin)}</span>
       </div>`;
     return b`
       <div class="sparkline-wrap">
@@ -1881,8 +2169,8 @@ let ElectricityPanelCard = class extends i {
               <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
             </linearGradient>
           </defs>
-          <path d="${areaPath}" fill="url(#${gid})"/>
-          <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.5"
+          <path d="${cached.area}" fill="url(#${gid})"/>
+          <path d="${cached.line}" fill="none" stroke="${color}" stroke-width="1.5"
             stroke-linejoin="round" stroke-linecap="round"/>
           <line x1="0" y1="${yMax}" x2="${W}" y2="${yMax}"
             class="spark-ref${showRef ? "" : " spark-hidden"}" style="stroke:${refColor}"/>
@@ -1904,7 +2192,7 @@ let ElectricityPanelCard = class extends i {
     const day = dt === "holiday" && src.holiday ? src.holiday : dt === "weekend" ? src.weekend : src.weekday;
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
-    const base = showing ? midnight.getTime() + 864e5 : midnight.getTime();
+    const base = showing ? this._dayEndMs(midnight.getTime()) : midnight.getTime();
     const slots = this._buildFullDaySlots(day.starts, day.offsets, base, showing);
     const remaining = showing ? null : this._ntRemainingMins(day.starts, day.offsets);
     const totalNT = day.offsets.reduce((a2, b2) => a2 + b2, 0);
@@ -1912,23 +2200,31 @@ let ElectricityPanelCard = class extends i {
     const currentSlot = slots.find((s2) => s2.isCurrent);
     return b`
       <div class="schedule-block">
-        <div class="schedule-title" @click=${() => {
+        <div class="schedule-title" role="button" tabindex="0"
+          aria-expanded=${exp ? "true" : "false"}
+          @click=${() => {
       this._scheduleExpanded = !exp;
+    }}
+          @keydown=${(e2) => {
+      if (e2.key === "Enter" || e2.key === " ") {
+        e2.preventDefault();
+        this._scheduleExpanded = !exp;
+      }
     }}>
-          <span class="schedule-when">${showing ? "Tomorrow" : "Today"}</span>
-          <span class="schedule-day">${dt}</span>
+          <span class="schedule-when">${showing ? this._t("tomorrow") : this._t("today")}</span>
+          <span class="schedule-day">${this._t(dt)}</span>
           ${!exp && currentSlot ? b`
             <span class="stariff ${currentSlot.type}" style="margin-left:4px">${currentSlot.type.toUpperCase()}</span>
             <span class="nt-remaining-inline">${currentSlot.label}</span>
           ` : A}
           <div class="schedule-nav">
-            ${exp && remaining !== null ? b`<span class="nt-remaining">${this._fmtMins(remaining)} NT left · ${this._fmtMins(totalNT)} total</span>` : A}
+            ${exp && remaining !== null ? b`<span class="nt-remaining">${this._fmtMins(remaining)} ${this._t("nt_left")} · ${this._fmtMins(totalNT)} ${this._t("total")}</span>` : A}
             ${exp ? b`
               <button class="sday-btn" @click=${(e2) => {
       e2.stopPropagation();
       this._showTomorrow = !this._showTomorrow;
     }}>
-                ${showing ? "Today" : "Tomorrow"}
+                ${showing ? this._t("today") : this._t("tomorrow")}
               </button>` : A}
             <ha-icon icon="${exp ? "mdi:chevron-up" : "mdi:chevron-down"}" class="schedule-chevron"></ha-icon>
           </div>
@@ -1943,7 +2239,7 @@ let ElectricityPanelCard = class extends i {
                 <div class="srow-track">
                   <div class="srow-fill ${sl.type}" style="width:${sl.pct.toFixed(1)}%"></div>
                 </div>
-                ${sl.isCurrent ? b`<span class="snow ${sl.type}">Now</span>` : b`<span class="sdur">${sl.durStr}</span>`}
+                ${sl.isCurrent ? b`<span class="snow ${sl.type}">${this._t("now")}</span>` : b`<span class="sdur">${sl.durStr}</span>`}
               </div>
             `)}
           </div>
@@ -1955,6 +2251,16 @@ let ElectricityPanelCard = class extends i {
   _renderHdo() {
     const hdo = this._config.hdo;
     if (!(hdo == null ? void 0 : hdo.switch)) return A;
+    if (!this._isAvail(hdo.switch)) {
+      return b`
+        <div class="hdo-bar unk">
+          <div class="hdo-dot unk"></div>
+          <div class="hdo-info">
+            <div class="hdo-label">${this._t("hdo_unavailable")}</div>
+          </div>
+        </div>
+      `;
+    }
     const isNT = this._isOn(hdo.switch);
     const cd = this._hdoCountdown();
     const price = isNT ? hdo.nt_price : hdo.vt_price;
@@ -1964,7 +2270,7 @@ let ElectricityPanelCard = class extends i {
       <div class="hdo-bar ${isNT ? "nt" : "vt"}">
         <div class="hdo-dot ${isNT ? "nt" : "vt"}"></div>
         <div class="hdo-info">
-          <div class="hdo-label">${isNT ? "NT — low tariff" : "VT — high tariff"}</div>
+          <div class="hdo-label">${isNT ? this._t("nt_low") : this._t("vt_high")}</div>
           ${price ? b`<div class="hdo-sub">${price} ${cur}/kWh</div>` : A}
           ${slotPct >= 0 ? b`
             <div class="hdo-prog"><div class="hdo-prog-fill" style="width:${slotPct.toFixed(1)}%"></div></div>
@@ -1972,7 +2278,7 @@ let ElectricityPanelCard = class extends i {
         </div>
         ${cd ? b`
           <div class="hdo-cd">
-            <div class="hdo-cd-lbl">ends in</div>
+            <div class="hdo-cd-lbl">${this._t("ends_in")}</div>
             <div class="hdo-cd-val">${cd}</div>
           </div>
         ` : A}
@@ -1986,7 +2292,7 @@ let ElectricityPanelCard = class extends i {
     const totalW = this._watts(m2.power_l1) + this._watts(m2.power_l2) + this._watts(m2.power_l3);
     const voltage = this._num(m2.voltage);
     const phases = [
-      { label: "L1", power: m2.power_l1, current: m2.current_l1, voltage: m2.voltage_l1 ?? (m2.voltage && !m2.voltage_l2 ? m2.voltage : void 0) },
+      { label: "L1", power: m2.power_l1, current: m2.current_l1, voltage: m2.voltage_l1 },
       { label: "L2", power: m2.power_l2, current: m2.current_l2, voltage: m2.voltage_l2 },
       { label: "L3", power: m2.power_l3, current: m2.current_l3, voltage: m2.voltage_l3 }
     ];
@@ -1997,13 +2303,16 @@ let ElectricityPanelCard = class extends i {
             <ha-icon icon="mdi:transmission-tower"></ha-icon>
           </div>
           <div class="meter-title-wrap">
-            <span class="meter-title">Main meter</span>
+            <span class="meter-title">${this._t("main_meter")}</span>
             <span class="badge badge-info">3φ</span>
           </div>
           <div class="meter-total">
-            <span class="metric-primary">${(totalW / 1e3).toFixed(2)} kW</span>
+            <span class="metric-primary ${m2.energy_today || m2.power_l1 ? "clickable" : ""}"
+              @click=${() => this._moreInfo(m2.power_l1 ?? m2.power_l2 ?? m2.power_l3 ?? m2.energy_today)}>
+              ${(totalW / 1e3).toFixed(2)} kW
+            </span>
             <span class="metric-small">
-              ${m2.energy_today ? b`${this._kwh(m2.energy_today).toFixed(1)} kWh today` : A}
+              ${m2.energy_today ? b`${this._kwh(m2.energy_today).toFixed(1)} ${this._t("kwh_today")}` : A}
               ${(() => {
       const cr = this._calcDailyCost(m2.power_l1, m2.power_l2, m2.power_l3);
       return cr ? b`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : A;
@@ -2017,7 +2326,10 @@ let ElectricityPanelCard = class extends i {
           ${phases.map((p2) => b`
             <div class="phase-cell">
               <div class="phase-label">${p2.label}</div>
-              <div class="phase-power">${(this._watts(p2.power) / 1e3).toFixed(2)} kW</div>
+              <div class="phase-power ${p2.power ? "clickable" : ""}"
+                @click=${() => this._moreInfo(p2.power)}>
+                ${(this._watts(p2.power) / 1e3).toFixed(2)} kW
+              </div>
               <div class="phase-detail">
                 ${this._num(p2.current).toFixed(1)} A
                 ${p2.voltage ? b`<span class="metric-sep">·</span>${this._num(p2.voltage).toFixed(0)} V` : A}
@@ -2033,48 +2345,59 @@ let ElectricityPanelCard = class extends i {
   _renderCircuit(c2) {
     var _a2;
     const isOn = this._isOn(c2.switch);
+    const powerUnavail = !!c2.power && !this._isAvail(c2.power);
     const power = this._watts(c2.power);
     const current = this._num(c2.current);
     const energy = this._kwh(c2.energy);
     const maxA = c2.max_current ?? (c2.phases === 3 ? 63 : 16);
-    const loadPct = Math.min(100, current > 0 ? current / maxA * 100 : power / (maxA * 230) * 100);
+    const loadPct = Math.min(100, Math.max(0, current > 0 ? current / maxA * 100 : power / (maxA * 230) * 100));
     const barColor = this._loadColor(loadPct);
     const expanded = this._expanded.has(c2.id);
     const hasDevices = (((_a2 = c2.devices) == null ? void 0 : _a2.length) ?? 0) > 0;
     const costRate = power > 0 ? this._calcDailyCost(c2.power) : "";
+    const ntHint = this._ntHint(power);
     return b`
       <div class="circuit-card ${c2.critical ? "critical" : ""} ${c2.switch && isOn ? "is-on" : ""}">
 
         <div class="circuit-header">
           <div class="status-dot ${isOn ? "on" : c2.switch ? "off" : "none"}"></div>
-          <span class="circuit-name" title="${c2.name}">${c2.name}</span>
+          <span class="circuit-name ${c2.power || c2.switch ? "clickable" : ""}" title="${c2.name}"
+            @click=${() => this._moreInfo(c2.power ?? c2.switch)}>${c2.name}</span>
           ${c2.phases === 3 ? b`<span class="badge badge-phase">3φ</span>` : A}
           ${c2.critical ? b`<ha-icon icon="mdi:lock" class="lock-icon"></ha-icon>` : c2.switch ? b`<button
                     class="toggle ${isOn ? "on" : "off"}"
-                    @click=${() => this._toggle(c2.switch)}
-                    aria-label="${isOn ? "Turn off" : "Turn on"} ${c2.name}">
+                    @click=${() => this._toggle(c2.switch, c2.name, c2.confirm_toggle)}
+                    aria-label="${this._t(isOn ? "turn_off" : "turn_on")} ${c2.name}">
                   </button>` : A}
         </div>
 
         <div class="load-track">
-          <div class="load-fill" style="width:${loadPct.toFixed(1)}%;background:${barColor}"></div>
+          <div class="load-fill ${loadPct >= 95 ? "overload" : ""}"
+            style="width:${loadPct.toFixed(1)}%;background:${barColor}"></div>
         </div>
 
         <div class="circuit-footer">
           <div class="metrics">
-            <span class="metric-primary ${!isOn && power === 0 ? "inactive" : ""}">${this._fmtW(power)}</span>
+            <span class="metric-primary ${!isOn && power === 0 ? "inactive" : ""}">
+              ${powerUnavail ? "—" : this._fmtW(power)}
+            </span>
             <span class="metric-small">
-              ${current.toFixed(1)} A
+              ${c2.current ? b`${this._isAvail(c2.current) ? current.toFixed(1) : "—"} A` : A}
               ${c2.voltage ? b`<span class="metric-sep">·</span>${this._num(c2.voltage).toFixed(0)} V` : A}
               ${energy > 0 ? b`<span class="metric-sep">·</span>${energy.toFixed(2)} kWh` : A}
               ${costRate ? b`<span class="metric-sep">·</span><span class="cost-rate">${costRate}</span>` : A}
               ${this._ageBadge(c2.power ?? c2.current ?? c2.switch)}
             </span>
           </div>
-          ${hasDevices ? b`<button class="expand-btn" @click=${() => this._toggleExpanded(c2.id)}>
+          ${hasDevices ? b`<button class="expand-btn" aria-expanded=${expanded ? "true" : "false"}
+                @click=${() => this._toggleExpanded(c2.id)}>
                 <ha-icon icon="${expanded ? "mdi:chevron-up" : "mdi:chevron-down"}"></ha-icon>
               </button>` : A}
         </div>
+
+        ${ntHint ? b`
+          <div class="nt-hint"><ha-icon icon="mdi:clock-fast"></ha-icon>${ntHint}</div>
+        ` : A}
 
         ${expanded && hasDevices ? b`<div class="devices-list">${c2.devices.map((d2) => this._renderDevice(d2))}</div>` : A}
         ${this._config.sparkline_1phase ? b`
@@ -2109,7 +2432,7 @@ let ElectricityPanelCard = class extends i {
       `;
     }
     const isOn = this._isOn(d2.switch);
-    const power = this._num(d2.power);
+    const power = this._watts(d2.power);
     const current = this._num(d2.current);
     return b`
       <div class="device-row">
@@ -2121,8 +2444,8 @@ let ElectricityPanelCard = class extends i {
         </span>
         ${d2.switch ? b`<button
                 class="toggle sm ${isOn ? "on" : "off"}"
-                @click=${() => this._toggle(d2.switch)}
-                aria-label="${isOn ? "Turn off" : "Turn on"} ${d2.name}">
+                @click=${() => this._toggle(d2.switch, d2.name)}
+                aria-label="${this._t(isOn ? "turn_off" : "turn_on")} ${d2.name}">
               </button>` : A}
       </div>
     `;
@@ -2130,7 +2453,7 @@ let ElectricityPanelCard = class extends i {
   // ── Render: channel ────────────────────────────────────────────────────────
   _renderChannel(ch) {
     const isOn = this._isOn(ch.switch);
-    const power = this._num(ch.power);
+    const power = this._watts(ch.power);
     const current = this._num(ch.current);
     return b`
       <div class="device-row channel">
@@ -2142,8 +2465,8 @@ let ElectricityPanelCard = class extends i {
         </span>
         ${ch.switch ? b`<button
                 class="toggle sm ${isOn ? "on" : "off"}"
-                @click=${() => this._toggle(ch.switch)}
-                aria-label="${isOn ? "Turn off" : "Turn on"} ${ch.name}">
+                @click=${() => this._toggle(ch.switch, ch.name)}
+                aria-label="${this._t(isOn ? "turn_off" : "turn_on")} ${ch.name}">
               </button>` : A}
       </div>
     `;
@@ -2152,7 +2475,6 @@ let ElectricityPanelCard = class extends i {
   _renderThreePhaseCircuit(c2) {
     var _a2;
     const isOn = this._isOn(c2.switch);
-    !!(c2.power_l1 || c2.power_l2 || c2.power_l3);
     const totalPower = c2.power ? this._watts(c2.power) : this._watts(c2.power_l1) + this._watts(c2.power_l2) + this._watts(c2.power_l3);
     const energy = this._kwh(c2.energy);
     const maxA = c2.max_current ?? 63;
@@ -2162,21 +2484,23 @@ let ElectricityPanelCard = class extends i {
       { label: "L3", power: c2.power_l3, current: c2.current_l3, voltage: c2.voltage_l3 }
     ];
     const totalCurrent = c2.current ? this._num(c2.current) : Math.max(this._num(c2.current_l1), this._num(c2.current_l2), this._num(c2.current_l3));
-    const loadPct = Math.min(100, totalCurrent > 0 ? totalCurrent / maxA * 100 : totalPower / (maxA * 400) * 100);
+    const loadPct = Math.min(100, Math.max(0, totalCurrent > 0 ? totalCurrent / maxA * 100 : totalPower / (maxA * Math.sqrt(3) * 400) * 100));
     const barColor = this._loadColor(loadPct);
     const expanded = this._expanded.has(c2.id);
     const hasDevices = (((_a2 = c2.devices) == null ? void 0 : _a2.length) ?? 0) > 0;
-    const costRate = totalPower > 0 ? this._calcDailyCost(c2.power, c2.power_l1, c2.power_l2, c2.power_l3) : "";
+    const costRate = totalPower > 0 ? c2.power ? this._calcDailyCost(c2.power) : this._calcDailyCost(c2.power_l1, c2.power_l2, c2.power_l3) : "";
+    const ntHint = this._ntHint(totalPower);
     return b`
       <div class="three-phase-card ${c2.critical ? "critical" : ""} ${c2.switch && isOn ? "is-on" : ""}">
         <div class="tp-header">
           <div class="tp-title-row">
             <div class="status-dot ${isOn ? "on" : c2.switch ? "off" : "none"}"></div>
-            <span class="circuit-name" title="${c2.name}">${c2.name}</span>
+            <span class="circuit-name ${c2.power || c2.switch ? "clickable" : ""}" title="${c2.name}"
+              @click=${() => this._moreInfo(c2.power ?? c2.switch)}>${c2.name}</span>
             <span class="badge badge-phase">3φ</span>
             ${c2.critical ? b`<ha-icon icon="mdi:lock" class="lock-icon"></ha-icon>` : c2.switch ? b`<button class="toggle ${isOn ? "on" : "off"}"
-                    @click=${() => this._toggle(c2.switch)}
-                    aria-label="${isOn ? "Turn off" : "Turn on"} ${c2.name}">
+                    @click=${() => this._toggle(c2.switch, c2.name, c2.confirm_toggle)}
+                    aria-label="${this._t(isOn ? "turn_off" : "turn_on")} ${c2.name}">
                   </button>` : A}
           </div>
           <div class="tp-total">
@@ -2190,14 +2514,22 @@ let ElectricityPanelCard = class extends i {
         </div>
 
         <div class="load-track">
-          <div class="load-fill" style="width:${loadPct.toFixed(1)}%;background:${barColor}"></div>
+          <div class="load-fill ${loadPct >= 95 ? "overload" : ""}"
+            style="width:${loadPct.toFixed(1)}%;background:${barColor}"></div>
         </div>
+
+        ${ntHint ? b`
+          <div class="nt-hint"><ha-icon icon="mdi:clock-fast"></ha-icon>${ntHint}</div>
+        ` : A}
 
         <div class="phases-grid">
           ${phases.map((p2) => b`
             <div class="phase-cell">
               <div class="phase-label">${p2.label}</div>
-              <div class="phase-power">${(this._watts(p2.power) / 1e3).toFixed(2)} kW</div>
+              <div class="phase-power ${p2.power ? "clickable" : ""}"
+                @click=${() => this._moreInfo(p2.power)}>
+                ${(this._watts(p2.power) / 1e3).toFixed(2)} kW
+              </div>
               <div class="phase-detail">
                 ${this._num(p2.current).toFixed(1)} A
                 ${p2.voltage ? b`<span class="metric-sep">·</span>${this._num(p2.voltage).toFixed(0)} V` : A}
@@ -2209,9 +2541,10 @@ let ElectricityPanelCard = class extends i {
 
         ${hasDevices ? b`
           <div class="tp-footer">
-            <button class="expand-btn" @click=${() => this._toggleExpanded(c2.id)}>
+            <button class="expand-btn" aria-expanded=${expanded ? "true" : "false"}
+              @click=${() => this._toggleExpanded(c2.id)}>
               <ha-icon icon="${expanded ? "mdi:chevron-up" : "mdi:chevron-down"}"></ha-icon>
-              <span>${expanded ? "hide" : "devices"}</span>
+              <span>${expanded ? this._t("hide") : this._t("devices")}</span>
             </button>
           </div>
         ` : A}
@@ -2227,7 +2560,7 @@ let ElectricityPanelCard = class extends i {
     const threePhase = circuits.filter((c2) => c2.phases === 3);
     const singlePhase = circuits.filter((c2) => c2.phases !== 3);
     return b`
-      <ha-card>
+      <ha-card class=${this._config.follow_theme ? "theme-auto" : ""}>
         ${this._config.title ? b`<div class="card-header">${this._config.title}</div>` : A}
         <div class="card-content">
           ${this._renderHdo()}
@@ -2235,14 +2568,14 @@ let ElectricityPanelCard = class extends i {
           ${this._renderMainMeter()}
 
           ${threePhase.length > 0 ? b`
-            <div class="section-label">3-phase circuits</div>
+            <div class="section-label">${this._t("three_phase_section")}</div>
             <div class="three-phase-list">
               ${threePhase.map((c2) => this._renderThreePhaseCircuit(c2))}
             </div>
           ` : A}
 
           ${singlePhase.length > 0 ? b`
-            ${threePhase.length > 0 ? b`<div class="section-label">Single-phase breakers</div>` : A}
+            ${threePhase.length > 0 ? b`<div class="section-label">${this._t("single_phase_section")}</div>` : A}
             <div class="circuit-grid">
               ${singlePhase.map((c2) => this._renderCircuit(c2))}
             </div>
@@ -2254,8 +2587,45 @@ let ElectricityPanelCard = class extends i {
 };
 ElectricityPanelCard.styles = i$3`
     :host { display: block; container-type: inline-size; }
-    ha-card { background: #111318; overflow: hidden; }
-    .card-header { padding: 16px 16px 0; font-size: 16px; font-weight: 500; letter-spacing: -0.2px; color: #e2e8f0; }
+    ha-card {
+      /* Built-in dark palette — overridden by .theme-auto below */
+      --ep-bg: #111318;
+      --ep-surface: #181c24;
+      --ep-border: #252a35;
+      --ep-border2: #1f2937;
+      --ep-text: #e2e8f0;
+      --ep-text-mid: #94a3b8;
+      --ep-text-dim: #5d6a80;
+      --ep-text-faint: #374151;
+      --ep-accent: #6b7db3;
+      --ep-accent-bg: #1e2435;
+      --ep-badge-bg: #1e2a4a;
+      --ep-badge-fg: #6b9bdb;
+      background: var(--ep-bg);
+      overflow: hidden;
+    }
+    /* follow_theme: true — map palette onto the active HA theme */
+    ha-card.theme-auto {
+      --ep-bg: var(--ha-card-background, var(--card-background-color, #fff));
+      --ep-surface: var(--secondary-background-color, #f5f5f5);
+      --ep-border: var(--divider-color, rgba(0,0,0,.12));
+      --ep-border2: var(--divider-color, rgba(0,0,0,.12));
+      --ep-text: var(--primary-text-color, #212121);
+      --ep-text-mid: var(--secondary-text-color, #727272);
+      --ep-text-dim: var(--secondary-text-color, #727272);
+      --ep-text-faint: var(--disabled-text-color, #bdbdbd);
+      --ep-accent: var(--primary-color, #03a9f4);
+      --ep-accent-bg: rgba(33, 150, 243, 0.12);
+      --ep-badge-bg: rgba(33, 150, 243, 0.12);
+      --ep-badge-fg: var(--primary-color, #03a9f4);
+    }
+    ha-card.theme-auto .hdo-bar.nt { background: rgba(34,197,94,.08); border-color: rgba(34,197,94,.3); }
+    ha-card.theme-auto .hdo-bar.vt { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.3); }
+    ha-card.theme-auto .hdo-bar.nt .hdo-sub,
+    ha-card.theme-auto .hdo-bar.vt .hdo-sub { color: var(--ep-text-mid); }
+    ha-card.theme-auto .hdo-bar.nt .hdo-prog,
+    ha-card.theme-auto .hdo-bar.vt .hdo-prog { background: rgba(127,127,127,.18); }
+    .card-header { padding: 16px 16px 0; font-size: 16px; font-weight: 500; letter-spacing: -0.2px; color: var(--ep-text); }
     .card-content { padding: 12px 12px 16px; }
 
     .hdo-bar { border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; }
@@ -2281,23 +2651,26 @@ ElectricityPanelCard.styles = i$3`
     .hdo-prog-fill { height: 100%; border-radius: 1px; }
     .hdo-bar.nt .hdo-prog-fill { background: #22c55e; }
     .hdo-bar.vt .hdo-prog-fill { background: #ef4444; }
+    .hdo-bar.unk { background: var(--ep-surface); border: 0.5px solid var(--ep-border); }
+    .hdo-dot.unk { background: var(--ep-text-dim); }
+    .hdo-bar.unk .hdo-label { color: var(--ep-text-mid); }
     .hdo-cd { text-align: right; flex-shrink: 0; }
-    .hdo-cd-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #4b5568; }
+    .hdo-cd-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--ep-text-dim); }
     .hdo-cd-val { font-size: 24px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
     .hdo-bar.nt .hdo-cd-val { color: #22c55e; }
     .hdo-bar.vt .hdo-cd-val { color: #ef4444; }
 
-    .schedule-block { background: #181c24; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; border: 0.5px solid #252a35; }
+    .schedule-block { background: var(--ep-surface); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; border: 0.5px solid var(--ep-border); }
     .schedule-title { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; cursor: pointer; user-select: none; flex-wrap: wrap; }
     .schedule-title:hover { opacity: .85; }
-    .schedule-when { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .7px; color: #94a3b8; }
-    .schedule-day { font-size: 10px; padding: 1px 6px; border-radius: 12px; background: #1e2a4a; color: #6b9bdb; text-transform: capitalize; }
+    .schedule-when { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .7px; color: var(--ep-text-mid); }
+    .schedule-day { font-size: 10px; padding: 1px 6px; border-radius: 12px; background: var(--ep-badge-bg); color: var(--ep-badge-fg); text-transform: capitalize; }
     .schedule-nav { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
-    .nt-remaining { font-size: 10px; color: #4b5568; white-space: nowrap; }
-    .nt-remaining-inline { font-size: 10px; color: #4b5568; margin-left: 4px; white-space: nowrap; }
-    .sday-btn { font-size: 10px; padding: 2px 8px; border-radius: 12px; border: 0.5px solid #252a35; background: #111318; color: #6b7db3; cursor: pointer; white-space: nowrap; font-weight: 500; }
-    .sday-btn:hover { background: #252a35; }
-    .schedule-chevron { --mdc-icon-size: 15px; color: #4b5568; flex-shrink: 0; }
+    .nt-remaining { font-size: 10px; color: var(--ep-text-dim); white-space: nowrap; }
+    .nt-remaining-inline { font-size: 10px; color: var(--ep-text-dim); margin-left: 4px; white-space: nowrap; }
+    .sday-btn { font-size: 10px; padding: 2px 8px; border-radius: 12px; border: 0.5px solid var(--ep-border); background: var(--ep-bg); color: var(--ep-accent); cursor: pointer; white-space: nowrap; font-weight: 500; }
+    .sday-btn:hover { background: var(--ep-border); }
+    .schedule-chevron { --mdc-icon-size: 15px; color: var(--ep-text-dim); flex-shrink: 0; }
     .schedule-rows { display: flex; flex-direction: column; gap: 1px; margin-top: 6px; }
     .srow { display: grid; grid-template-columns: 22px minmax(0,100px) 1fr auto; align-items: center; gap: 7px; padding: 4px 5px; border-radius: 5px; transition: opacity .2s; }
     .srow.past { opacity: .3; }
@@ -2308,15 +2681,15 @@ ElectricityPanelCard.styles = i$3`
     .stariff { font-size: 8px; font-weight: 800; letter-spacing: .4px; padding: 2px 4px; border-radius: 3px; text-align: center; }
     .stariff.nt { background: rgba(34,197,94,.15); color: #22c55e; }
     .stariff.vt { background: rgba(239,68,68,.12); color: #ef4444; }
-    .srow-time { font-size: 11px; font-weight: 500; color: #94a3b8; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
-    .srow-track { height: 3px; background: #252a35; border-radius: 2px; overflow: hidden; }
+    .srow-time { font-size: 11px; font-weight: 500; color: var(--ep-text-mid); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+    .srow-track { height: 3px; background: var(--ep-border); border-radius: 2px; overflow: hidden; }
     .srow-fill { height: 100%; border-radius: 2px; transition: width 1s ease; }
     .srow-fill.nt { background: #22c55e; }
     .srow-fill.vt { background: #ef4444; }
     .snow { font-size: 8px; text-transform: uppercase; letter-spacing: .8px; font-weight: 800; padding: 2px 5px; border-radius: 8px; white-space: nowrap; }
     .snow.nt { background: rgba(34,197,94,.15); color: #22c55e; }
     .snow.vt { background: rgba(239,68,68,.12); color: #ef4444; }
-    .sdur { font-size: 10px; color: #4b5568; white-space: nowrap; text-align: right; }
+    .sdur { font-size: 10px; color: var(--ep-text-dim); white-space: nowrap; text-align: right; }
 
     .timeline-bar { display: flex; height: 4px; border-radius: 2px; overflow: hidden; margin-bottom: 8px; gap: 1px; position: relative; }
     .tl-seg { border-radius: 1px; transition: opacity .3s; }
@@ -2327,21 +2700,21 @@ ElectricityPanelCard.styles = i$3`
     .tl-seg.active.vt { background: #ef4444; }
     .timeline-now { position: absolute; top: -2px; bottom: -2px; width: 4px; background: #fff; border-radius: 2px; pointer-events: none; box-shadow: -1px 0 0 #000, 1px 0 0 #000; }
 
-    .section-label { font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: #4b5568; margin: 12px 0 6px; padding-left: 7px; border-left: 2px solid #252a35; }
+    .section-label { font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: var(--ep-text-dim); margin: 12px 0 6px; padding-left: 7px; border-left: 2px solid var(--ep-border); }
 
-    .ep-meter { background: #181c24; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; border: 0.5px solid #252a35; }
+    .ep-meter { background: var(--ep-surface); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; border: 0.5px solid var(--ep-border); }
     .meter-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-    .meter-icon { width: 28px; height: 28px; border-radius: 6px; background: #1e2435; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .meter-icon ha-icon { --mdc-icon-size: 16px; color: #6b7db3; }
+    .meter-icon { width: 28px; height: 28px; border-radius: 6px; background: var(--ep-accent-bg); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .meter-icon ha-icon { --mdc-icon-size: 16px; color: var(--ep-accent); }
     .meter-title-wrap { display: flex; align-items: center; gap: 6px; flex: 1; }
-    .meter-title { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px; color: #6b7db3; }
+    .meter-title { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px; color: var(--ep-accent); }
     .meter-total { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
     .phases-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; }
-    .phase-cell { background: #111318; border-radius: 6px; padding: 8px 10px; border: 0.5px solid #252a35; }
-    .circuit-spark-wrap { background: #111318; border-radius: 6px; padding: 6px 10px; border: 0.5px solid #252a35; margin-top: 6px; }
-    .phase-label { font-size: 10px; color: #4b5568; font-weight: 500; margin-bottom: 3px; }
+    .phase-cell { background: var(--ep-bg); border-radius: 6px; padding: 8px 10px; border: 0.5px solid var(--ep-border); }
+    .circuit-spark-wrap { background: var(--ep-bg); border-radius: 6px; padding: 6px 10px; border: 0.5px solid var(--ep-border); margin-top: 6px; }
+    .phase-label { font-size: 10px; color: var(--ep-text-dim); font-weight: 500; margin-bottom: 3px; }
     .phase-power { font-size: 14px; font-weight: 500; color: #a0aec0; }
-    .phase-detail { font-size: 11px; color: #4b5568; margin-top: 1px; }
+    .phase-detail { font-size: 11px; color: var(--ep-text-dim); margin-top: 1px; }
 
     .circuit-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; }
     @container (max-width: 480px) { .circuit-grid { grid-template-columns: 1fr; } }
@@ -2349,15 +2722,15 @@ ElectricityPanelCard.styles = i$3`
     @container (max-width: 360px) { .phases-grid { grid-template-columns: 1fr; } }
     .three-phase-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
 
-    .circuit-card { background: #181c24; border-radius: 8px; padding: 12px 14px; border: 0.5px solid #252a35; }
+    .circuit-card { background: var(--ep-surface); border-radius: 8px; padding: 12px 14px; border: 0.5px solid var(--ep-border); }
     .circuit-card.critical  { border-left: 2px solid #f59e0b; }
     .circuit-card.is-on     { border-left: 2px solid #22c55e; }
     .circuit-card.critical.is-on { border-left: 2px solid #f59e0b; }
     .circuit-header { display: flex; align-items: center; gap: 6px; margin-bottom: 1px; }
-    .circuit-name { font-size: 12px; font-weight: 500; color: #94a3b8; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .circuit-name { font-size: 12px; font-weight: 500; color: var(--ep-text-mid); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .lock-icon { --mdc-icon-size: 14px; color: #f59e0b; flex-shrink: 0; }
 
-    .three-phase-card { background: #181c24; border-radius: 8px; padding: 12px 14px; border: 0.5px solid #252a35; }
+    .three-phase-card { background: var(--ep-surface); border-radius: 8px; padding: 12px 14px; border: 0.5px solid var(--ep-border); }
     .three-phase-card.critical { border-left: 2px solid #f59e0b; }
     .three-phase-card.is-on    { border-left: 2px solid #22c55e; }
     .tp-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
@@ -2365,20 +2738,25 @@ ElectricityPanelCard.styles = i$3`
     .tp-total { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex-shrink: 0; }
     .tp-footer { display: flex; justify-content: flex-end; margin-top: 8px; }
 
-    .load-track { height: 3px; background: #1f2937; border-radius: 2px; overflow: hidden; margin: 7px 0; }
+    .load-track { height: 3px; background: var(--ep-border2); border-radius: 2px; overflow: hidden; margin: 7px 0; }
     .load-fill { height: 100%; border-radius: 2px; transition: width 1s ease; }
+    .load-fill.overload { animation: ep-overload 1s ease-in-out infinite; }
+    @keyframes ep-overload {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: .45; }
+    }
 
     .circuit-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; }
     .metrics { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-    .metric-primary { font-size: 22px; font-weight: 500; color: #e2e8f0; line-height: 1; letter-spacing: -0.4px; }
-    .metric-primary.inactive { color: #374151; }
-    .metric-small { font-size: 11px; color: #4b5568; display: flex; flex-wrap: wrap; align-items: center; gap: 1px 2px; }
+    .metric-primary { font-size: 22px; font-weight: 500; color: var(--ep-text); line-height: 1; letter-spacing: -0.4px; }
+    .metric-primary.inactive { color: var(--ep-text-faint); }
+    .metric-small { font-size: 11px; color: var(--ep-text-dim); display: flex; flex-wrap: wrap; align-items: center; gap: 1px 2px; }
     .metric-sep { opacity: .4; margin: 0 1px; }
     .cost-rate { color: #f59e0b; font-weight: 500; }
 
     .badge { font-size: 9px; padding: 2px 5px; border-radius: 4px; font-weight: 500; flex-shrink: 0; letter-spacing: .3px; }
-    .badge-info  { background: #1e2a4a; color: #6b9bdb; }
-    .badge-phase { background: #1e2a4a; color: #6b9bdb; }
+    .badge-info  { background: var(--ep-badge-bg); color: var(--ep-badge-fg); }
+    .badge-phase { background: var(--ep-badge-bg); color: var(--ep-badge-fg); }
 
     .toggle { width: 32px; height: 18px; border-radius: 9px; border: none; cursor: pointer; position: relative; flex-shrink: 0; transition: background .2s; }
     .toggle::after { content: ''; position: absolute; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.4); transition: left .2s; }
@@ -2397,25 +2775,25 @@ ElectricityPanelCard.styles = i$3`
     .status-dot.none { background: transparent; border: 1px solid #374151; }
     .status-dot.sm  { width: 6px; height: 6px; }
 
-    .expand-btn { display: flex; align-items: center; gap: 4px; background: #111318; border: 0.5px solid #252a35; border-radius: 5px; cursor: pointer; color: #4b5568; padding: 2px 6px; flex-shrink: 0; }
+    .expand-btn { display: flex; align-items: center; gap: 4px; background: var(--ep-bg); border: 0.5px solid var(--ep-border); border-radius: 5px; cursor: pointer; color: var(--ep-text-dim); padding: 2px 6px; flex-shrink: 0; }
     .expand-btn ha-icon { --mdc-icon-size: 14px; }
     .expand-btn span { font-size: 10px; }
 
-    .tp-devices-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid #252a35; }
-    .devices-list { display: flex; flex-direction: column; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid #252a35; }
+    .tp-devices-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--ep-border); }
+    .devices-list { display: flex; flex-direction: column; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--ep-border); }
     .tp-device-col { min-width: 0; }
     .tp-device-col .device-group-label { padding-left: 0; }
     .tp-device-col .device-row { padding-left: 0; }
     .device-group { margin-bottom: 6px; }
-    .device-group-label { display: flex; justify-content: space-between; align-items: center; font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: #4b5568; margin-bottom: 4px; padding-left: 14px; }
-    .ch-sum { font-size: 10px; font-weight: 500; color: #6b7db3; letter-spacing: 0; text-transform: none; }
-    .device-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 0.5px solid #1f2937; }
+    .device-group-label { display: flex; justify-content: space-between; align-items: center; font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: var(--ep-text-dim); margin-bottom: 4px; padding-left: 14px; }
+    .ch-sum { font-size: 10px; font-weight: 500; color: var(--ep-accent); letter-spacing: 0; text-transform: none; }
+    .device-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 0.5px solid var(--ep-border2); }
     .device-row:last-child { border-bottom: none; }
     .device-row.channel { padding-left: 8px; }
-    .device-name { flex: 1; font-size: 12px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .device-metrics { font-size: 11px; color: #4b5568; white-space: nowrap; flex-shrink: 0; }
+    .device-name { flex: 1; font-size: 12px; color: var(--ep-text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .device-metrics { font-size: 11px; color: var(--ep-text-dim); white-space: nowrap; flex-shrink: 0; }
     .note-row { opacity: .6; }
-    .note-icon { --mdc-icon-size: 12px; color: #4b5568; flex-shrink: 0; }
+    .note-icon { --mdc-icon-size: 12px; color: var(--ep-text-dim); flex-shrink: 0; }
     .note-row .device-name { font-style: italic; }
 
     .sparkline-wrap { display: flex; align-items: stretch; width: 100%; height: 38px; margin-top: 6px; }
@@ -2423,11 +2801,17 @@ ElectricityPanelCard.styles = i$3`
     .spark-lbls { width: 40px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 2px 2px; pointer-events: none; }
     .spark-lbls-left { align-items: flex-start; }
     .spark-lbls-right { align-items: flex-end; }
-    .spark-lbl-max { font-size: 8px; color: rgba(255,255,255,.75); text-shadow: 0 0 3px #111318, 0 0 3px #111318; white-space: nowrap; font-family: inherit; }
-    .spark-lbl-min { font-size: 8px; color: rgba(255,255,255,.45); text-shadow: 0 0 3px #111318, 0 0 3px #111318; white-space: nowrap; font-family: inherit; }
+    .spark-lbl-max { font-size: 8px; color: rgba(255,255,255,.75); text-shadow: 0 0 3px var(--ep-bg), 0 0 3px var(--ep-bg); white-space: nowrap; font-family: inherit; }
+    .spark-lbl-min { font-size: 8px; color: rgba(255,255,255,.45); text-shadow: 0 0 3px var(--ep-bg), 0 0 3px var(--ep-bg); white-space: nowrap; font-family: inherit; }
     .spark-ref { stroke-width: 1px; stroke-dasharray: 3 3; }
     .spark-hidden { display: none; }
     .age-badge { font-size: 10px; font-variant-numeric: tabular-nums; }
+
+    .nt-hint { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #f59e0b; opacity: .85; margin-top: 6px; }
+    .nt-hint ha-icon { --mdc-icon-size: 12px; }
+
+    .clickable { cursor: pointer; }
+    .clickable:hover { opacity: .8; }
   `;
 __decorateClass([
   r()

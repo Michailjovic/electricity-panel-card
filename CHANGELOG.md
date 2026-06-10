@@ -5,6 +5,148 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.1.0] — 2026-06-10
+*Accuracy release — correct daily costs, holiday-aware schedules, cs/en localization,
+HA theme support, and a faster, safer card.*
+
+### ✨ Added
+
+- **Public holiday sensor** — new `hdo.holiday_sensor` entity field: any entity that is
+  `on` on public holidays, e.g. a national holiday calendar (`calendar.czechia`).
+  Today's state selects the holiday schedule; for `calendar.*` entities the next-event
+  attributes (`start_time` / `end_time`) are additionally used to detect whether
+  **tomorrow** is a holiday, so the Tomorrow schedule view now shows the correct
+  holiday programme.
+
+- **"Wait for NT" hint** (opt-in) — during VT, circuits drawing above a configurable
+  threshold (default 100 W) show a compact amber hint with the countdown to the next
+  NT window and the percentage saving (`NT in 1h 23m · save 58 %`). Disabled by
+  default to keep the dashboard calm; enable in the HDO editor section. Requires
+  NT/VT prices.
+
+- **Localization (cs/en)** — all card strings are translated. Language follows the HA
+  profile automatically; force with `language: en | cs`.
+
+- **Follow HA theme** — `follow_theme: true` maps the card palette onto the active HA
+  theme (light or dark) instead of the built-in dark design. Off by default —
+  existing dashboards are unchanged.
+
+- **Toggle confirmation** — per-circuit `confirm_toggle` shows a confirmation dialog
+  before switching the breaker.
+
+- **More-info dialogs** — circuit names, phase power values and the main-meter total
+  are clickable and open the standard HA more-info dialog.
+
+- **Overload pulse** — the load bar pulses when load reaches 95 % of the breaker rating.
+
+- **Unavailable states surfaced** — an unavailable HDO switch renders a neutral grey
+  bar instead of masquerading as VT; unavailable power/current sensors show `—`
+  instead of a misleading `0`.
+
+- **Sections layout support** — `getGridOptions()` reports full-width sizing for the
+  HA sections (grid) dashboard layout.
+
+- **Editor: reorder arrows** — ↑ / ↓ buttons next to each circuit (HTML5 drag & drop
+  never worked on touch devices; both methods are now available).
+
+- **Editor: "Appearance & behaviour" section** — theme, language and debug-logging
+  controls.
+
+- **`.env.example`** — template for `deploy.mjs` that the docs referenced but the
+  repository never contained.
+
+### 🐛 Fixed
+
+- **Daily cost was not daily** — power history was fetched only `graph_hours`
+  (default 3 h) back, so the "cost today" figure actually integrated just the last
+  few hours. With prices configured the history window now always starts at midnight.
+
+- **3-phase cost double-counting** — circuits with both a total power entity and
+  per-phase entities summed all four signals in the cost integral (≈2× the real
+  cost). The total entity is now preferred; phases are used only when no total exists.
+
+- **Day type without a workday sensor** — with no (or an unavailable) workday sensor
+  every Mon–Fri was classified as a *holiday*, silently selecting the wrong NT
+  schedule. Day-of-week is now the fallback, and an unavailable sensor no longer
+  flips the schedule.
+
+- **3-phase load bar power fallback** — used `P / (maxA × 400)`; correct is
+  `P / (maxA × √3 × 400)`, so the bar over-reported load by ~73 % whenever no current
+  entity was configured.
+
+- **Device & channel units ignored** — device/channel rows bypassed
+  `unit_of_measurement`; a sensor reporting kW rendered as e.g. "1 W" while the
+  channel-sum line above it was correct. All rows now use the same unit-aware
+  conversion as circuits.
+
+- **Toggle domain hardcoded to `switch`** — toggles now call
+  `homeassistant.turn_on/off`, so `light.*`, `input_boolean.*`, `fan.*` etc. work as
+  breaker/device switches.
+
+- **Negative power (PV export)** — clamped to zero in the cost integration and the
+  load bars; export periods no longer produce negative daily costs.
+
+- **Midnight-crossing NT windows** — schedule slots are clamped to 24:00 and sorted;
+  malformed or unsorted manual schedules can no longer produce negative VT gaps or a
+  timeline wider than 24 h.
+
+- **DST transition days** — slot times are computed as wall-clock times instead of
+  `midnight + minutes`, so the schedule stays aligned on 23/25-hour days.
+
+- **Config-change race** — a `setConfig` arriving while a history fetch was in flight
+  silently dropped the refetch until the next 5-minute timer. Refetches are now
+  queued and run as soon as the active fetch finishes.
+
+- **Prices stored as strings** — the GUI editor saved `nt_price` / `vt_price` as
+  strings; they are now stored as numbers, matching the documented config schema.
+
+- **Editor: renaming overwrote custom IDs** — the circuit `id` is only auto-derived
+  from the name when it was itself auto-generated; manually set IDs survive renames.
+
+- **Editor: stale per-phase entities** — switching a circuit from 3φ to 1φ now
+  removes the per-phase entity fields from the config instead of leaving dead keys.
+
+- **Main meter voltage duplication** — a single `voltage` entity no longer renders
+  both in the meter header and inside the L1 phase cell.
+
+### ⚡ Performance
+
+- **Sparkline path caching** — SVG paths are computed once per history fetch instead
+  of on every 30-second countdown re-render.
+
+- **Time-aligned sparklines** — all graphs now share the same x-axis
+  `[fetch − graph_hours, fetch]` and extend the last value to the right edge, making
+  phases visually comparable (previously each graph auto-scaled to its own data span).
+
+- **Leaner history fetches** — only entities that are actually displayed (or needed
+  for cost tracking) are queried; `minimal_response: true` added to the WS call; GUI
+  editor keystrokes are debounced (300 ms) instead of triggering a recorder query per
+  character.
+
+- **No-op hass updates skipped** — with no tracked entities the card no longer
+  re-renders on every state change in HA.
+
+### 🎨 Design & accessibility
+
+- Palette refactored to CSS custom properties (`--ep-*`) — the basis for
+  `follow_theme`.
+- Dim text colour bumped `#4b5568` → `#5d6a80` for better small-text contrast.
+- Schedule header is keyboard-accessible (`role="button"`, `tabindex`, Enter/Space);
+  expand buttons expose `aria-expanded`.
+
+### 🛠 Internal
+
+- `npm run build` now runs `tsc --noEmit` before bundling, and the validate workflow
+  gained a typecheck+build job — the build was previously never type-checked.
+- Dead code removed: `_fmtCostRate`, unused `_inputHandler`; `_moveCircuit` is back
+  in use by the new reorder arrows.
+- Debug console logging is opt-in via `debug: true`; production console spam removed.
+- `package.json` version synced with `EP_VERSION` (was 2.0.0 vs 5.0.8).
+- Removed stray `vite.config.ts.timestamp-*.mjs` artefacts; README's broken
+  screenshot links removed.
+
+---
+
 ## [5.0.8] — 2026-06-05
 *Third and final sparkline label fix — flex layout, labels always 40 px, no overlap.*
 
