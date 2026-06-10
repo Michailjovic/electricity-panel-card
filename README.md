@@ -6,6 +6,22 @@ Configured entirely through a built-in GUI editor. No YAML editing required.
 
 ---
 
+## Screenshots
+
+![Electricity Panel Card — overview](docs/screenshot-overview.png)
+*Main meter with sparkline graphs, HDO tariff bar with countdown, 3-phase circuit and single-phase breakers*
+
+![Electricity Panel Card — NT schedule](docs/screenshot-schedule.png)
+*Expanded daily NT/VT schedule with timeline, current slot progress and tomorrow view*
+
+![Electricity Panel Card — circuit detail](docs/screenshot-circuit.png)
+*Expanded circuit with device list, multi-channel device, load bar and daily cost*
+
+![Electricity Panel Card — GUI editor](docs/screenshot-editor.png)
+*Built-in visual editor — HDO section with tariff preset, holiday sensor and prices*
+
+---
+
 ## Features
 
 - **Panel overview** — main 3-phase meter plus all circuit breakers in one view
@@ -41,6 +57,8 @@ The card works with any entities exposed to HA. Tested with:
 | Tuya smart circuit breakers | Switch + power + current + energy entities per breaker |
 | Shelly 1PM / 2PM / 4PM | Per-device or per-channel power and current monitoring |
 | Any HDO integration | `switch.hdo` + next-change sensors |
+| Workday integration | weekday / weekend / holiday schedule switching |
+| Holiday calendar (e.g. `calendar.czechia`) | public holiday detection for today and tomorrow |
 
 ### HACS
 
@@ -120,11 +138,14 @@ See the [`examples/`](examples/) folder for a standalone HDO dashboard YAML view
 
 ```bash
 npm install
-npm run build      # build to dist/
+npm run typecheck  # tsc --noEmit only
+npm run build      # typecheck + build to dist/
 npm run watch      # rebuild on file changes
-npm run deploy     # build + bump HA resource URL (dev workflow)
+npm run deploy     # build + bump HA resource URL (dev workflow, needs .env)
 npm run bump       # bump HA resource URL only, no rebuild (after HACS update)
 ```
+
+For `deploy` / `bump`, copy `.env.example` to `.env` and fill in `HA_URL` and `HA_TOKEN`.
 
 The output `dist/electricity-panel-card.js` is committed to the repository — HACS requires this.
 
