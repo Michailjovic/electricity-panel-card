@@ -437,6 +437,16 @@ export class ElectricityPanelEditor extends LitElement {
               Weekday / weekend / holiday schedules are loaded automatically.
             </span>
           </div>
+          <div class="field checkbox">
+            <input type="checkbox" id="merge-midnight" .checked=${h.merge_midnight ?? false}
+              @change=${(e: Event) => this._set(['hdo', 'merge_midnight'], (e.target as HTMLInputElement).checked)} />
+            <label for="merge-midnight">Merge NT window across midnight in the schedule display</label>
+          </div>
+          <span class="field-hint">
+            If today's NT window ends at midnight and tomorrow's starts at 00:00, show
+            them as one continuous window instead of splitting at the day boundary.
+            Presentation only — cost calculation is unaffected.
+          </span>
           <div class="group-label" style="margin-top:12px;">Tariff prices (optional)</div>
           ${this._numField('NT price per kWh (low tariff)', h.nt_price as number | undefined, sNum('nt_price'), '0.00')}
           ${this._numField('VT price per kWh (high tariff)', h.vt_price as number | undefined, sNum('vt_price'), '0.00')}

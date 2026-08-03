@@ -1075,6 +1075,16 @@ let ElectricityPanelEditor = class extends i {
               Weekday / weekend / holiday schedules are loaded automatically.
             </span>
           </div>
+          <div class="field checkbox">
+            <input type="checkbox" id="merge-midnight" .checked=${h2.merge_midnight ?? false}
+              @change=${(e2) => this._set(["hdo", "merge_midnight"], e2.target.checked)} />
+            <label for="merge-midnight">Merge NT window across midnight in the schedule display</label>
+          </div>
+          <span class="field-hint">
+            If today's NT window ends at midnight and tomorrow's starts at 00:00, show
+            them as one continuous window instead of splitting at the day boundary.
+            Presentation only — cost calculation is unaffected.
+          </span>
           <div class="group-label" style="margin-top:12px;">Tariff prices (optional)</div>
           ${this._numField("NT price per kWh (low tariff)", h2.nt_price, sNum("nt_price"), "0.00")}
           ${this._numField("VT price per kWh (high tariff)", h2.vt_price, sNum("vt_price"), "0.00")}
@@ -1467,7 +1477,13 @@ const STRINGS = {
     confirm_turn_on: 'Turn ON circuit "{name}"?',
     confirm_turn_off: 'Turn OFF circuit "{name}"?',
     nt_in: "NT in",
-    save_pct: "save"
+    save_pct: "save",
+    from_schedule: "from schedule",
+    nt_should_start: "NT should have started at {time} ({mins} min ago)",
+    nt_started_early: "NT started early — planned {time}",
+    nt_should_end: "NT should have ended at {time} ({mins} min ago)",
+    nt_ended_early: "NT ended early — planned {time}",
+    hdo_mismatch: "doesn't match schedule"
   },
   cs: {
     nt_low: "NT — nízký tarif",
@@ -1494,7 +1510,13 @@ const STRINGS = {
     confirm_turn_on: 'Opravdu ZAPNOUT okruh „{name}"?',
     confirm_turn_off: 'Opravdu VYPNOUT okruh „{name}"?',
     nt_in: "NT za",
-    save_pct: "úspora"
+    save_pct: "úspora",
+    from_schedule: "podle rozvrhu",
+    nt_should_start: "NT měl začít v {time} (před {mins} min)",
+    nt_started_early: "NT začal dříve — plán {time}",
+    nt_should_end: "NT měl skončit v {time} (před {mins} min)",
+    nt_ended_early: "NT skončil dříve — plán {time}",
+    hdo_mismatch: "neodpovídá rozvrhu"
   }
 };
 function resolveLang(config, hass) {
@@ -1508,6 +1530,184 @@ function localize(lang, key, vars) {
   let str = STRINGS[lang][key] ?? STRINGS.en[key] ?? key;
   if (vars) for (const [k2, v2] of Object.entries(vars)) str = str.replace(`{${k2}}`, v2);
   return str;
+}
+function slotTimeMs(base, hm) {
+  const [h2, m2] = hm.split(":").map(Number);
+  const d2 = new Date(base);
+  d2.setHours(h2, m2, 0, 0);
+  return d2.getTime();
+}
+function dayEndMs(base) {
+  const d2 = new Date(base);
+  d2.setDate(d2.getDate() + 1);
+  d2.setHours(0, 0, 0, 0);
+  return d2.getTime();
+}
+function fmtMins(mins) {
+  const h2 = Math.floor(mins / 60);
+  const m2 = Math.floor(mins % 60);
+  return h2 > 0 ? `${h2}h ${m2}m` : `${m2}m`;
+}
+function fmtDur(m2) {
+  return m2 >= 60 ? `${Math.floor(m2 / 60)}h${m2 % 60 ? ` ${m2 % 60}m` : ""}` : `${m2}m`;
+}
+function computeDayType(dow, isHoliday, workdaySensorState) {
+  if (isHoliday) return "holiday";
+  const isWeekendDay = dow === 0 || dow === 6;
+  if (workdaySensorState === "on") return "weekday";
+  if (workdaySensorState === "off") return isWeekendDay ? "weekend" : "holiday";
+  return isWeekendDay ? "weekend" : "weekday";
+}
+function computeTomorrowDayType(tomorrowDow, isHolidayTomorrow) {
+  if (isHolidayTomorrow) return "holiday";
+  return tomorrowDow === 0 || tomorrowDow === 6 ? "weekend" : "weekday";
+}
+function isWithinHolidayEvent(startIso, endIso, probeMs) {
+  const s2 = new Date(startIso.replace(" ", "T")).getTime();
+  const e2 = endIso ? new Date(endIso.replace(" ", "T")).getTime() : s2 + 864e5;
+  return s2 <= probeMs && probeMs < e2;
+}
+function ntRemainingMins(starts, offsets, base, dayEnd, now) {
+  let rem = 0;
+  starts.forEach((s2, i2) => {
+    const st = slotTimeMs(base, s2);
+    const en = Math.min(st + offsets[i2] * 6e4, dayEnd);
+    if (en > st && now < en) rem += (en - Math.max(now, st)) / 6e4;
+  });
+  return rem;
+}
+function ntWindowsForDay(day, base, dayEnd) {
+  return day.starts.map((start, i2) => {
+    const s2 = slotTimeMs(base, start);
+    return { start: s2, end: Math.min(s2 + day.offsets[i2] * 6e4, dayEnd) };
+  }).filter((w) => w.end > w.start && w.start < dayEnd).sort((a2, b2) => a2.start - b2.start);
+}
+function buildFullDaySlots(starts, offsets, base, showing, now, fmt) {
+  const dayEnd = dayEndMs(base);
+  const ntWindows = ntWindowsForDay({ starts, offsets }, base, dayEnd);
+  const makeSlot = (type, slotStart, slotEnd, durMins) => {
+    const isPast = !showing && now >= slotEnd;
+    const isCurrent = !showing && now >= slotStart && now < slotEnd;
+    const pct = isCurrent ? Math.min(100, (now - slotStart) / (slotEnd - slotStart) * 100) : isPast ? 100 : 0;
+    return {
+      type,
+      label: `${fmt(slotStart)}–${fmt(slotEnd)}`,
+      isPast,
+      isCurrent,
+      pct,
+      durMins,
+      durStr: fmtDur(durMins)
+    };
+  };
+  const slots = [];
+  let cursor = base;
+  for (const nt of ntWindows) {
+    const s2 = Math.max(nt.start, cursor);
+    if (s2 >= nt.end) continue;
+    if (s2 > cursor) {
+      slots.push(makeSlot("vt", cursor, s2, Math.round((s2 - cursor) / 6e4)));
+    }
+    slots.push(makeSlot("nt", s2, nt.end, Math.round((nt.end - s2) / 6e4)));
+    cursor = nt.end;
+  }
+  if (cursor < dayEnd) {
+    slots.push(makeSlot("vt", cursor, dayEnd, Math.round((dayEnd - cursor) / 6e4)));
+  }
+  return slots;
+}
+function mergeMidnightNt(slots, dayEnd, tomorrowFirstNtDurMins, now, fmt) {
+  if (!tomorrowFirstNtDurMins || tomorrowFirstNtDurMins <= 0) return slots;
+  const last = slots[slots.length - 1];
+  if (!last || last.type !== "nt") return slots;
+  const slotStart = dayEnd - last.durMins * 6e4;
+  const mergedEnd = dayEnd + tomorrowFirstNtDurMins * 6e4;
+  const durMins = last.durMins + tomorrowFirstNtDurMins;
+  const isCurrent = now >= slotStart && now < mergedEnd;
+  const isPast = now >= mergedEnd;
+  const pct = isCurrent ? Math.min(100, (now - slotStart) / (mergedEnd - slotStart) * 100) : isPast ? 100 : 0;
+  const merged = {
+    ...last,
+    label: `${fmt(slotStart)}–${fmt(mergedEnd)}`,
+    durMins,
+    durStr: fmtDur(durMins),
+    isCurrent,
+    isPast,
+    pct
+  };
+  return [...slots.slice(0, -1), merged];
+}
+const MISMATCH_THRESHOLD_MINS = 120;
+function resolveHdoStatus(now, switchOn, switchSince, windows, dayEnd) {
+  const current = windows.find((w) => now >= w.start && now < w.end);
+  const prev = [...windows].reverse().find((w) => w.end <= now);
+  const next = windows.find((w) => w.start > now);
+  const scheduleOn = !!current;
+  if (switchOn === scheduleOn) {
+    const slotEnd2 = switchOn ? current.end : next ? next.start : dayEnd;
+    return { isNT: switchOn, kind: "ok", slotStart: switchSince, slotEnd: slotEnd2 };
+  }
+  let kind;
+  let boundaryMs;
+  let slotEnd;
+  if (!switchOn && scheduleOn) {
+    if (switchSince <= current.start) {
+      kind = "late_start";
+      boundaryMs = current.start;
+    } else {
+      kind = "early_end";
+      boundaryMs = current.end;
+    }
+    slotEnd = current.end;
+  } else {
+    if (prev && switchSince <= prev.end) {
+      kind = "late_end";
+      boundaryMs = prev.end;
+      slotEnd = next ? next.start : prev.end;
+    } else {
+      kind = "early_start";
+      boundaryMs = next ? next.start : prev ? prev.end : dayEnd;
+      slotEnd = next ? next.end : dayEnd;
+    }
+  }
+  const deltaMins = Math.round(Math.abs(now - boundaryMs) / 6e4);
+  if (deltaMins > MISMATCH_THRESHOLD_MINS) kind = "mismatch";
+  return { isNT: switchOn, kind, boundaryMs, deltaMins, slotStart: switchSince, slotEnd };
+}
+function isNTAt(t2, hdoHistory, scheduleDay, midnightBase, fallbackSwitchOn) {
+  if (hdoHistory && hdoHistory.length > 0 && t2 >= hdoHistory[0].t) {
+    let state = hdoHistory[0].v;
+    for (const pt of hdoHistory) {
+      if (pt.t <= t2) state = pt.v;
+      else break;
+    }
+    return state > 0.5;
+  }
+  if (scheduleDay) {
+    return scheduleDay.starts.some((start, i2) => {
+      const s2 = slotTimeMs(midnightBase, start);
+      return t2 >= s2 && t2 < s2 + scheduleDay.offsets[i2] * 6e4;
+    });
+  }
+  return fallbackSwitchOn;
+}
+function accumulateTariffWh(seriesList, isNTAtFn) {
+  let ntWh = 0, vtWh = 0, hasData = false;
+  for (const pts of seriesList) {
+    if (!pts || pts.length < 2) continue;
+    hasData = true;
+    for (let i2 = 1; i2 < pts.length; i2++) {
+      const dtMs = pts[i2].t - pts[i2 - 1].t;
+      const avgW = Math.max(0, (pts[i2].v + pts[i2 - 1].v) / 2);
+      const wh = avgW * (dtMs / 36e5);
+      const midT = (pts[i2].t + pts[i2 - 1].t) / 2;
+      if (isNTAtFn(midT)) ntWh += wh;
+      else vtWh += wh;
+    }
+  }
+  return { ntWh, vtWh, hasData };
+}
+function calcCost(ntWh, vtWh, ntPrice, vtPrice) {
+  return ntWh / 1e3 * ntPrice + vtWh / 1e3 * vtPrice;
 }
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -1750,61 +1950,29 @@ let ElectricityPanelCard = class extends i {
     const probe = /* @__PURE__ */ new Date();
     probe.setDate(probe.getDate() + 1);
     probe.setHours(12, 0, 0, 0);
-    const s2 = new Date(start.replace(" ", "T")).getTime();
-    const e2 = end ? new Date(end.replace(" ", "T")).getTime() : s2 + 864e5;
-    return s2 <= probe.getTime() && probe.getTime() < e2;
+    return isWithinHolidayEvent(start, end, probe.getTime());
   }
   _dayType() {
     var _a2;
-    if (this._isHolidayToday()) return "holiday";
-    const d2 = (/* @__PURE__ */ new Date()).getDay();
-    const isWeekendDay = d2 === 0 || d2 === 6;
     const ws = (_a2 = this._config.hdo) == null ? void 0 : _a2.workday_sensor;
-    if (ws) {
-      const st = this._state(ws);
-      if (st === "on") return "weekday";
-      if (st === "off") return isWeekendDay ? "weekend" : "holiday";
-    }
-    return isWeekendDay ? "weekend" : "weekday";
+    return computeDayType((/* @__PURE__ */ new Date()).getDay(), this._isHolidayToday(), ws ? this._state(ws) : void 0);
   }
   _tomorrowDayType() {
-    if (this._isHolidayTomorrow()) return "holiday";
     const d2 = ((/* @__PURE__ */ new Date()).getDay() + 1) % 7;
-    return d2 === 0 || d2 === 6 ? "weekend" : "weekday";
-  }
-  /** Wall-clock "HH:MM" on the day starting at `base` — DST-safe
-   *  (unlike base + minutes*60000 on 23/25-hour days). */
-  _slotTimeMs(base, hm) {
-    const [h2, m2] = hm.split(":").map(Number);
-    const d2 = new Date(base);
-    d2.setHours(h2, m2, 0, 0);
-    return d2.getTime();
+    return computeTomorrowDayType(d2, this._isHolidayTomorrow());
   }
   /** Midnight of the following day — DST-safe day end. */
   _dayEndMs(base) {
-    const d2 = new Date(base);
-    d2.setDate(d2.getDate() + 1);
-    d2.setHours(0, 0, 0, 0);
-    return d2.getTime();
+    return dayEndMs(base);
   }
   _ntRemainingMins(starts, offsets) {
-    const now = Date.now();
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
     const base = midnight.getTime();
-    const dayEnd = this._dayEndMs(base);
-    let rem = 0;
-    starts.forEach((s2, i2) => {
-      const st = this._slotTimeMs(base, s2);
-      const en = Math.min(st + offsets[i2] * 6e4, dayEnd);
-      if (en > st && now < en) rem += (en - Math.max(now, st)) / 6e4;
-    });
-    return rem;
+    return ntRemainingMins(starts, offsets, base, this._dayEndMs(base), Date.now());
   }
   _fmtMins(mins) {
-    const h2 = Math.floor(mins / 60);
-    const m2 = Math.floor(mins % 60);
-    return h2 > 0 ? `${h2}h ${m2}m` : `${m2}m`;
+    return fmtMins(mins);
   }
   /** During VT: "NT in 1h 23m · save 58 %" — per-circuit hint that deferring the
    *  load to the next NT window saves money. Opt-in via show_nt_hint. */
@@ -1843,59 +2011,77 @@ let ElectricityPanelCard = class extends i {
     return b`<span class="metric-sep">·</span><span class="age-badge" style="color:${color}">↻ ${label}</span>`;
   }
   // ── Full-day schedule builder ──────────────────────────────────────────────
-  _buildFullDaySlots(starts, offsets, base, showing) {
+  _fmtTime(ms) {
     const loc = this._lang() === "cs" ? "cs-CZ" : "en-GB";
-    const fmt = (ms) => new Date(ms).toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" });
-    const fmtDur = (m2) => m2 >= 60 ? `${Math.floor(m2 / 60)}h${m2 % 60 ? ` ${m2 % 60}m` : ""}` : `${m2}m`;
-    const now = Date.now();
-    const dayEnd = this._dayEndMs(base);
-    const ntWindows = starts.map((start, i2) => {
-      const s2 = this._slotTimeMs(base, start);
-      return { s: s2, e: Math.min(s2 + offsets[i2] * 6e4, dayEnd) };
-    }).filter((w) => w.e > w.s && w.s < dayEnd).sort((a2, b2) => a2.s - b2.s);
-    const makeSlot = (type, slotStart, slotEnd, durMins) => {
-      const isPast = !showing && now >= slotEnd;
-      const isCurrent = !showing && now >= slotStart && now < slotEnd;
-      const pct = isCurrent ? Math.min(100, (now - slotStart) / (slotEnd - slotStart) * 100) : isPast ? 100 : 0;
-      return {
-        type,
-        label: `${fmt(slotStart)}–${fmt(slotEnd)}`,
-        isPast,
-        isCurrent,
-        pct,
-        durMins,
-        durStr: fmtDur(durMins)
-      };
-    };
-    const slots = [];
-    let cursor = base;
-    for (const nt of ntWindows) {
-      const s2 = Math.max(nt.s, cursor);
-      if (s2 >= nt.e) continue;
-      if (s2 > cursor) {
-        slots.push(makeSlot("vt", cursor, s2, Math.round((s2 - cursor) / 6e4)));
-      }
-      slots.push(makeSlot("nt", s2, nt.e, Math.round((nt.e - s2) / 6e4)));
-      cursor = nt.e;
-    }
-    if (cursor < dayEnd) {
-      slots.push(makeSlot("vt", cursor, dayEnd, Math.round((dayEnd - cursor) / 6e4)));
-    }
-    return slots;
+    return new Date(ms).toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" });
   }
-  _getCurrentSlotPct() {
+  _buildFullDaySlots(starts, offsets, base, showing) {
+    return buildFullDaySlots(starts, offsets, base, showing, Date.now(), (ms) => this._fmtTime(ms));
+  }
+  /** Fáze 1.2: minutes of tomorrow's NT window starting exactly at 00:00, if
+   *  any — the piece that visually continues today's midnight-ending NT
+   *  window when `hdo.merge_midnight` is on. */
+  _tomorrowFirstNtDurMins(src) {
+    const tdt = this._tomorrowDayType();
+    const day = tdt === "holiday" && src.holiday ? src.holiday : tdt === "weekend" ? src.weekend : src.weekday;
+    const idx = day.starts.indexOf("00:00");
+    return idx === -1 ? void 0 : day.offsets[idx];
+  }
+  /** Fáze 1.3: today's NT windows per the active schedule (preset or manual),
+   *  with the Fáze 1.2 midnight merge already folded in when enabled.
+   *  Undefined when no schedule is configured — callers fall back to
+   *  switch-only behaviour. */
+  _hdoWindowsToday() {
     const hdo = this._config.hdo;
-    if (!hdo) return -1;
+    if (!hdo) return void 0;
     const preset = hdo.tariff_preset ? PRE_TARIFFS[hdo.tariff_preset] : void 0;
     const src = preset ?? hdo.schedule;
-    if (!src) return -1;
+    if (!src) return void 0;
     const dt = this._dayType();
     const day = dt === "holiday" && src.holiday ? src.holiday : dt === "weekend" ? src.weekend : src.weekday;
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
-    const slots = this._buildFullDaySlots(day.starts, day.offsets, midnight.getTime(), false);
-    const current = slots.find((s2) => s2.isCurrent);
-    return current ? current.pct : -1;
+    const base = midnight.getTime();
+    const dayEnd = this._dayEndMs(base);
+    let windows = ntWindowsForDay(day, base, dayEnd);
+    if (hdo.merge_midnight && windows.length) {
+      const last = windows[windows.length - 1];
+      if (last.end === dayEnd) {
+        const extra = this._tomorrowFirstNtDurMins(src);
+        if (extra) windows = [...windows.slice(0, -1), { start: last.start, end: dayEnd + extra * 6e4 }];
+      }
+    }
+    return { windows, dayEnd };
+  }
+  /** Fáze 1.3: compare the real HDO switch against the schedule. Undefined
+   *  when there's no switch, it's unavailable, or no schedule is configured
+   *  — callers fall back to switch-only behaviour with no mismatch UI. */
+  _hdoStatus() {
+    var _a2;
+    const hdo = this._config.hdo;
+    if (!(hdo == null ? void 0 : hdo.switch) || !this._isAvail(hdo.switch)) return void 0;
+    const wd = this._hdoWindowsToday();
+    if (!wd) return void 0;
+    const entity = (_a2 = this.hass) == null ? void 0 : _a2.states[hdo.switch];
+    const switchSince = (entity == null ? void 0 : entity.last_changed) ? new Date(entity.last_changed).getTime() : Date.now();
+    return resolveHdoStatus(Date.now(), this._isOn(hdo.switch), switchSince, wd.windows, wd.dayEnd);
+  }
+  _hdoMismatchNote(status) {
+    if (status.kind === "mismatch") return this._t("hdo_mismatch");
+    const time = status.boundaryMs !== void 0 ? this._fmtTime(status.boundaryMs) : "";
+    const mins = status.deltaMins !== void 0 ? String(status.deltaMins) : "";
+    switch (status.kind) {
+      case "late_start":
+        return this._t("nt_should_start", { time, mins });
+      case "early_start":
+        return this._t("nt_started_early", { time });
+      case "late_end":
+        return this._t("nt_should_end", { time, mins });
+      case "early_end":
+        return this._t("nt_ended_early", { time });
+      default:
+        return "";
+    }
   }
   // ── Render: 24h timeline bar ───────────────────────────────────────────────
   _renderTimeline(slots, showMarker = false) {
@@ -2044,33 +2230,26 @@ let ElectricityPanelCard = class extends i {
       }
     }
   }
+  /** Precedence (Fáze 1.1, zafixováno — see utils.ts isNTAt): real HDO switch
+   *  history is authoritative once it covers `t`; the tariff schedule is a
+   *  fallback for times before the first history entry and for the future;
+   *  the live switch state is the last resort when neither is available. */
   _isNTAt(t2) {
     const hdo = this._config.hdo;
     if (!hdo) return false;
-    if (hdo.switch) {
-      const hdoHist = this._historyCache.get(hdo.switch);
-      if (hdoHist && hdoHist.length > 0 && t2 >= hdoHist[0].t) {
-        let state2 = hdoHist[0].v;
-        for (const pt of hdoHist) {
-          if (pt.t <= t2) state2 = pt.v;
-          else break;
-        }
-        return state2 > 0.5;
-      }
-    }
     const preset = hdo.tariff_preset ? PRE_TARIFFS[hdo.tariff_preset] : void 0;
     const src = preset ?? hdo.schedule;
-    if (src) {
-      const midnight = /* @__PURE__ */ new Date();
-      midnight.setHours(0, 0, 0, 0);
-      const dt = this._dayType();
-      const day = dt === "holiday" && src.holiday ? src.holiday : dt === "weekend" ? src.weekend : src.weekday;
-      return day.starts.some((start, i2) => {
-        const s2 = this._slotTimeMs(midnight.getTime(), start);
-        return t2 >= s2 && t2 < s2 + day.offsets[i2] * 6e4;
-      });
-    }
-    return this._isOn(hdo.switch);
+    const dt = this._dayType();
+    const scheduleDay = src ? dt === "holiday" && src.holiday ? src.holiday : dt === "weekend" ? src.weekend : src.weekday : void 0;
+    const midnight = /* @__PURE__ */ new Date();
+    midnight.setHours(0, 0, 0, 0);
+    return isNTAt(
+      t2,
+      hdo.switch ? this._historyCache.get(hdo.switch) : void 0,
+      scheduleDay,
+      midnight.getTime(),
+      this._isOn(hdo.switch)
+    );
   }
   /** Accumulate today's energy cost across one or more power entities (W).
    *  Entities are integrated independently and summed — correct for multi-phase
@@ -2082,25 +2261,13 @@ let ElectricityPanelCard = class extends i {
     midnight.setHours(0, 0, 0, 0);
     const ntP = parseFloat(hdo.nt_price) || 0;
     const vtP = parseFloat(hdo.vt_price) || 0;
-    let ntWh = 0, vtWh = 0, hasData = false;
-    for (const id of entityIds) {
-      if (!id) continue;
-      const data = this._historyCache.get(id);
-      if (!data || data.length < 2) continue;
-      const todayPts = data.filter((p2) => p2.t >= midnight.getTime());
-      if (todayPts.length < 2) continue;
-      hasData = true;
-      for (let i2 = 1; i2 < todayPts.length; i2++) {
-        const dtMs = todayPts[i2].t - todayPts[i2 - 1].t;
-        const avgW = Math.max(0, (todayPts[i2].v + todayPts[i2 - 1].v) / 2);
-        const wh = avgW * (dtMs / 36e5);
-        const midT = (todayPts[i2].t + todayPts[i2 - 1].t) / 2;
-        if (this._isNTAt(midT)) ntWh += wh;
-        else vtWh += wh;
-      }
-    }
+    const series = entityIds.filter((id) => !!id).map((id) => {
+      var _a2;
+      return (_a2 = this._historyCache.get(id)) == null ? void 0 : _a2.filter((p2) => p2.t >= midnight.getTime());
+    });
+    const { ntWh, vtWh, hasData } = accumulateTariffWh(series, (t2) => this._isNTAt(t2));
     if (!hasData) return "";
-    const cost = ntWh / 1e3 * ntP + vtWh / 1e3 * vtP;
+    const cost = calcCost(ntWh, vtWh, ntP, vtP);
     if (cost < 5e-3) return "";
     const cur = hdo.currency ?? "Kč";
     return `${cost.toFixed(2)} ${cur}`;
@@ -2193,9 +2360,17 @@ let ElectricityPanelCard = class extends i {
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
     const base = showing ? this._dayEndMs(midnight.getTime()) : midnight.getTime();
-    const slots = this._buildFullDaySlots(day.starts, day.offsets, base, showing);
-    const remaining = showing ? null : this._ntRemainingMins(day.starts, day.offsets);
-    const totalNT = day.offsets.reduce((a2, b2) => a2 + b2, 0);
+    let slots = this._buildFullDaySlots(day.starts, day.offsets, base, showing);
+    let remaining = showing ? null : this._ntRemainingMins(day.starts, day.offsets);
+    let totalNT = day.offsets.reduce((a2, b2) => a2 + b2, 0);
+    if (!showing && hdo.merge_midnight) {
+      const extra = this._tomorrowFirstNtDurMins(src);
+      if (extra) {
+        slots = mergeMidnightNt(slots, this._dayEndMs(base), extra, Date.now(), (ms) => this._fmtTime(ms));
+        remaining = (remaining ?? 0) + extra;
+        totalNT += extra;
+      }
+    }
     const exp = this._scheduleExpanded;
     const currentSlot = slots.find((s2) => s2.isCurrent);
     return b`
@@ -2252,6 +2427,24 @@ let ElectricityPanelCard = class extends i {
     const hdo = this._config.hdo;
     if (!(hdo == null ? void 0 : hdo.switch)) return A;
     if (!this._isAvail(hdo.switch)) {
+      const wd = this._hdoWindowsToday();
+      if (wd) {
+        const now = Date.now();
+        const isNT2 = wd.windows.some((w) => now >= w.start && now < w.end);
+        const price2 = isNT2 ? hdo.nt_price : hdo.vt_price;
+        const cur2 = hdo.currency ?? "Kč";
+        return b`
+          <div class="hdo-bar ${isNT2 ? "nt" : "vt"}">
+            <div class="hdo-dot ${isNT2 ? "nt" : "vt"}"></div>
+            <div class="hdo-info">
+              <div class="hdo-label">${isNT2 ? this._t("nt_low") : this._t("vt_high")}
+                <span class="hdo-src-badge">${this._t("from_schedule")}</span>
+              </div>
+              ${price2 ? b`<div class="hdo-sub">${price2} ${cur2}/kWh</div>` : A}
+            </div>
+          </div>
+        `;
+      }
       return b`
         <div class="hdo-bar unk">
           <div class="hdo-dot unk"></div>
@@ -2265,7 +2458,9 @@ let ElectricityPanelCard = class extends i {
     const cd = this._hdoCountdown();
     const price = isNT ? hdo.nt_price : hdo.vt_price;
     const cur = hdo.currency ?? "Kč";
-    const slotPct = this._getCurrentSlotPct();
+    const status = this._hdoStatus();
+    const slotPct = status && status.slotEnd > status.slotStart ? Math.min(100, Math.max(0, (Date.now() - status.slotStart) / (status.slotEnd - status.slotStart) * 100)) : -1;
+    const note = status && status.kind !== "ok" ? this._hdoMismatchNote(status) : "";
     return b`
       <div class="hdo-bar ${isNT ? "nt" : "vt"}">
         <div class="hdo-dot ${isNT ? "nt" : "vt"}"></div>
@@ -2275,6 +2470,7 @@ let ElectricityPanelCard = class extends i {
           ${slotPct >= 0 ? b`
             <div class="hdo-prog"><div class="hdo-prog-fill" style="width:${slotPct.toFixed(1)}%"></div></div>
           ` : A}
+          ${note ? b`<div class="hdo-mismatch">${note}</div>` : A}
         </div>
         ${cd ? b`
           <div class="hdo-cd">
@@ -2654,6 +2850,15 @@ ElectricityPanelCard.styles = i$3`
     .hdo-bar.unk { background: var(--ep-surface); border: 0.5px solid var(--ep-border); }
     .hdo-dot.unk { background: var(--ep-text-dim); }
     .hdo-bar.unk .hdo-label { color: var(--ep-text-mid); }
+    .hdo-src-badge {
+      font-size: 9px; font-weight: 600; text-transform: none; letter-spacing: 0;
+      color: var(--ep-text-dim); background: rgba(127,127,127,.15);
+      border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: middle;
+    }
+    .hdo-mismatch {
+      font-size: 11px; margin-top: 4px; color: var(--warning-color, #f59e0b);
+      display: flex; align-items: center; gap: 4px;
+    }
     .hdo-cd { text-align: right; flex-shrink: 0; }
     .hdo-cd-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--ep-text-dim); }
     .hdo-cd-val { font-size: 24px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }

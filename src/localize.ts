@@ -29,6 +29,12 @@ const STRINGS: Record<EpLang, Record<string, string>> = {
     confirm_turn_off: 'Turn OFF circuit "{name}"?',
     nt_in: 'NT in',
     save_pct: 'save',
+    from_schedule: 'from schedule',
+    nt_should_start: 'NT should have started at {time} ({mins} min ago)',
+    nt_started_early: 'NT started early — planned {time}',
+    nt_should_end: 'NT should have ended at {time} ({mins} min ago)',
+    nt_ended_early: 'NT ended early — planned {time}',
+    hdo_mismatch: "doesn't match schedule",
   },
   cs: {
     nt_low: 'NT — nízký tarif',
@@ -56,6 +62,12 @@ const STRINGS: Record<EpLang, Record<string, string>> = {
     confirm_turn_off: 'Opravdu VYPNOUT okruh „{name}"?',
     nt_in: 'NT za',
     save_pct: 'úspora',
+    from_schedule: 'podle rozvrhu',
+    nt_should_start: 'NT měl začít v {time} (před {mins} min)',
+    nt_started_early: 'NT začal dříve — plán {time}',
+    nt_should_end: 'NT měl skončit v {time} (před {mins} min)',
+    nt_ended_early: 'NT skončil dříve — plán {time}',
+    hdo_mismatch: 'neodpovídá rozvrhu',
   },
 };
 

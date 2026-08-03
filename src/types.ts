@@ -132,6 +132,13 @@ export interface HdoConfig {
     weekend: TariffDay;
     holiday?: TariffDay;
   };
+  /**
+   * When an NT window ends exactly at midnight and tomorrow's schedule starts
+   * a new NT window at 00:00, display them as one continuous window in the
+   * schedule timeline/rows and the countdown (default: false). Presentation
+   * only — internal per-day computation and cost integration are unaffected.
+   */
+  merge_midnight?: boolean;
 }
 
 /** Top-level card configuration */

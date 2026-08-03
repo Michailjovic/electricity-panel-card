@@ -11,6 +11,8 @@
     "build": "tsc --noEmit && vite build",
     "watch": "vite build --watch",
     "dev": "vite",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "deploy": "node deploy.mjs",
     "bump": "node deploy.mjs --bump"
   },
@@ -18,7 +20,9 @@
     "lit": "^3.2.0"
   },
   "devDependencies": {
+    "@types/node": "^26.1.2",
     "typescript": "^5.4.0",
-    "vite": "^5.2.0"
+    "vite": "^5.2.0",
+    "vitest": "^4.1.10"
   }
 }

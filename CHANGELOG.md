@@ -5,6 +5,44 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [Unreleased] — Fáze 1 complete (ROADMAP.md, v5.2.0 stabilization)
+
+### ✨ Added
+
+- **Switch × schedule mismatch indication** (standard behaviour, not opt-in) — the
+  HDO bar always shows the *real* switch state as NT/VT, never the schedule. When
+  the two disagree, a note explains how: `"NT měl začít v HH:MM (před X min)"` when
+  NT is overdue, `"NT začal dříve — plán HH:MM"` when it started ahead of schedule,
+  and the symmetric pair for NT ending late/early. Drift beyond ~120 min is no
+  longer shown as a growing delay — it's flagged as `"neodpovídá rozvrhu"` (schedule/
+  day-type is probably wrong, not just running late). The progress bar now tracks
+  from the switch's real last transition to the schedule's expected boundary,
+  instead of the schedule's own nominal start. When the switch is unavailable, the
+  bar falls back to the schedule (if one is configured) and labels it `"podle
+  rozvrhu"` — the grey "unavailable" state is now shown only when there's no
+  schedule to fall back on either.
+- **`hdo.merge_midnight`** (opt-in, default `false`) — when today's NT window ends
+  exactly at midnight and tomorrow's schedule opens a new NT window at 00:00, the
+  schedule timeline, expanded rows, "NT zbývá" countdown and the top HDO bar's
+  progress fill now show them as one continuous window instead of splitting at the
+  day boundary. Presentation only — cost calculation and per-day logic are
+  unaffected. Toggle in the HDO editor section.
+
+### 🔧 Internal
+
+- **`src/utils.ts`** — extracted the pure schedule/tariff logic (`buildFullDaySlots`,
+  `isNTAt`, day-type resolution, NT-remaining, cost integration, `mergeMidnightNt`,
+  `ntWindowsForDay`, `resolveHdoStatus`) out of `ElectricityPanelCard` into
+  standalone, dependency-free functions.
+- **Unit tests (vitest)** — 54 tests covering slot building (midnight-crossing
+  windows, unsorted inputs, DST spring-forward/fall-back days), day-type resolution,
+  midnight merge, switch×schedule mismatch classification (all four combinations
+  plus the drift threshold), and the cost integration math. Pins down the
+  source-precedence rule for good: the real HDO switch (state + history) is always
+  authoritative; the tariff schedule is only a fallback for times before the first
+  history entry and a predictor of the future.
+- **CI** — `validate.yml` now runs `npm test` before the typecheck/build step.
+
 ## [5.1.0] — 2026-06-10
 *Accuracy release — correct daily costs, holiday-aware schedules, cs/en localization,
 HA theme support, and a faster, safer card.*

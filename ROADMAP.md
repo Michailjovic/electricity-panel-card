@@ -15,10 +15,10 @@ Je to pojistka: až budeme měnit zdroj rozvrhu (Fáze 2) a výpočet nákladů 
 testy okamžitě odhalí, že např. NT okno přes půlnoc nebo DST den počítáme špatně.
 Nulový dopad na výkon karty — testy běží jen v CI, do bundle se nedostanou.
 
-- [ ] `src/utils.ts` — přesun čistých funkcí (bez `this`, vstupy parametrem)
-- [ ] `vitest` jako devDependency, `npm test`, job v validate.yml
-- [ ] Testy: sloty (vč. půlnoci, DST, neseřazených oken), `isNTAt`, cost integrace, day-type
-- [ ] **Test precedence zdrojů (zafixovat!):** reálný HDO switch (stav + historie) je vždy
+- [x] `src/utils.ts` — přesun čistých funkcí (bez `this`, vstupy parametrem)
+- [x] `vitest` jako devDependency, `npm test`, job v validate.yml
+- [x] Testy: sloty (vč. půlnoci, DST, neseřazených oken), `isNTAt`, cost integrace, day-type
+- [x] **Test precedence zdrojů (zafixovat!):** reálný HDO switch (stav + historie) je vždy
       autoritativní; rozvrh/integrace pouze fallback (před prvním záznamem historie)
       a predikce budoucnosti. Hardwarová čtečka přepíná s odchylkou minut oproti
       rozvrhu — karta musí vždy interpretovat vůči reálnému stavu.
@@ -28,28 +28,28 @@ HDO switch (hardwarová čtečka) je **vždy zdroj pravdy**, dokud je dostupný
 a vyplněný v GUI. Rozvrh je plán — a když se rozcházejí, karta to řekne.
 
 **Specifikace chování HDO baru:**
-- [ ] Switch dostupný, souhlasí s rozvrhem → dnešní stav (beze změny)
-- [ ] Switch říká VT, rozvrh už NT → bar ukazuje **VT** + poznámka:
+- [x] Switch dostupný, souhlasí s rozvrhem → dnešní stav (beze změny)
+- [x] Switch říká VT, rozvrh už NT → bar ukazuje **VT** + poznámka:
       „NT měl začít v HH:MM (před X min)"
-- [ ] Switch říká NT, rozvrh ještě VT → bar ukazuje **NT** + poznámka:
+- [x] Switch říká NT, rozvrh ještě VT → bar ukazuje **NT** + poznámka:
       „NT začal dříve — plán HH:MM"
-- [ ] Symetricky pro konec NT (předčasný / opožděný konec)
-- [ ] Nesoulad > ~120 min → nejde o zpoždění, ale o špatný rozvrh/day-type:
+- [x] Symetricky pro konec NT (předčasný / opožděný konec)
+- [x] Nesoulad > ~120 min → nejde o zpoždění, ale o špatný rozvrh/day-type:
       místo rostoucí delty zobrazit „neodpovídá rozvrhu" (přesný práh doladit)
-- [ ] Switch unavailable nebo nevyplněný → tarif odvodit z rozvrhu a **explicitně
+- [x] Switch unavailable nebo nevyplněný → tarif odvodit z rozvrhu a **explicitně
       označit** „podle rozvrhu" (místo dnešního šedého unavailable baru);
       šedý bar zůstává jen když není ani rozvrh
-- [ ] Progress bar slotu v HDO baru řídit reálným stavem (start = skutečné
+- [x] Progress bar slotu v HDO baru řídit reálným stavem (start = skutečné
       přepnutí switche, konec = plánovaný konec z rozvrhu)
-- [ ] Lokalizace cs/en; testy na všechny čtyři kombinace nesouladu
+- [x] Lokalizace cs/en; testy na všechny čtyři kombinace nesouladu
 
 ### 1.2 Sloučení NT přes půlnoc (GUI fajfka)
 NT končící 24:00 + NT začínající 00:00 zobrazit v rozvrhu a horním panelu jako jedno
 souvislé okno (countdown pak ukazuje skutečný konec, ne půlnoc).
 
-- [ ] Config: `hdo.merge_midnight: boolean` (default false), checkbox v editoru
-- [ ] Čistě prezentační vrstva — interní výpočty zůstávají per kalendářní den
-- [ ] Pozor na "zbývá NT dnes" — při merge ukazovat až do konce sloučeného okna
+- [x] Config: `hdo.merge_midnight: boolean` (default false), checkbox v editoru
+- [x] Čistě prezentační vrstva — interní výpočty zůstávají per kalendářní den
+- [x] Pozor na "zbývá NT dnes" — při merge ukazovat až do konce sloučeného okna
 
 ---
 
