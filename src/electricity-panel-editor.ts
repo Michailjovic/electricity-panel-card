@@ -2,6 +2,7 @@ import { LitElement, html, css, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { PRE_TARIFFS } from './tariff-presets.js';
 import { EP_VERSION } from './types.js';
+import { parseScheduleEntity, dayEndMs } from './utils.js';
 import type {
   HomeAssistant,
   ElectricityPanelConfig,
@@ -397,6 +398,29 @@ export class ElectricityPanelEditor extends LitElement {
       </details>`;
   }
 
+  /** Fáze 2: mirrors the card's own schedule_entity → tariff_preset → manual
+   *  priority so the editor can show which one is actually active, without
+   *  duplicating the day-type/merge logic — a plain presence check for
+   *  preset/manual is enough here (the card's own rendering is the source of
+   *  truth for the details). */
+  private _activeScheduleSourceLabel(): string {
+    const h = this._config.hdo;
+    if (!h) return 'none configured';
+    const fallback = h.tariff_preset ? `tariff_preset (${h.tariff_preset})`
+      : h.schedule ? 'manual schedule' : 'none configured';
+    if (h.schedule_entity) {
+      const entity = this.hass?.states[h.schedule_entity];
+      if (entity) {
+        const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+        const start = midnight.getTime();
+        const windows = parseScheduleEntity(entity.attributes, start, dayEndMs(start));
+        if (windows) return `schedule_entity (${h.schedule_entity})`;
+      }
+      return `schedule_entity unavailable — falling back to ${fallback}`;
+    }
+    return fallback;
+  }
+
   private _renderHdoSection(): TemplateResult {
     const h = this._config.hdo ?? {};
     const s = (f: string) => (v: string) => this._set(['hdo', f], v);
@@ -422,6 +446,17 @@ export class ElectricityPanelEditor extends LitElement {
             (calendar.czechia). For calendar entities the next-event attributes
             are also used to detect whether tomorrow is a holiday.
           </span>
+          ${this._entityField('Schedule entity (NT windows — advanced)', h.schedule_entity, s('schedule_entity'))}
+          <span class="field-hint">
+            Entity with a "schedule" attribute listing NT windows (e.g.
+            sensor.cez_hdo_schedule_* from the ha_cez_distribuce integration).
+            Highest priority — used instead of the preset or manual schedule
+            below whenever it resolves data for the day; falls back to them
+            otherwise.
+          </span>
+          <div class="field-hint" style="margin-top:2px;">
+            Active schedule source: <strong>${this._activeScheduleSourceLabel()}</strong>
+          </div>
           <div class="field">
             <label>PRE tariff preset (NT schedule)</label>
             <select @change=${(e: Event) => s('tariff_preset')((e.target as HTMLSelectElement).value)}>

@@ -1,4 +1,4 @@
-export const EP_VERSION = '5.1.0';
+export const EP_VERSION = '5.1.6';
 
 // ── Home Assistant types ────────────────────────────────────────────────────
 
@@ -116,8 +116,19 @@ export interface HdoConfig {
    */
   holiday_sensor?: string;
   /**
+   * Entity whose `schedule` attribute provides the NT windows directly —
+   * e.g. `sensor.cez_hdo_schedule_*` from the `ha_cez_distribuce` integration:
+   * an array of `{ start, end, tariff }` (ISO datetimes, "NT"/"VT"). Highest
+   * priority schedule source (Fáze 2, ROADMAP.md) — when it resolves usable
+   * windows for a given day, `tariff_preset`/`schedule` are not consulted for
+   * that day. Falls through to them when the entity is missing/unavailable
+   * or its `schedule` attribute doesn't cover the day.
+   */
+  schedule_entity?: string;
+  /**
    * PRE tariff preset code — e.g. '605'. When set, the card loads the
-   * built-in schedule for that tariff. Takes precedence over `schedule`.
+   * built-in schedule for that tariff. Used when `schedule_entity` isn't
+   * configured or doesn't resolve for the day; takes precedence over `schedule`.
    */
   tariff_preset?: string;
   /** Price per kWh during low tariff (NT) — used for cost rate display */

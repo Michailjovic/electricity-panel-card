@@ -57,14 +57,28 @@ souvislé okno (countdown pak ukazuje skutečný konec, ne půlnoc).
 
 Cíl: zrušit závislost na ručně udržovaných PRE tabulkách v kódu.
 
-- [ ] Config: `hdo.schedule_entity` — sensor, jehož atributy obsahují NT okna
-      (primárně formát PRE distribuce integrace; prozkoumat přesnou strukturu atributů)
-- [ ] Parser atributů → interní `TariffDay` formát; tolerantní k formátům časů
-- [ ] Priorita zdrojů: `schedule_entity` → `tariff_preset` → manuální `schedule`
-- [ ] Editor: pole pro entitu + indikace, který zdroj rozvrhu je právě aktivní
-- [ ] Debug log: vypsat naparsovaný rozvrh při `debug: true`
-- [ ] Testy parseru (navazuje na 1.1)
-- [ ] Presety v kódu ponechat jako fallback, ale označit za zamrzlé (neudržovat)
+**Průzkum (2026-08-03):** ani ČEZ, ani PRE nemají otevřené veřejné API — ČEZ
+distribuce vyžaduje EAN + CAPTCHA (řeší se OCR na backendu), PRE se dá jen
+scrapovat z HTML stavové stránky. Karta běží v prohlížeči bez backendu, takže
+přímé napojení na tyto weby nedává smysl (CORS, žádné úložiště přihlašovacích
+údajů) — správně to řeší komunitní HA integrace (Python), karta jen čte
+entitu. Nejbohatší ověřený formát: `sensor.cez_hdo_schedule_*` z
+[ha_cez_distribuce](https://github.com/Cmajda/ha_cez_distribuce) — atribut
+`schedule` = pole `{start, end, tariff: "NT"|"VT"}` (ISO časy, 7 dní dopředu).
+Ekvivalent pro PRE jsem nenašel — `parseScheduleEntity` je proto tolerantní
+k pár aliasům klíčů (`from`/`to`, `value`/`is_low`, …), ne jen k jednomu tvaru.
+
+- [x] Config: `hdo.schedule_entity` — sensor, jehož atributy obsahují NT okna
+      (cíleno na ověřený formát `ha_cez_distribuce`, tolerantně i k aliasům)
+- [x] Parser atributů → přímo `Window[]` (start/end v ms), ne `TariffDay` —
+      entita už řeší konkrétní datum, den-týdne/svátek se tu neodvozuje;
+      `buildFullDaySlots`/`isNTAt`/`resolveHdoStatus` teď berou `Window[]`
+      jednotně bez ohledu na zdroj (viz `ElectricityPanelCard._scheduleWindows`)
+- [x] Priorita zdrojů: `schedule_entity` → `tariff_preset` → manuální `schedule`
+- [x] Editor: pole pro entitu + indikace, který zdroj rozvrhu je právě aktivní
+- [x] Debug log: vypsat naparsovaný rozvrh při `debug: true`
+- [x] Testy parseru (navazuje na 1.1)
+- [x] Presety v kódu ponechat jako fallback, ale označit za zamrzlé (neudržovat)
 
 ---
 

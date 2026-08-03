@@ -105,6 +105,18 @@ export function ntRemainingMins(
   return rem;
 }
 
+/** Same as `ntRemainingMins` but for already-resolved `Window[]` — the
+ *  Fáze 2 equivalent used regardless of whether the windows came from a
+ *  preset/manual `TariffDay` or a `schedule_entity`. */
+export function ntRemainingMinsFromWindows(windows: Window[], dayEnd: number, now: number): number {
+  let rem = 0;
+  for (const w of windows) {
+    const en = Math.min(w.end, dayEnd);
+    if (en > w.start && now < en) rem += (en - Math.max(now, w.start)) / 60000;
+  }
+  return rem;
+}
+
 export interface Window {
   start: number;
   end: number;
@@ -125,20 +137,20 @@ export function ntWindowsForDay(day: TariffDay, base: number, dayEnd: number): W
     .sort((a, b) => a.start - b.start);
 }
 
-/** Build the full-day VT/NT slot list for the schedule timeline & rows.
- *  `showing` true = a future day being previewed (no past/current
- *  highlighting). `fmt` formats a ms timestamp as a locale time label. */
-export function buildFullDaySlots(
-  starts: string[],
-  offsets: number[],
+/** Build the full-day VT/NT slot list for the schedule timeline & rows from
+ *  already-resolved NT windows — shared by `buildFullDaySlots` (preset/manual
+ *  schedule, Fáze 1.1) and Fáze 2's `schedule_entity` path, which produces
+ *  `Window[]` directly with no day-type/HH:MM step needed. `showing` true =
+ *  a future day being previewed (no past/current highlighting). `fmt`
+ *  formats a ms timestamp as a locale time label. */
+export function buildFullDaySlotsFromWindows(
+  ntWindows: Window[],
   base: number,
+  dayEnd: number,
   showing: boolean,
   now: number,
   fmt: (ms: number) => string
 ): DaySlot[] {
-  const dayEnd = dayEndMs(base);
-  const ntWindows = ntWindowsForDay({ starts, offsets }, base, dayEnd);
-
   const makeSlot = (
     type: 'nt' | 'vt',
     slotStart: number,
@@ -174,6 +186,22 @@ export function buildFullDaySlots(
   }
 
   return slots;
+}
+
+/** Build the full-day VT/NT slot list from a preset/manual `TariffDay`
+ *  (HH:MM starts + minute offsets). See `buildFullDaySlotsFromWindows` for
+ *  the entity-schedule equivalent — both feed the same slot shape. */
+export function buildFullDaySlots(
+  starts: string[],
+  offsets: number[],
+  base: number,
+  showing: boolean,
+  now: number,
+  fmt: (ms: number) => string
+): DaySlot[] {
+  const dayEnd = dayEndMs(base);
+  const ntWindows = ntWindowsForDay({ starts, offsets }, base, dayEnd);
+  return buildFullDaySlotsFromWindows(ntWindows, base, dayEnd, showing, now, fmt);
 }
 
 /**
@@ -319,17 +347,18 @@ export function resolveHdoStatus(
 
 /**
  * Precedence rule (Fáze 1.1, zafixováno): the real HDO switch history is
- * always authoritative once it covers `t`. The tariff schedule is used only
- * (a) as a fallback for instants before the first recorded history point,
- * and (b) to predict tariff state in the future, where no history can exist
- * yet. If neither history nor schedule is available, fall back to the
- * switch's current live state.
+ * always authoritative once it covers `t`. The schedule (`windows` — NT
+ * windows for the day containing `t`, from whichever source is active:
+ * schedule_entity, preset or manual — see Fáze 2) is used only (a) as a
+ * fallback for instants before the first recorded history point, and (b) to
+ * predict tariff state in the future, where no history can exist yet. If
+ * neither history nor schedule is available, fall back to the switch's
+ * current live state.
  */
 export function isNTAt(
   t: number,
   hdoHistory: HistPoint[] | undefined,
-  scheduleDay: TariffDay | undefined,
-  midnightBase: number,
+  windows: Window[] | undefined,
   fallbackSwitchOn: boolean
 ): boolean {
   if (hdoHistory && hdoHistory.length > 0 && t >= hdoHistory[0].t) {
@@ -340,13 +369,84 @@ export function isNTAt(
     }
     return state > 0.5; // 1 = on = NT
   }
-  if (scheduleDay) {
-    return scheduleDay.starts.some((start, i) => {
-      const s = slotTimeMs(midnightBase, start);
-      return t >= s && t < s + scheduleDay.offsets[i] * 60000;
-    });
+  if (windows) {
+    return windows.some(w => t >= w.start && t < w.end);
   }
   return fallbackSwitchOn;
+}
+
+/**
+ * Fáze 2 (ROADMAP.md): parse a `schedule_entity`'s `schedule` attribute into
+ * NT windows for one calendar day `[dayStart, dayEnd)`. Targets the shape
+ * published by the `ha_cez_distribuce` integration's `sensor.cez_hdo_schedule_*`
+ * (verified against its source, 2026-08):
+ *
+ *   attributes.schedule = [
+ *     { start: "2026-01-27T00:00:00+01:00", end: "...", tariff: "NT", value: 1 },
+ *     { start: "...", end: "...", tariff: "VT", value: 0 },
+ *     ...
+ *   ]
+ *
+ * Tolerant of a few reasonable key aliases so other integrations converging
+ * on the same rough shape (array of dated intervals with a low/high marker)
+ * have a chance of working without changes:
+ *   - time bounds: start/from/begin, end/to/until
+ *   - NT marker: tariff/type/rate case-insensitively matching "NT"/"LOW"/
+ *     "LOW_TARIFF" (or similar), OR a truthy value/is_nt/is_low/low field
+ *
+ * Unlike the preset/manual path there is no day-type step — the entity
+ * already resolved that (its dates are absolute) — so this returns `Window[]`
+ * directly, ready for `buildFullDaySlotsFromWindows`/`resolveHdoStatus`/`isNTAt`.
+ *
+ * Returns `undefined` when `attributes` has no usable `schedule` array at all
+ * (signals callers to fall back to the next source in the priority chain:
+ * schedule_entity → tariff_preset → manual schedule). Returns `[]` when the
+ * array exists but nothing falls inside the requested day (a real "no NT
+ * today" answer, not a "try the next source" one).
+ */
+export function parseScheduleEntity(
+  attributes: Record<string, unknown> | undefined,
+  dayStart: number,
+  dayEnd: number
+): Window[] | undefined {
+  const raw = attributes?.['schedule'];
+  if (!Array.isArray(raw)) return undefined;
+
+  const pick = (o: Record<string, unknown>, keys: string[]): unknown => {
+    for (const k of keys) if (o[k] !== undefined) return o[k];
+    return undefined;
+  };
+  const isNtEntry = (o: Record<string, unknown>): boolean => {
+    const tariff = pick(o, ['tariff', 'type', 'rate']);
+    if (typeof tariff === 'string') {
+      const t = tariff.trim().toUpperCase();
+      if (t === 'NT' || t.includes('LOW')) return true;
+      if (t === 'VT' || t.includes('HIGH')) return false;
+    }
+    const value = pick(o, ['value', 'is_nt', 'is_low', 'low']);
+    if (typeof value === 'number') return value > 0.5;
+    if (typeof value === 'boolean') return value;
+    return false;
+  };
+
+  const windows: Window[] = [];
+  for (const entry of raw as unknown[]) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const o = entry as Record<string, unknown>;
+    if (!isNtEntry(o)) continue;
+    const startRaw = pick(o, ['start', 'from', 'begin']);
+    const endRaw = pick(o, ['end', 'to', 'until']);
+    if (typeof startRaw !== 'string' || typeof endRaw !== 'string') continue;
+    const s = new Date(startRaw).getTime();
+    const e = new Date(endRaw).getTime();
+    if (isNaN(s) || isNaN(e) || e <= s) continue;
+    // Clip to the requested day — entity schedules typically span several days.
+    const start = Math.max(s, dayStart);
+    const end = Math.min(e, dayEnd);
+    if (end > start) windows.push({ start, end });
+  }
+
+  return windows.sort((a, b) => a.start - b.start);
 }
 
 /** Integrate one or more power-history series (W) into NT/VT watt-hour

@@ -5,7 +5,42 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
-## [Unreleased] — Fáze 1 complete (ROADMAP.md, v5.2.0 stabilization)
+## [5.1.6] — 2026-08-03
+*Fáze 2 (ROADMAP.md) — NT schedule can now come from a live entity instead of only hardcoded presets.*
+
+### ✨ Added
+
+- **`hdo.schedule_entity`** (optional) — point the card at an entity whose
+  `schedule` attribute lists NT windows (targets the verified
+  `sensor.cez_hdo_schedule_*` shape from the `ha_cez_distribuce` integration:
+  an array of `{start, end, tariff}` ISO-timed entries, tolerant of a few
+  reasonable key aliases). When it resolves data for a given day it takes
+  priority over `tariff_preset` and manual `schedule`; falls back to them
+  automatically when the entity is missing/unavailable or has nothing for
+  that day. Editor shows which source is currently active.
+- Direct API integration with ČEZ/PRE was investigated and ruled out for the
+  card itself — see ROADMAP.md Fáze 2 for why (no open API, CAPTCHA/scraping
+  belongs in a backend HA integration, not a browser-side Lovelace card).
+
+### 🔧 Internal
+
+- **`src/utils.ts`** — `isNTAt` and the slot builder now work on plain
+  `Window[]` (`{start, end}` in ms) instead of a preset-shaped `TariffDay` +
+  day-type, so preset/manual and entity-sourced schedules flow through the
+  exact same code from `ElectricityPanelCard._scheduleWindows()` onward
+  (mismatch detection, midnight merge, cost integration — all source-agnostic
+  now). Added `parseScheduleEntity`, `buildFullDaySlotsFromWindows`,
+  `ntRemainingMinsFromWindows`.
+- **Unit tests (vitest)** — 64 tests (was 54): `parseScheduleEntity` against
+  the verified shape plus malformed/multi-day/no-match inputs, and the
+  `isNTAt` precedence suite re-verified against both preset-derived and
+  entity-derived windows.
+- Presets in `tariff-presets.ts` marked as a frozen fallback (not actively
+  maintained going forward) now that `schedule_entity` can stay current on
+  its own.
+
+## [5.1.5] — 2026-08-03
+*Fáze 1 (ROADMAP.md) complete — stabilization: extracted/tested core logic, midnight NT merge, switch×schedule mismatch indication.*
 
 ### ✨ Added
 

@@ -12,6 +12,13 @@ export interface TariffPreset {
  * Source: PRE HDO schedule Excel, valid from 2025-10-16 to 2028-01-26.
  * Parsed directly from official "aktualni-program-hdo-ke-stazeni.xls".
  * NT windows bordering midnight (00:00 start / 24:00 end) are included.
+ *
+ * Fáze 2 (ROADMAP.md): frozen fallback, not actively maintained. Now that
+ * `hdo.schedule_entity` (e.g. sensor.cez_hdo_schedule_* from the
+ * ha_cez_distribuce integration) can supply NT windows directly and stays
+ * current automatically, these hardcoded tables are a last-resort default
+ * for users without such an integration — kept for backward compatibility,
+ * but not updated to track future PRE schedule revisions.
  */
 export const PRE_TARIFFS: Record<string, TariffPreset> = {
 

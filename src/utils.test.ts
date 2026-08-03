@@ -9,11 +9,13 @@ import {
   isWithinHolidayEvent,
   ntRemainingMins,
   buildFullDaySlots,
+  buildFullDaySlotsFromWindows,
   mergeMidnightNt,
   ntWindowsForDay,
   resolveHdoStatus,
   MISMATCH_THRESHOLD_MINS,
   isNTAt,
+  parseScheduleEntity,
   accumulateTariffWh,
   calcCost,
   type HistPoint,
@@ -208,6 +210,15 @@ describe('buildFullDaySlots', () => {
     const slots = buildFullDaySlots(['01:00'], [180], base, true, now, fmtHM);
     expect(slots.every(s => !s.isPast && !s.isCurrent)).toBe(true);
   });
+
+  it('buildFullDaySlotsFromWindows matches buildFullDaySlots given the same windows (Fáze 2 refactor)', () => {
+    const now = new Date(2026, 5, 15, 2, 0, 0, 0).getTime();
+    const starts = ['01:00', '14:00'], offsets = [180, 120];
+    const fromDay = buildFullDaySlots(starts, offsets, base, false, now, fmtHM);
+    const windows = ntWindowsForDay({ starts, offsets }, base, dayEndMs(base));
+    const fromWindows = buildFullDaySlotsFromWindows(windows, base, dayEndMs(base), false, now, fmtHM);
+    expect(fromWindows).toEqual(fromDay);
+  });
 });
 
 describe('mergeMidnightNt (Fáze 1.2)', () => {
@@ -366,18 +377,19 @@ describe('resolveHdoStatus — switch × schedule mismatch (Fáze 1.3, zafixová
   });
 });
 
-describe('isNTAt — source precedence (Fáze 1.1, zafixováno)', () => {
+describe('isNTAt — source precedence (Fáze 1.1, zafixováno; Fáze 2: windows are source-agnostic)', () => {
   const midnight = new Date(2026, 5, 15, 0, 0, 0, 0).getTime();
   const scheduleDay: TariffDay = { starts: ['01:00', '14:00'], offsets: [180, 120] }; // NT 01-04, 14-16
+  const windows = ntWindowsForDay(scheduleDay, midnight, dayEndMs(midnight));
 
   it('with no history: schedule alone decides — inside a window is NT', () => {
     const t = new Date(2026, 5, 15, 2, 0, 0, 0).getTime();
-    expect(isNTAt(t, undefined, scheduleDay, midnight, false)).toBe(true);
+    expect(isNTAt(t, undefined, windows, false)).toBe(true);
   });
 
   it('with no history: outside any window is VT', () => {
     const t = new Date(2026, 5, 15, 10, 0, 0, 0).getTime();
-    expect(isNTAt(t, undefined, scheduleDay, midnight, false)).toBe(false);
+    expect(isNTAt(t, undefined, windows, false)).toBe(false);
   });
 
   it('before the first history entry: schedule is authoritative even if history exists later', () => {
@@ -385,7 +397,7 @@ describe('isNTAt — source precedence (Fáze 1.1, zafixováno)', () => {
       { t: new Date(2026, 5, 15, 5, 0, 0, 0).getTime(), v: 0 }, // history starts at 05:00, says VT
     ];
     const t = new Date(2026, 5, 15, 2, 0, 0, 0).getTime(); // 02:00 — before first entry, inside NT window
-    expect(isNTAt(t, history, scheduleDay, midnight, false)).toBe(true);
+    expect(isNTAt(t, history, windows, false)).toBe(true);
   });
 
   it('once history covers the instant, the real switch overrides the schedule (switch says VT, schedule says NT)', () => {
@@ -393,7 +405,7 @@ describe('isNTAt — source precedence (Fáze 1.1, zafixováno)', () => {
       { t: new Date(2026, 5, 15, 0, 0, 0, 0).getTime(), v: 0 }, // VT from midnight
     ];
     const t = new Date(2026, 5, 15, 2, 0, 0, 0).getTime(); // inside the 01-04 NT window per schedule
-    expect(isNTAt(t, history, scheduleDay, midnight, false)).toBe(false);
+    expect(isNTAt(t, history, windows, false)).toBe(false);
   });
 
   it('once history covers the instant, the real switch overrides the schedule (switch says NT, schedule says VT)', () => {
@@ -401,7 +413,7 @@ describe('isNTAt — source precedence (Fáze 1.1, zafixováno)', () => {
       { t: new Date(2026, 5, 15, 0, 0, 0, 0).getTime(), v: 1 }, // NT from midnight
     ];
     const t = new Date(2026, 5, 15, 10, 0, 0, 0).getTime(); // outside any schedule window
-    expect(isNTAt(t, history, scheduleDay, midnight, false)).toBe(true);
+    expect(isNTAt(t, history, windows, false)).toBe(true);
   });
 
   it('steps to the next recorded state exactly at its timestamp', () => {
@@ -411,14 +423,117 @@ describe('isNTAt — source precedence (Fáze 1.1, zafixováno)', () => {
     ];
     const justBefore = new Date(2026, 5, 15, 5, 59, 59, 0).getTime();
     const exactly = new Date(2026, 5, 15, 6, 0, 0, 0).getTime();
-    expect(isNTAt(justBefore, history, scheduleDay, midnight, false)).toBe(true);
-    expect(isNTAt(exactly, history, scheduleDay, midnight, false)).toBe(false);
+    expect(isNTAt(justBefore, history, windows, false)).toBe(true);
+    expect(isNTAt(exactly, history, windows, false)).toBe(false);
   });
 
   it('no history and no schedule falls back to the live switch state', () => {
     const t = new Date(2026, 5, 15, 2, 0, 0, 0).getTime();
-    expect(isNTAt(t, undefined, undefined, midnight, true)).toBe(true);
-    expect(isNTAt(t, undefined, undefined, midnight, false)).toBe(false);
+    expect(isNTAt(t, undefined, undefined, true)).toBe(true);
+    expect(isNTAt(t, undefined, undefined, false)).toBe(false);
+  });
+
+  it('works identically when windows come from parseScheduleEntity instead of a preset', () => {
+    const dayEnd = dayEndMs(midnight);
+    const entityWindows = parseScheduleEntity(
+      { schedule: [
+        { start: '2026-06-15T01:00:00', end: '2026-06-15T04:00:00', tariff: 'NT' },
+        { start: '2026-06-15T14:00:00', end: '2026-06-15T16:00:00', tariff: 'NT' },
+      ] },
+      midnight,
+      dayEnd
+    );
+    const t = new Date(2026, 5, 15, 2, 0, 0, 0).getTime();
+    expect(isNTAt(t, undefined, entityWindows, false)).toBe(true);
+  });
+});
+
+describe('parseScheduleEntity (Fáze 2)', () => {
+  const dayStart = new Date(2026, 5, 15, 0, 0, 0, 0).getTime();
+  const dayEnd = dayEndMs(dayStart);
+
+  it('parses the verified ha_cez_distribuce shape (tariff: "NT"/"VT", ISO timestamps)', () => {
+    const windows = parseScheduleEntity(
+      { schedule: [
+        { start: '2026-06-15T00:00:00+02:00', end: '2026-06-15T07:15:00+02:00', tariff: 'NT', value: 1 },
+        { start: '2026-06-15T07:15:00+02:00', end: '2026-06-15T08:15:00+02:00', tariff: 'VT', value: 0 },
+        { start: '2026-06-15T08:15:00+02:00', end: '2026-06-16T00:00:00+02:00', tariff: 'NT', value: 1 },
+      ] },
+      dayStart,
+      dayEnd
+    );
+    expect(windows).toEqual([
+      { start: new Date('2026-06-15T00:00:00+02:00').getTime(), end: new Date('2026-06-15T07:15:00+02:00').getTime() },
+      { start: new Date('2026-06-15T08:15:00+02:00').getTime(), end: new Date('2026-06-16T00:00:00+02:00').getTime() },
+    ]);
+  });
+
+  it('falls back to the boolean/numeric value field when tariff/type is absent', () => {
+    const windows = parseScheduleEntity(
+      { schedule: [{ start: '2026-06-15T01:00:00', end: '2026-06-15T02:00:00', value: 1 }] },
+      dayStart,
+      dayEnd
+    );
+    expect(windows).toHaveLength(1);
+  });
+
+  it('accepts from/to and is_low as aliases', () => {
+    const windows = parseScheduleEntity(
+      { schedule: [{ from: '2026-06-15T01:00:00', to: '2026-06-15T02:00:00', is_low: true }] },
+      dayStart,
+      dayEnd
+    );
+    expect(windows).toHaveLength(1);
+  });
+
+  it('drops VT entries', () => {
+    const windows = parseScheduleEntity(
+      { schedule: [{ start: '2026-06-15T01:00:00', end: '2026-06-15T02:00:00', tariff: 'VT', value: 0 }] },
+      dayStart,
+      dayEnd
+    );
+    expect(windows).toEqual([]);
+  });
+
+  it('clips a multi-day entry to the requested day', () => {
+    const windows = parseScheduleEntity(
+      { schedule: [{ start: '2026-06-14T22:00:00', end: '2026-06-15T05:00:00', tariff: 'NT' }] },
+      dayStart,
+      dayEnd
+    );
+    expect(windows).toEqual([{ start: dayStart, end: new Date('2026-06-15T05:00:00').getTime() }]);
+  });
+
+  it('returns undefined (try next source) when there is no schedule array at all', () => {
+    expect(parseScheduleEntity({}, dayStart, dayEnd)).toBeUndefined();
+    expect(parseScheduleEntity(undefined, dayStart, dayEnd)).toBeUndefined();
+    expect(parseScheduleEntity({ schedule: 'not-an-array' }, dayStart, dayEnd)).toBeUndefined();
+  });
+
+  it('returns [] (real "no NT today" answer) when the array exists but nothing matches the day', () => {
+    const windows = parseScheduleEntity(
+      { schedule: [{ start: '2026-06-20T01:00:00', end: '2026-06-20T02:00:00', tariff: 'NT' }] },
+      dayStart,
+      dayEnd
+    );
+    expect(windows).toEqual([]);
+  });
+
+  it('skips malformed entries (missing/invalid times) without throwing', () => {
+    const windows = parseScheduleEntity(
+      { schedule: [
+        { start: 'not-a-date', end: '2026-06-15T02:00:00', tariff: 'NT' },
+        { start: '2026-06-15T03:00:00', tariff: 'NT' }, // missing end
+        null,
+        { start: '2026-06-15T05:00:00', end: '2026-06-15T04:00:00', tariff: 'NT' }, // end before start
+        { start: '2026-06-15T10:00:00', end: '2026-06-15T11:00:00', tariff: 'NT' },
+      ] },
+      dayStart,
+      dayEnd
+    );
+    expect(windows).toEqual([
+      { start: new Date('2026-06-15T10:00:00').getTime(), end: new Date('2026-06-15T11:00:00').getTime() },
+    ]);
   });
 });
 

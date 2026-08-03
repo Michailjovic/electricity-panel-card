@@ -1,6 +1,6 @@
 {
   "name": "electricity-panel-card",
-  "version": "5.1.0",
+  "version": "5.1.6",
   "description": "Home Assistant custom Lovelace card for electricity panel management",
   "keywords": ["home-assistant", "lovelace", "custom-card", "electricity", "hdo"],
   "license": "MIT",

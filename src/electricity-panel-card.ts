@@ -10,7 +10,6 @@ import type {
   Circuit,
   CircuitDevice,
   DeviceChannel,
-  TariffDay,
 } from './types.js';
 import {
   dayEndMs,
@@ -18,10 +17,11 @@ import {
   computeDayType,
   computeTomorrowDayType,
   isWithinHolidayEvent,
-  ntRemainingMins,
-  buildFullDaySlots,
+  ntRemainingMinsFromWindows,
+  buildFullDaySlotsFromWindows,
   mergeMidnightNt,
   ntWindowsForDay,
+  parseScheduleEntity,
   resolveHdoStatus,
   isNTAt,
   accumulateTariffWh,
@@ -304,12 +304,6 @@ export class ElectricityPanelCard extends LitElement {
     return dayEndMs(base);
   }
 
-  private _ntRemainingMins(starts: string[], offsets: number[]): number {
-    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
-    const base = midnight.getTime();
-    return ntRemainingMins(starts, offsets, base, this._dayEndMs(base), Date.now());
-  }
-
   private _fmtMins(mins: number): string {
     return fmtMins(mins);
   }
@@ -363,56 +357,67 @@ export class ElectricityPanelCard extends LitElement {
     return new Date(ms).toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
   }
 
-  private _buildFullDaySlots(
-    starts: string[],
-    offsets: number[],
-    base: number,
-    showing: boolean
-  ): DaySlot[] {
-    return buildFullDaySlots(starts, offsets, base, showing, Date.now(), (ms) => this._fmtTime(ms));
+  /** [dayStart, dayEnd) for today (offset 0) or tomorrow (offset 1), DST-safe. */
+  private _dayBounds(dayOffset: 0 | 1): { start: number; end: number } {
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    const start = dayOffset === 0 ? midnight.getTime() : this._dayEndMs(midnight.getTime());
+    return { start, end: this._dayEndMs(start) };
   }
 
-  /** Fáze 1.2: minutes of tomorrow's NT window starting exactly at 00:00, if
-   *  any — the piece that visually continues today's midnight-ending NT
-   *  window when `hdo.merge_midnight` is on. */
-  private _tomorrowFirstNtDurMins(src: { weekday: TariffDay; weekend: TariffDay; holiday?: TariffDay }): number | undefined {
-    const tdt = this._tomorrowDayType();
-    const day = (tdt === 'holiday' && src.holiday) ? src.holiday
-      : tdt === 'weekend' ? src.weekend : src.weekday;
-    const idx = day.starts.indexOf('00:00');
-    return idx === -1 ? undefined : day.offsets[idx];
-  }
-
-  /** Fáze 1.3: today's NT windows per the active schedule (preset or manual),
-   *  with the Fáze 1.2 midnight merge already folded in when enabled.
-   *  Undefined when no schedule is configured — callers fall back to
-   *  switch-only behaviour. */
-  private _hdoWindowsToday(): { windows: Window[]; dayEnd: number } | undefined {
+  /** Fáze 2: today's (dayOffset 0) or tomorrow's (dayOffset 1) NT windows
+   *  from whichever schedule source is active, in priority order:
+   *  `schedule_entity` → `tariff_preset` → manual `schedule`. An entity is
+   *  used once it resolves a `schedule` attribute at all — even an empty
+   *  window list counts as "this source answered" (a real "no NT that day"),
+   *  so a misconfigured/empty preset never gets silently substituted in.
+   *  Undefined only when nothing configured yields anything for that day. */
+  private _scheduleWindows(dayOffset: 0 | 1): { windows: Window[]; start: number; end: number; source: 'entity' | 'preset' | 'manual' } | undefined {
     const hdo = this._config.hdo;
     if (!hdo) return undefined;
+    const { start, end } = this._dayBounds(dayOffset);
+
+    if (hdo.schedule_entity) {
+      const entity = this.hass?.states[hdo.schedule_entity];
+      const windows = entity ? parseScheduleEntity(entity.attributes, start, end) : undefined;
+      if (windows) {
+        this._log('schedule_entity', hdo.schedule_entity, 'parsed windows for day offset', dayOffset, windows);
+        return { windows, start, end, source: 'entity' };
+      }
+      if (hdo.schedule_entity) this._log('schedule_entity', hdo.schedule_entity, 'unavailable or no schedule attribute — falling back');
+    }
+
     const preset = hdo.tariff_preset ? PRE_TARIFFS[hdo.tariff_preset] : undefined;
     const src = preset ?? hdo.schedule;
     if (!src) return undefined;
-    const dt = this._dayType();
+    const dt = dayOffset === 0 ? this._dayType() : this._tomorrowDayType();
     const day = (dt === 'holiday' && src.holiday) ? src.holiday
       : dt === 'weekend' ? src.weekend : src.weekday;
-    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
-    const base = midnight.getTime();
-    const dayEnd = this._dayEndMs(base);
-    let windows = ntWindowsForDay(day, base, dayEnd);
+    return { windows: ntWindowsForDay(day, start, end), start, end, source: preset ? 'preset' : 'manual' };
+  }
+
+  /** Fáze 1.3: today's NT windows, with the Fáze 1.2 midnight merge already
+   *  folded in when enabled. Undefined when no schedule source resolves
+   *  anything for today — callers fall back to switch-only behaviour. */
+  private _hdoWindowsToday(): { windows: Window[]; dayEnd: number } | undefined {
+    const hdo = this._config.hdo;
+    const today = this._scheduleWindows(0);
+    if (!hdo || !today) return undefined;
+    let windows = today.windows;
     if (hdo.merge_midnight && windows.length) {
       const last = windows[windows.length - 1];
-      if (last.end === dayEnd) {
-        const extra = this._tomorrowFirstNtDurMins(src);
-        if (extra) windows = [...windows.slice(0, -1), { start: last.start, end: dayEnd + extra * 60000 }];
+      if (last.end === today.end) {
+        const firstTomorrow = this._scheduleWindows(1)?.windows[0];
+        if (firstTomorrow && firstTomorrow.start === today.end) {
+          windows = [...windows.slice(0, -1), { start: last.start, end: firstTomorrow.end }];
+        }
       }
     }
-    return { windows, dayEnd };
+    return { windows, dayEnd: today.end };
   }
 
   /** Fáze 1.3: compare the real HDO switch against the schedule. Undefined
    *  when there's no switch, it's unavailable, or no schedule is configured
-   *  — callers fall back to switch-only behaviour with no mismatch UI. */
+   *  — callers fall back to switch-only behaviour. */
   private _hdoStatus(): HdoStatus | undefined {
     const hdo = this._config.hdo;
     if (!hdo?.switch || !this._isAvail(hdo.switch)) return undefined;
@@ -605,18 +610,14 @@ export class ElectricityPanelCard extends LitElement {
   private _isNTAt(t: number): boolean {
     const hdo = this._config.hdo;
     if (!hdo) return false;
-    const preset = hdo.tariff_preset ? PRE_TARIFFS[hdo.tariff_preset] : undefined;
-    const src = preset ?? hdo.schedule;
-    const dt = this._dayType();
-    const scheduleDay = src
-      ? ((dt === 'holiday' && src.holiday) ? src.holiday : dt === 'weekend' ? src.weekend : src.weekday)
-      : undefined;
-    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    // _calcDailyCost only ever integrates today's history, so `t` is always
+    // within today — today's windows (whichever source resolved them) are
+    // the only ones that can ever be relevant here.
+    const windows = this._scheduleWindows(0)?.windows;
     return isNTAt(
       t,
       hdo.switch ? this._historyCache.get(hdo.switch) : undefined,
-      scheduleDay,
-      midnight.getTime(),
+      windows,
       this._isOn(hdo.switch)
     );
   }
@@ -733,30 +734,34 @@ export class ElectricityPanelCard extends LitElement {
   private _renderHdoSchedule(): TemplateResult | typeof nothing {
     const hdo = this._config.hdo;
     if (!hdo) return nothing;
-    const preset = hdo.tariff_preset ? PRE_TARIFFS[hdo.tariff_preset] : undefined;
-    const src = preset ?? hdo.schedule;
-    if (!src) return nothing;
 
     const showing = this._showTomorrow;
+    const dayOffset = showing ? 1 : 0;
+    const resolved = this._scheduleWindows(dayOffset);
+    if (!resolved) return nothing;
+    const { windows, start: base, end: dayEnd } = resolved;
+    // Day-type label is purely informational here — it no longer decides
+    // which windows to show once a schedule_entity has resolved the day.
     const dt = showing ? this._tomorrowDayType() : this._dayType();
-    const day = (dt === 'holiday' && src.holiday) ? src.holiday
-      : dt === 'weekend' ? src.weekend : src.weekday;
 
-    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
-    const base = showing ? this._dayEndMs(midnight.getTime()) : midnight.getTime();
-
-    let slots = this._buildFullDaySlots(day.starts, day.offsets, base, showing);
-    let remaining = showing ? null : this._ntRemainingMins(day.starts, day.offsets);
-    let totalNT = day.offsets.reduce((a, b) => a + b, 0);
+    let slots = buildFullDaySlotsFromWindows(windows, base, dayEnd, showing, Date.now(), (ms) => this._fmtTime(ms));
+    let remaining = showing ? null : ntRemainingMinsFromWindows(windows, dayEnd, Date.now());
+    let totalNT = windows.reduce((a, w) => a + (w.end - w.start) / 60000, 0);
 
     // Fáze 1.2: merge today's midnight-ending NT window with tomorrow's if it
-    // starts at 00:00 — presentation only, today's own slots/cost are untouched.
-    if (!showing && hdo.merge_midnight) {
-      const extra = this._tomorrowFirstNtDurMins(src);
-      if (extra) {
-        slots = mergeMidnightNt(slots, this._dayEndMs(base), extra, Date.now(), (ms) => this._fmtTime(ms));
-        remaining = (remaining ?? 0) + extra;
-        totalNT += extra;
+    // starts right at day end — presentation only, today's own slots/cost
+    // are untouched. Works the same regardless of which source resolved
+    // today vs. tomorrow (can even mix, e.g. entity today / preset tomorrow).
+    if (!showing && hdo.merge_midnight && windows.length) {
+      const last = windows[windows.length - 1];
+      if (last.end === dayEnd) {
+        const firstTomorrow = this._scheduleWindows(1)?.windows[0];
+        if (firstTomorrow && firstTomorrow.start === dayEnd) {
+          const extra = (firstTomorrow.end - firstTomorrow.start) / 60000;
+          slots = mergeMidnightNt(slots, dayEnd, extra, Date.now(), (ms) => this._fmtTime(ms));
+          remaining = (remaining ?? 0) + extra;
+          totalNT += extra;
+        }
       }
     }
 
