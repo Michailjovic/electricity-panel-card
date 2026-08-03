@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.1.7] — 2026-08-03
+*Editor: GUI pole pro manuální (custom) HDO rozvrh.*
+
+### ✨ Added
+
+- **Editor — Custom NT schedule**: `hdo.schedule` (weekday/weekend/optional
+  holiday, each a list of start-time + duration NT windows) now has a full
+  GUI editor instead of requiring raw YAML. "Add custom schedule" creates the
+  weekday/weekend blocks, each window is a time picker + minutes input with
+  add/remove, holiday can be added/removed separately, and the whole block
+  can be removed again. Same `starts[]`/`offsets[]` shape as the built-in PRE
+  presets, so it round-trips through the card unchanged.
+- Practical motivation: this is the immediate, dependency-free option when a
+  user's tariff/meter changes and no `schedule_entity`-capable integration
+  exists yet for their new setup — see ROADMAP.md Fáze 2 notes. The HDO
+  switch itself stays authoritative for real-time NT/VT and cost regardless;
+  only the predictive timeline needs a schedule source.
+
 ## [5.1.6] — 2026-08-03
 *Fáze 2 (ROADMAP.md) — NT schedule can now come from a live entity instead of only hardcoded presets.*
 

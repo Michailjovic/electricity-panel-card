@@ -9,7 +9,10 @@ import type {
   Circuit,
   CircuitDevice,
   DeviceChannel,
+  TariffDay,
 } from './types.js';
+
+type ScheduleDayKey = 'weekday' | 'weekend' | 'holiday';
 
 function deepClone<T>(obj: T): T {
   return structuredClone(obj);
@@ -421,6 +424,107 @@ export class ElectricityPanelEditor extends LitElement {
     return fallback;
   }
 
+  // ── Custom (manual) NT schedule — hdo.schedule ──────────────────────────────
+  // Lowest-priority fallback source: used only when schedule_entity and
+  // tariff_preset don't resolve. Kept in the same starts[]/offsets[] shape as
+  // the built-in presets so it round-trips through PRE_TARIFFS unchanged.
+
+  private _scheduleDay(day: ScheduleDayKey): TariffDay {
+    return this._config.hdo?.schedule?.[day] ?? { starts: [], offsets: [] };
+  }
+
+  private _updateScheduleDay(day: ScheduleDayKey, td: TariffDay): void {
+    const cfg = deepClone(this._config);
+    cfg.hdo ??= {};
+    cfg.hdo.schedule ??= { weekday: { starts: [], offsets: [] }, weekend: { starts: [], offsets: [] } };
+    cfg.hdo.schedule[day] = td;
+    this._config = cfg;
+    this._fire(cfg);
+  }
+
+  private _addScheduleWindow(day: ScheduleDayKey): void {
+    const td = this._scheduleDay(day);
+    this._updateScheduleDay(day, {
+      starts: [...td.starts, '00:00'],
+      offsets: [...td.offsets, 60],
+    });
+  }
+
+  private _removeScheduleWindow(day: ScheduleDayKey, idx: number): void {
+    const td = this._scheduleDay(day);
+    this._updateScheduleDay(day, {
+      starts: td.starts.filter((_, i) => i !== idx),
+      offsets: td.offsets.filter((_, i) => i !== idx),
+    });
+  }
+
+  private _setScheduleWindowStart(day: ScheduleDayKey, idx: number, val: string): void {
+    const td = this._scheduleDay(day);
+    const starts = [...td.starts];
+    starts[idx] = val;
+    this._updateScheduleDay(day, { starts, offsets: td.offsets });
+  }
+
+  private _setScheduleWindowOffset(day: ScheduleDayKey, idx: number, val: string): void {
+    const td = this._scheduleDay(day);
+    const offsets = [...td.offsets];
+    offsets[idx] = Math.max(1, parseInt(val, 10) || 0);
+    this._updateScheduleDay(day, { starts: td.starts, offsets });
+  }
+
+  private _enableCustomSchedule(): void {
+    const cfg = deepClone(this._config);
+    cfg.hdo ??= {};
+    cfg.hdo.schedule = {
+      weekday: { starts: ['00:00'], offsets: [60] },
+      weekend: { starts: ['00:00'], offsets: [60] },
+    };
+    this._config = cfg;
+    this._fire(cfg);
+  }
+
+  private _disableCustomSchedule(): void {
+    const cfg = deepClone(this._config);
+    if (cfg.hdo) delete cfg.hdo.schedule;
+    this._config = cfg;
+    this._fire(cfg);
+  }
+
+  private _enableHolidaySchedule(): void {
+    this._updateScheduleDay('holiday', { starts: ['00:00'], offsets: [60] });
+  }
+
+  private _disableHolidaySchedule(): void {
+    const cfg = deepClone(this._config);
+    if (cfg.hdo?.schedule) delete cfg.hdo.schedule.holiday;
+    this._config = cfg;
+    this._fire(cfg);
+  }
+
+  private _renderScheduleDayEditor(day: ScheduleDayKey, label: string): TemplateResult {
+    const td = this._scheduleDay(day);
+    return html`
+      <div class="sched-day">
+        <div class="group-label" style="margin-top:10px;">${label}</div>
+        ${td.starts.map((start, i) => html`
+          <div class="sched-row">
+            <input type="time" .value=${start}
+              @change=${(e: Event) => this._setScheduleWindowStart(day, i, (e.target as HTMLInputElement).value)} />
+            <span class="sched-sep">+</span>
+            <input type="number" min="1" .value=${String(td.offsets[i] ?? 60)}
+              @change=${(e: Event) => this._setScheduleWindowOffset(day, i, (e.target as HTMLInputElement).value)} />
+            <span class="sched-unit">min</span>
+            <button class="btn-icon danger" title="Remove window"
+              @click=${() => this._removeScheduleWindow(day, i)}>
+              <ha-icon icon="mdi:minus-circle-outline"></ha-icon>
+            </button>
+          </div>`)}
+        <button class="btn-add" @click=${() => this._addScheduleWindow(day)}>
+          <ha-icon icon="mdi:plus"></ha-icon> Add NT window
+        </button>
+      </div>`;
+  }
+
   private _renderHdoSection(): TemplateResult {
     const h = this._config.hdo ?? {};
     const s = (f: string) => (v: string) => this._set(['hdo', f], v);
@@ -471,6 +575,37 @@ export class ElectricityPanelEditor extends LitElement {
               Enables the NT schedule timeline in the card.
               Weekday / weekend / holiday schedules are loaded automatically.
             </span>
+          </div>
+          <div class="field" style="margin-top:10px;">
+            <label>Custom NT schedule (manual, lowest-priority fallback)</label>
+            ${!h.schedule ? html`
+              <button class="btn-add" @click=${() => this._enableCustomSchedule()}>
+                <ha-icon icon="mdi:plus"></ha-icon> Add custom schedule
+              </button>
+              <span class="field-hint">
+                Define your own weekday/weekend/holiday NT windows — e.g. when
+                your distributor's HDO program isn't among the built-in
+                presets, or it changes and no schedule_entity integration
+                exists yet. Used only when schedule_entity and tariff_preset
+                above are not set/don't resolve.
+              </span>
+            ` : html`
+              ${this._renderScheduleDayEditor('weekday', 'Weekday')}
+              ${this._renderScheduleDayEditor('weekend', 'Weekend')}
+              ${h.schedule.holiday ? html`
+                ${this._renderScheduleDayEditor('holiday', 'Public holiday')}
+                <button class="btn-add" @click=${() => this._disableHolidaySchedule()}>
+                  <ha-icon icon="mdi:minus"></ha-icon> Remove holiday schedule (falls back to weekend)
+                </button>
+              ` : html`
+                <button class="btn-add" @click=${() => this._enableHolidaySchedule()}>
+                  <ha-icon icon="mdi:plus"></ha-icon> Add separate holiday schedule
+                </button>
+              `}
+              <button class="btn-add danger" style="margin-top:8px;" @click=${() => this._disableCustomSchedule()}>
+                <ha-icon icon="mdi:trash-can-outline"></ha-icon> Remove custom schedule
+              </button>
+            `}
           </div>
           <div class="field checkbox">
             <input type="checkbox" id="merge-midnight" .checked=${h.merge_midnight ?? false}
@@ -798,7 +933,19 @@ display: flex; align-items: center; gap: 6px;
     }
     .btn-add:hover { background: var(--secondary-background-color); }
     .btn-add.primary { border-color: var(--primary-color, #2196f3); color: var(--primary-color, #2196f3); margin-top: 8px; }
+    .btn-add.danger { border-color: var(--error-color, #e53935); color: var(--error-color, #e53935); }
     .btn-add ha-icon { --mdc-icon-size: 18px; }
+
+    .sched-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .sched-row input[type="time"],
+    .sched-row input[type="number"] {
+      padding: 5px 8px; border-radius: 6px;
+      border: 1px solid var(--divider-color, rgba(0,0,0,0.15));
+      background: var(--primary-background-color);
+      color: var(--primary-text-color); font-size: 13px;
+    }
+    .sched-row input[type="number"] { width: 64px; }
+    .sched-sep, .sched-unit { font-size: 12px; color: var(--secondary-text-color); flex-shrink: 0; }
     .ep-ver { font-size: 10px; color: var(--disabled-text-color); text-align: center; padding: 8px 0 2px; opacity: 0.6; }
   `;
 }
