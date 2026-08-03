@@ -477,3 +477,85 @@ export function accumulateTariffWh(
 export function calcCost(ntWh: number, vtWh: number, ntPrice: number, vtPrice: number): number {
   return (ntWh / 1000) * ntPrice + (vtWh / 1000) * vtPrice;
 }
+
+/**
+ * Fáze 3.2 (ROADMAP.md): one `recorder/statistics_during_period` bucket for
+ * a power entity — `mean` is the average W over `[start, end)`, already
+ * unit-normalized to W like `HistPoint.v`. Unlike `HistPoint`, statistics
+ * responses don't carry an explicit `end` per row — callers derive it from
+ * the requested period (`start + periodMs`) before building this shape.
+ */
+export interface StatBucket {
+  start: number;
+  end: number;
+  mean: number;
+}
+
+/**
+ * Exact NT fraction of an arbitrary `[start, end)` interval — the piece that
+ * lets `accumulateTariffWhFromStats` split a coarse (5-minute/hourly)
+ * statistics bucket across a tariff boundary that falls inside it, instead of
+ * a single midpoint test misattributing the whole bucket. Splits the interval
+ * at every point where `isNTAt` could change state (switch-history
+ * transitions and window start/end times) and re-tests each resulting
+ * sub-segment with `isNTAt` itself — so this always agrees with `isNTAt`'s
+ * precedence rule (switch history authoritative, windows fallback, live
+ * state last resort) instead of duplicating it.
+ */
+export function ntFractionOfInterval(
+  start: number,
+  end: number,
+  hdoHistory: HistPoint[] | undefined,
+  windows: Window[] | undefined,
+  fallbackSwitchOn: boolean
+): number {
+  const total = end - start;
+  if (total <= 0) return 0;
+
+  const breaks = new Set<number>([start, end]);
+  if (hdoHistory) {
+    for (const p of hdoHistory) if (p.t > start && p.t < end) breaks.add(p.t);
+  }
+  if (windows) {
+    for (const w of windows) {
+      if (w.start > start && w.start < end) breaks.add(w.start);
+      if (w.end > start && w.end < end) breaks.add(w.end);
+    }
+  }
+  const pts = [...breaks].sort((a, b) => a - b);
+
+  let ntMs = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const segStart = pts[i - 1], segEnd = pts[i];
+    const mid = (segStart + segEnd) / 2;
+    if (isNTAt(mid, hdoHistory, windows, fallbackSwitchOn)) ntMs += segEnd - segStart;
+  }
+  return ntMs / total;
+}
+
+/**
+ * Fáze 3.2 (ROADMAP.md): the `recorder/statistics_during_period` equivalent
+ * of `accumulateTariffWh` — buckets carry a pre-averaged `mean` W instead of
+ * instantaneous samples, so there's no trapezoidal step, just `mean *
+ * duration`. Each bucket is split across the NT/VT boundary proportionally
+ * via `ntFractionFn` rather than a single midpoint test, since a hardware
+ * HDO switch can flip mid-bucket on coarser (hourly) statistics. Negative
+ * power (PV export) is clamped to zero, same as `accumulateTariffWh`.
+ */
+export function accumulateTariffWhFromStats(
+  bucketsList: Array<StatBucket[] | undefined>,
+  ntFractionFn: (start: number, end: number) => number
+): { ntWh: number; vtWh: number; hasData: boolean } {
+  let ntWh = 0, vtWh = 0, hasData = false;
+  for (const buckets of bucketsList) {
+    if (!buckets || buckets.length === 0) continue;
+    hasData = true;
+    for (const b of buckets) {
+      const wh = Math.max(0, b.mean) * ((b.end - b.start) / 3_600_000);
+      const ntFrac = ntFractionFn(b.start, b.end);
+      ntWh += wh * ntFrac;
+      vtWh += wh * (1 - ntFrac);
+    }
+  }
+  return { ntWh, vtWh, hasData };
+}

@@ -26,9 +26,12 @@ import {
   isNTAt,
   accumulateTariffWh,
   calcCost,
+  ntFractionOfInterval,
+  accumulateTariffWhFromStats,
   type DaySlot,
   type Window,
   type HdoStatus,
+  type StatBucket,
 } from './utils.js';
 
 @customElement('electricity-panel-card')
@@ -65,6 +68,13 @@ export class ElectricityPanelCard extends LitElement {
   private _refetchDebounce?: number;
   private _trackedIds: string[] = [];
   private _historyCache = new Map<string, Array<{t: number; v: number}>>();
+  /** Fáze 3.2 (ROADMAP.md): recorder/statistics_during_period buckets (5minute,
+   *  since midnight), keyed by entity_id. Populated only for entities that
+   *  actually have long-term statistics (state_class set) — entities absent
+   *  here fall back to `_historyCache`'s raw-history integration in
+   *  `_calcDailyCost`. Lighter on the recorder than raw history and survives
+   *  purge, but not every power entity is guaranteed to have it. */
+  private _statsCache = new Map<string, StatBucket[]>();
   private _historyFetching = false;
   private _refetchQueued = false;
   /** Timestamp of the last successful history fetch — right edge of sparkline x-axis */
@@ -110,6 +120,7 @@ export class ElectricityPanelCard extends LitElement {
     );
     if (!appearanceOnly) {
       this._historyCache.clear();
+      this._statsCache.clear();
       this._sparkCache.clear();
       // Debounce — the GUI editor fires config-changed on every keystroke;
       // without this each keystroke would trigger a recorder WS query.
@@ -590,6 +601,13 @@ export class ElectricityPanelCard extends LitElement {
       this._log(`cache now has ${this._historyCache.size} entities`);
       this._historyWindowEnd = nowMs;
       this._sparkCache.clear();
+      // Fáze 3.2: statistics are strictly an optimization for cost calc — never
+      // block or fail the render on them. Raw history above is already the
+      // safety net (`_calcDailyCost` falls back to it per-entity), so this
+      // fetch happens after and independently.
+      if (this._hasPrices() && graphIds.length > 0) {
+        await this._fetchStatistics(graphIds, wattsMul, midnight.getTime(), nowMs);
+      }
       this.requestUpdate();
     } catch (err) {
       console.warn('[ep-card] history fetch failed:', err);
@@ -599,6 +617,71 @@ export class ElectricityPanelCard extends LitElement {
         this._refetchQueued = false;
         void this._fetchHistory();
       }
+    }
+  }
+
+  /** Fáze 3.2 (ROADMAP.md): prefer `recorder/statistics_during_period` over
+   *  raw history for the daily cost integration — pre-aggregated 5-minute
+   *  buckets are far lighter on the recorder than pulling every raw state
+   *  change for the whole day, and (unlike raw history) survive the
+   *  recorder's purge schedule. Not every power entity has long-term
+   *  statistics though — it requires `state_class` to be set on the sensor —
+   *  so entities missing from the response are simply left out of
+   *  `_statsCache`; `_calcDailyCost` falls back to `_historyCache` for those,
+   *  entity by entity, so a partial result here never breaks cost display,
+   *  only makes it marginally less light on the recorder. `wattsMul` is the
+   *  same per-entity W-normalization map `_fetchHistory` already built from
+   *  the entities' current `unit_of_measurement` — statistics report in the
+   *  same unit as the entity's state, so it applies identically here. */
+  private async _fetchStatistics(
+    ids: string[],
+    wattsMul: Map<string, number>,
+    dayStartMs: number,
+    nowMs: number
+  ): Promise<void> {
+    if (!this._hass) return;
+    const PERIOD_MS = 300_000; // '5minute' — matches today's resolution near tariff switchover
+    type StatEntry = { start: number | string; mean?: number | null };
+    try {
+      const raw = await this._hass.callWS<Record<string, Array<StatEntry>>>({
+        type: 'recorder/statistics_during_period',
+        start_time: new Date(dayStartMs).toISOString(),
+        end_time: new Date(nowMs).toISOString(),
+        statistic_ids: ids,
+        period: '5minute',
+        types: ['mean'],
+      });
+      let withStats = 0;
+      for (const id of ids) {
+        const entries = raw?.[id];
+        if (!Array.isArray(entries) || entries.length === 0) {
+          this._statsCache.delete(id);
+          this._log(`stats: ${id} has no 5minute statistics (state_class missing, or too new) — falling back to raw history for it`);
+          continue;
+        }
+        const mul = wattsMul.get(id) ?? 1;
+        const buckets: StatBucket[] = entries
+          .map((e): StatBucket => {
+            // HA has shipped both epoch-seconds numbers and ISO strings for
+            // statistics `start` across versions — same defensive parsing
+            // style as the compressed-history handling above.
+            const s = typeof e.start === 'number'
+              ? (e.start < 1e12 ? e.start * 1000 : e.start)
+              : new Date(e.start).getTime();
+            const mean = typeof e.mean === 'number' ? e.mean * mul : NaN;
+            return { start: s, end: s + PERIOD_MS, mean };
+          })
+          .filter(b => !isNaN(b.start) && !isNaN(b.mean));
+        if (buckets.length > 0) {
+          this._statsCache.set(id, buckets);
+          withStats++;
+        } else {
+          this._statsCache.delete(id);
+        }
+      }
+      this._log(`stats: ${withStats}/${ids.length} entities have usable 5minute statistics`);
+    } catch (err) {
+      this._log('stats fetch failed — cost calc falls back to raw history for all entities:', err);
     }
   }
 
@@ -623,18 +706,40 @@ export class ElectricityPanelCard extends LitElement {
   }
 
   /** Accumulate today's energy cost across one or more power entities (W).
-   *  Entities are integrated independently and summed — correct for multi-phase
-   *  circuits where each phase has its own history entity. */
+   *  Fáze 3.2 (ROADMAP.md): each entity independently prefers its
+   *  `_statsCache` (recorder/statistics_during_period, 5minute buckets) when
+   *  available, and only falls back to `_historyCache`'s raw-history
+   *  trapezoidal integration (Fáze 1.1, unchanged) when that entity has no
+   *  usable statistics yet. Mixing sources per-entity (rather than an
+   *  all-or-nothing choice for the whole call) means a 3-phase circuit where
+   *  only L1 has statistics still gets the recorder-load benefit for L1
+   *  without losing L2/L3's cost. Both paths produce Wh and sum losslessly. */
   private _calcDailyCost(...entityIds: (string | undefined)[]): string {
     const hdo = this._config.hdo;
     if (!hdo || (!hdo.nt_price && !hdo.vt_price)) return '';
     const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    const midnightMs = midnight.getTime();
     const ntP = parseFloat(hdo.nt_price as unknown as string) || 0;
     const vtP = parseFloat(hdo.vt_price as unknown as string) || 0;
-    const series = entityIds
-      .filter((id): id is string => !!id)
-      .map(id => this._historyCache.get(id)?.filter(p => p.t >= midnight.getTime()));
-    const { ntWh, vtWh, hasData } = accumulateTariffWh(series, (t) => this._isNTAt(t));
+
+    const windows = this._scheduleWindows(0)?.windows;
+    const hdoHist = hdo.switch ? this._historyCache.get(hdo.switch) : undefined;
+    const switchOn = this._isOn(hdo.switch);
+    const ntFractionFn = (s: number, e: number) => ntFractionOfInterval(s, e, hdoHist, windows, switchOn);
+
+    let ntWh = 0, vtWh = 0, hasData = false;
+    for (const id of entityIds) {
+      if (!id) continue;
+      const stats = this._statsCache.get(id);
+      if (stats && stats.length > 0) {
+        const r = accumulateTariffWhFromStats([stats], ntFractionFn);
+        ntWh += r.ntWh; vtWh += r.vtWh; hasData = hasData || r.hasData;
+      } else {
+        const raw = this._historyCache.get(id)?.filter(p => p.t >= midnightMs);
+        const r = accumulateTariffWh([raw], (t) => this._isNTAt(t));
+        ntWh += r.ntWh; vtWh += r.vtWh; hasData = hasData || r.hasData;
+      }
+    }
     if (!hasData) return '';
     const cost = calcCost(ntWh, vtWh, ntP, vtP);
     if (cost < 0.005) return '';

@@ -656,7 +656,7 @@ const PRE_TARIFFS = {
     holiday: { starts: ["02:20", "07:00", "15:20"], offsets: [240, 80, 160] }
   }
 };
-const EP_VERSION = "5.1.7";
+const EP_VERSION = "5.1.8";
 function slotTimeMs(base, hm) {
   const [h2, m2] = hm.split(":").map(Number);
   const d2 = new Date(base);
@@ -864,6 +864,42 @@ function accumulateTariffWh(seriesList, isNTAtFn) {
 }
 function calcCost(ntWh, vtWh, ntPrice, vtPrice) {
   return ntWh / 1e3 * ntPrice + vtWh / 1e3 * vtPrice;
+}
+function ntFractionOfInterval(start, end, hdoHistory, windows, fallbackSwitchOn) {
+  const total = end - start;
+  if (total <= 0) return 0;
+  const breaks = /* @__PURE__ */ new Set([start, end]);
+  if (hdoHistory) {
+    for (const p2 of hdoHistory) if (p2.t > start && p2.t < end) breaks.add(p2.t);
+  }
+  if (windows) {
+    for (const w of windows) {
+      if (w.start > start && w.start < end) breaks.add(w.start);
+      if (w.end > start && w.end < end) breaks.add(w.end);
+    }
+  }
+  const pts = [...breaks].sort((a2, b2) => a2 - b2);
+  let ntMs = 0;
+  for (let i2 = 1; i2 < pts.length; i2++) {
+    const segStart = pts[i2 - 1], segEnd = pts[i2];
+    const mid = (segStart + segEnd) / 2;
+    if (isNTAt(mid, hdoHistory, windows, fallbackSwitchOn)) ntMs += segEnd - segStart;
+  }
+  return ntMs / total;
+}
+function accumulateTariffWhFromStats(bucketsList, ntFractionFn) {
+  let ntWh = 0, vtWh = 0, hasData = false;
+  for (const buckets of bucketsList) {
+    if (!buckets || buckets.length === 0) continue;
+    hasData = true;
+    for (const b2 of buckets) {
+      const wh = Math.max(0, b2.mean) * ((b2.end - b2.start) / 36e5);
+      const ntFrac = ntFractionFn(b2.start, b2.end);
+      ntWh += wh * ntFrac;
+      vtWh += wh * (1 - ntFrac);
+    }
+  }
+  return { ntWh, vtWh, hasData };
 }
 var __defProp$1 = Object.defineProperty;
 var __getOwnPropDesc$1 = Object.getOwnPropertyDescriptor;
@@ -1926,6 +1962,7 @@ let ElectricityPanelCard = class extends i {
     this._scheduleExpanded = false;
     this._trackedIds = [];
     this._historyCache = /* @__PURE__ */ new Map();
+    this._statsCache = /* @__PURE__ */ new Map();
     this._historyFetching = false;
     this._refetchQueued = false;
     this._historyWindowEnd = 0;
@@ -1969,6 +2006,7 @@ let ElectricityPanelCard = class extends i {
     const appearanceOnly = prev && (prev.graph_hours === config.graph_hours && JSON.stringify(prev.circuits) === JSON.stringify(config.circuits) && JSON.stringify(prev.hdo) === JSON.stringify(config.hdo) && JSON.stringify(prev.main_meter) === JSON.stringify(config.main_meter));
     if (!appearanceOnly) {
       this._historyCache.clear();
+      this._statsCache.clear();
       this._sparkCache.clear();
       clearTimeout(this._refetchDebounce);
       this._refetchDebounce = window.setTimeout(() => {
@@ -2429,6 +2467,9 @@ let ElectricityPanelCard = class extends i {
       this._log(`cache now has ${this._historyCache.size} entities`);
       this._historyWindowEnd = nowMs;
       this._sparkCache.clear();
+      if (this._hasPrices() && graphIds.length > 0) {
+        await this._fetchStatistics(graphIds, wattsMul, midnight.getTime(), nowMs);
+      }
       this.requestUpdate();
     } catch (err) {
       console.warn("[ep-card] history fetch failed:", err);
@@ -2438,6 +2479,57 @@ let ElectricityPanelCard = class extends i {
         this._refetchQueued = false;
         void this._fetchHistory();
       }
+    }
+  }
+  /** Fáze 3.2 (ROADMAP.md): prefer `recorder/statistics_during_period` over
+   *  raw history for the daily cost integration — pre-aggregated 5-minute
+   *  buckets are far lighter on the recorder than pulling every raw state
+   *  change for the whole day, and (unlike raw history) survive the
+   *  recorder's purge schedule. Not every power entity has long-term
+   *  statistics though — it requires `state_class` to be set on the sensor —
+   *  so entities missing from the response are simply left out of
+   *  `_statsCache`; `_calcDailyCost` falls back to `_historyCache` for those,
+   *  entity by entity, so a partial result here never breaks cost display,
+   *  only makes it marginally less light on the recorder. `wattsMul` is the
+   *  same per-entity W-normalization map `_fetchHistory` already built from
+   *  the entities' current `unit_of_measurement` — statistics report in the
+   *  same unit as the entity's state, so it applies identically here. */
+  async _fetchStatistics(ids, wattsMul, dayStartMs, nowMs) {
+    if (!this._hass) return;
+    const PERIOD_MS = 3e5;
+    try {
+      const raw = await this._hass.callWS({
+        type: "recorder/statistics_during_period",
+        start_time: new Date(dayStartMs).toISOString(),
+        end_time: new Date(nowMs).toISOString(),
+        statistic_ids: ids,
+        period: "5minute",
+        types: ["mean"]
+      });
+      let withStats = 0;
+      for (const id of ids) {
+        const entries = raw == null ? void 0 : raw[id];
+        if (!Array.isArray(entries) || entries.length === 0) {
+          this._statsCache.delete(id);
+          this._log(`stats: ${id} has no 5minute statistics (state_class missing, or too new) — falling back to raw history for it`);
+          continue;
+        }
+        const mul = wattsMul.get(id) ?? 1;
+        const buckets = entries.map((e2) => {
+          const s2 = typeof e2.start === "number" ? e2.start < 1e12 ? e2.start * 1e3 : e2.start : new Date(e2.start).getTime();
+          const mean = typeof e2.mean === "number" ? e2.mean * mul : NaN;
+          return { start: s2, end: s2 + PERIOD_MS, mean };
+        }).filter((b2) => !isNaN(b2.start) && !isNaN(b2.mean));
+        if (buckets.length > 0) {
+          this._statsCache.set(id, buckets);
+          withStats++;
+        } else {
+          this._statsCache.delete(id);
+        }
+      }
+      this._log(`stats: ${withStats}/${ids.length} entities have usable 5minute statistics`);
+    } catch (err) {
+      this._log("stats fetch failed — cost calc falls back to raw history for all entities:", err);
     }
   }
   /** Precedence (Fáze 1.1, zafixováno — see utils.ts isNTAt): real HDO switch
@@ -2457,20 +2549,44 @@ let ElectricityPanelCard = class extends i {
     );
   }
   /** Accumulate today's energy cost across one or more power entities (W).
-   *  Entities are integrated independently and summed — correct for multi-phase
-   *  circuits where each phase has its own history entity. */
+   *  Fáze 3.2 (ROADMAP.md): each entity independently prefers its
+   *  `_statsCache` (recorder/statistics_during_period, 5minute buckets) when
+   *  available, and only falls back to `_historyCache`'s raw-history
+   *  trapezoidal integration (Fáze 1.1, unchanged) when that entity has no
+   *  usable statistics yet. Mixing sources per-entity (rather than an
+   *  all-or-nothing choice for the whole call) means a 3-phase circuit where
+   *  only L1 has statistics still gets the recorder-load benefit for L1
+   *  without losing L2/L3's cost. Both paths produce Wh and sum losslessly. */
   _calcDailyCost(...entityIds) {
+    var _a2, _b;
     const hdo = this._config.hdo;
     if (!hdo || !hdo.nt_price && !hdo.vt_price) return "";
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
+    const midnightMs = midnight.getTime();
     const ntP = parseFloat(hdo.nt_price) || 0;
     const vtP = parseFloat(hdo.vt_price) || 0;
-    const series = entityIds.filter((id) => !!id).map((id) => {
-      var _a2;
-      return (_a2 = this._historyCache.get(id)) == null ? void 0 : _a2.filter((p2) => p2.t >= midnight.getTime());
-    });
-    const { ntWh, vtWh, hasData } = accumulateTariffWh(series, (t2) => this._isNTAt(t2));
+    const windows = (_a2 = this._scheduleWindows(0)) == null ? void 0 : _a2.windows;
+    const hdoHist = hdo.switch ? this._historyCache.get(hdo.switch) : void 0;
+    const switchOn = this._isOn(hdo.switch);
+    const ntFractionFn = (s2, e2) => ntFractionOfInterval(s2, e2, hdoHist, windows, switchOn);
+    let ntWh = 0, vtWh = 0, hasData = false;
+    for (const id of entityIds) {
+      if (!id) continue;
+      const stats = this._statsCache.get(id);
+      if (stats && stats.length > 0) {
+        const r2 = accumulateTariffWhFromStats([stats], ntFractionFn);
+        ntWh += r2.ntWh;
+        vtWh += r2.vtWh;
+        hasData = hasData || r2.hasData;
+      } else {
+        const raw = (_b = this._historyCache.get(id)) == null ? void 0 : _b.filter((p2) => p2.t >= midnightMs);
+        const r2 = accumulateTariffWh([raw], (t2) => this._isNTAt(t2));
+        ntWh += r2.ntWh;
+        vtWh += r2.vtWh;
+        hasData = hasData || r2.hasData;
+      }
+    }
     if (!hasData) return "";
     const cost = calcCost(ntWh, vtWh, ntP, vtP);
     if (cost < 5e-3) return "";

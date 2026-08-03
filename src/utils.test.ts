@@ -18,8 +18,11 @@ import {
   parseScheduleEntity,
   accumulateTariffWh,
   calcCost,
+  ntFractionOfInterval,
+  accumulateTariffWhFromStats,
   type HistPoint,
   type Window,
+  type StatBucket,
 } from './utils.js';
 import type { TariffDay } from './types.js';
 
@@ -571,5 +574,84 @@ describe('accumulateTariffWh / calcCost', () => {
 
   it('calcCost combines NT/VT watt-hours with their respective prices', () => {
     expect(calcCost(1000, 2000, 3, 5)).toBeCloseTo(1 * 3 + 2 * 5, 5);
+  });
+});
+
+describe('ntFractionOfInterval (Fáze 3.2)', () => {
+  const midnight = new Date(2026, 5, 15, 0, 0, 0, 0).getTime();
+  const scheduleDay: TariffDay = { starts: ['01:00', '14:00'], offsets: [180, 120] }; // NT 01-04, 14-16
+  const windows = ntWindowsForDay(scheduleDay, midnight, dayEndMs(midnight));
+  const h = (hh: number) => new Date(2026, 5, 15, hh, 0, 0, 0).getTime();
+
+  it('bucket fully inside a schedule NT window is 1', () => {
+    expect(ntFractionOfInterval(h(1), h(2), undefined, windows, false)).toBe(1);
+  });
+
+  it('bucket fully outside any NT window is 0', () => {
+    expect(ntFractionOfInterval(h(5), h(6), undefined, windows, false)).toBe(0);
+  });
+
+  it('an hourly bucket straddling a schedule window boundary splits proportionally', () => {
+    // 00:30–01:30, NT starts at 01:00 — first half VT, second half NT
+    const start = h(0) + 30 * 60_000;
+    const end = h(1) + 30 * 60_000;
+    expect(ntFractionOfInterval(start, end, undefined, windows, false)).toBeCloseTo(0.5, 5);
+  });
+
+  it('splits proportionally at a real switch-history transition, not just the schedule', () => {
+    // Switch flips NT->VT at 01:15 inside the 01:00-01:30 bucket — history wins over schedule
+    const history: HistPoint[] = [
+      { t: h(0), v: 1 }, // NT from midnight
+      { t: h(1) + 15 * 60_000, v: 0 }, // VT from 01:15
+    ];
+    const start = h(1);
+    const end = h(1) + 30 * 60_000;
+    expect(ntFractionOfInterval(start, end, history, windows, false)).toBeCloseTo(0.5, 5);
+  });
+
+  it('zero-length or inverted interval is 0', () => {
+    expect(ntFractionOfInterval(h(1), h(1), undefined, windows, false)).toBe(0);
+    expect(ntFractionOfInterval(h(2), h(1), undefined, windows, false)).toBe(0);
+  });
+
+  it('with no history and no windows, falls back to the live switch state for the whole bucket', () => {
+    expect(ntFractionOfInterval(h(1), h(2), undefined, undefined, true)).toBe(1);
+    expect(ntFractionOfInterval(h(1), h(2), undefined, undefined, false)).toBe(0);
+  });
+});
+
+describe('accumulateTariffWhFromStats (Fáze 3.2)', () => {
+  it('mean W * bucket duration => Wh, split via the supplied NT-fraction function', () => {
+    const buckets: StatBucket[] = [{ start: 0, end: 3_600_000, mean: 1000 }]; // 1000 W for 1h => 1000 Wh
+    const { ntWh, vtWh, hasData } = accumulateTariffWhFromStats([buckets], () => 1);
+    expect(hasData).toBe(true);
+    expect(ntWh).toBeCloseTo(1000, 5);
+    expect(vtWh).toBe(0);
+  });
+
+  it('splits a single bucket across NT/VT using a fractional ntFractionFn', () => {
+    const buckets: StatBucket[] = [{ start: 0, end: 3_600_000, mean: 1000 }];
+    const { ntWh, vtWh } = accumulateTariffWhFromStats([buckets], () => 0.25);
+    expect(ntWh).toBeCloseTo(250, 5);
+    expect(vtWh).toBeCloseTo(750, 5);
+  });
+
+  it('sums multiple independent bucket series (e.g. per-phase entities)', () => {
+    const a: StatBucket[] = [{ start: 0, end: 3_600_000, mean: 1000 }];
+    const b: StatBucket[] = [{ start: 0, end: 3_600_000, mean: 500 }];
+    const { ntWh } = accumulateTariffWhFromStats([a, b], () => 1);
+    expect(ntWh).toBeCloseTo(1500, 5);
+  });
+
+  it('clamps a negative mean (PV export) to zero instead of subtracting cost', () => {
+    const buckets: StatBucket[] = [{ start: 0, end: 3_600_000, mean: -500 }];
+    const { ntWh, vtWh } = accumulateTariffWhFromStats([buckets], () => 1);
+    expect(ntWh).toBe(0);
+    expect(vtWh).toBe(0);
+  });
+
+  it('ignores empty/missing series and reports hasData=false when nothing usable', () => {
+    const { hasData } = accumulateTariffWhFromStats([undefined, []], () => 1);
+    expect(hasData).toBe(false);
   });
 });

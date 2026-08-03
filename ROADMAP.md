@@ -88,16 +88,33 @@ k pár aliasům klíčů (`from`/`to`, `value`/`is_low`, …), ne jen k jednomu 
 informačně hustá — nové prvky musí být sbalitelné a volitelné.
 
 ### 3.1 Design iterace
-- [ ] HTML mockupy 2–3 variant umístění (sbalitelná sekce „Náklady" pod HDO blokem
-      vs. samostatná karta `electricity-costs-card` vs. tab v rozvrhu)
-- [ ] Rozhodnout granularitu: dnes / 7 dní / měsíc; NT vs VT stacked bar
-- [ ] Rozhodnout, co je default (pravděpodobně: vše sbalené, jen řádek s dnešní sumou)
+- [x] HTML mockupy 3 variant umístění (sbalitelná sekce pod HDO blokem /
+      samostatná karta `electricity-costs-card` / tab v bloku rozvrhu) —
+      2026-08-03, interaktivní widget v konverzaci (Cowork), zatím nesoučást repa
+- [x] **Rozhodnuto: varianta „tab v rozvrhu"** — blok rozvrhu dostane druhou
+      záložku „Náklady" vedle „Rozvrh"; bez nárůstu výšky karty, cena za to je
+      že rozvrh a náklady nejdou vidět současně (přijatelné)
+- [x] Granularita: přepínač **Dnes / 7 dní / Měsíc** uvnitř záložky Náklady;
+      NT vs VT jako jeden stacked bar (2 segmenty) + legenda kWh/Kč pod ním
+- [x] Default: záložka „Rozvrh" aktivní při otevření karty (náklady jsou
+      druhý krok, ne první věc, kterou uživatel vidí)
 
 ### 3.2 Přechod na long-term statistics
-- [ ] `recorder/statistics_during_period` (period `hour`, pro dnešek `5minute`)
-      místo raw historie pro výpočet nákladů; fallback na současnou history metodu
-- [ ] Ověřit dostupnost statistik pro výkonové entity (state_class: measurement)
-- [ ] Méně zátěže na recorder, data přežijí purge
+- [x] `recorder/statistics_during_period` (`period: '5minute'`, od půlnoci) —
+      v5.1.8. `_calcDailyCost` teď pro každou entitu zvlášť preferuje
+      `_statsCache`, a jen když pro ni statistiky chybí, spadne zpět na
+      dosavadní raw-history trapezoidal (`_historyCache` + `accumulateTariffWh`,
+      beze změny). Nová `ntFractionOfInterval` dělí bucket přesně podle
+      switch-transition/window bodů (ne jen midpoint test) — přesnější než
+      raw-history metoda i pro hrubší 5min/hour granularitu.
+- [ ] **Ověřit na reálné instanci:** `debug: true` teď loguje kolik
+      trackovaných entit má use statistiky (`stats: N/M entities have usable
+      5minute statistics`). Nutné zkontrolovat u Michaličových power entit
+      (main_meter fáze, okruhy) — vyžaduje `state_class: measurement`
+      nastavený na senzoru; bez toho HA statistiky vůbec nezaznamenává.
+- [ ] Zúžit raw-history fetch zpět na `graph_hours` (dnes jde kvůli cost
+      calc až k půlnoci) — odloženo do potvrzení výše, ať se neztratí
+      fallback bezpečnostní síť dřív, než víme, že statistiky fungují
 
 ### 3.3 Souhrn nákladů
 - [ ] Dle vítězného návrhu z 3.1; odhad měsíční faktury extrapolací přes HDO rozvrh

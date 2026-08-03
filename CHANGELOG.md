@@ -5,6 +5,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.1.8] — 2026-08-03
+*Fáze 3.2 (ROADMAP.md) — daily cost calc prefers long-term statistics over raw history.*
+
+### ✨ Added
+
+- **Cost calc now prefers `recorder/statistics_during_period`** (5-minute
+  buckets, since midnight) over raw state history for the NT/VT daily cost
+  shown next to the main meter and each circuit. Falls back to the existing
+  raw-history trapezoidal integration (Fáze 1.1) per entity — a 3-phase
+  circuit where only some phases have long-term statistics still gets the
+  benefit for those, without losing cost for the rest. Requires the power
+  entity to have `state_class: measurement` (or similar) for HA to actually
+  record statistics for it; entities without it just keep using raw history,
+  same as before this change.
+- New `ntFractionOfInterval` splits a statistics bucket across an NT/VT
+  boundary that falls inside it proportionally (exact switch-transition/
+  window-boundary split), instead of a single midpoint test — more accurate
+  than the raw-history method for the coarser 5-minute/hourly granularity.
+- Debug log (`debug: true`) now reports how many tracked entities actually
+  have usable statistics — needed to verify this against a real HA instance
+  per-entity, since availability depends on each sensor's `state_class`.
+- Raw history fetch (today, since midnight) is unchanged for now — still the
+  fallback safety net. Narrowing it once statistics are confirmed reliable
+  on real entities is a follow-up, not part of this step.
+
 ## [5.1.7] — 2026-08-03
 *Editor: GUI pole pro manuální (custom) HDO rozvrh.*
 
