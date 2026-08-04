@@ -117,7 +117,21 @@ informačně hustá — nové prvky musí být sbalitelné a volitelné.
       fallback bezpečnostní síť dřív, než víme, že statistiky fungují
 
 ### 3.3 Souhrn nákladů
-- [ ] Dle vítězného návrhu z 3.1; odhad měsíční faktury extrapolací přes HDO rozvrh
+- [x] Dle vítězného návrhu z 3.1 (varianta C) — v5.1.9. Blok rozvrhu má
+      záložky „Rozvrh"/„Náklady" (jen když jsou nastavené `nt_price`/`vt_price`,
+      jinak beze změny). Náklady: přepínač Dnes/7 dní/Měsíc, NT/VT stacked
+      bar + legenda, celkem, u 7 dní/Měsíc druhý řádek (průměr/den, odhad
+      měsíce). Počítá se z `main_meter` fází (celá instalace, ne součet
+      okruhů). Odhad měsíce = lineární extrapolace z průměru měsíce k datu
+      (`estimateMonthCost`) — záměrně bez váhování všední/víkend nebo podle
+      poměru NT/VT v rozvrhu; pokud to bude nepřesné, doladíme.
+- [ ] **Ověřit na reálné instanci:** „7 dní"/„Měsíc" běží na nové
+      `_fetchRangeData` (31 dní hodinových statistik + širší historie
+      HDO switche), natahuje se líně až při prvním otevření záložky
+      Náklady. Bez fallbacku na raw historii pro tento rozsah — entita bez
+      dlouhodobých statistik do 7d/měsíc součtu prostě nepřispěje. Nutné
+      zkontrolovat, že `main_meter` fáze mají statistiky (navazuje na
+      ověření z 3.2) a že částky za 7 dní/měsíc dávají smysl.
 
 ---
 

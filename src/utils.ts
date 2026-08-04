@@ -559,3 +559,17 @@ export function accumulateTariffWhFromStats(
   }
   return { ntWh, vtWh, hasData };
 }
+
+/**
+ * Fáze 3.3 (ROADMAP.md): the Náklady tab's "estimated month total" line —
+ * plain linear extrapolation from the month-to-date average
+ * (`mtdCost / mtdDays * daysInMonth`). Deliberately not weighted by
+ * weekday/weekend or the HDO schedule's NT/VT ratio — the honest simple
+ * estimate ("if the rest of the month looks like it has so far"), not a
+ * prediction. `mtdDays` is meant to be fractional (elapsed time / 86 400 000,
+ * not a whole-day count) so the estimate doesn't jump in daily steps.
+ */
+export function estimateMonthCost(mtdCost: number, mtdDays: number, daysInMonth: number): number {
+  if (mtdDays <= 0) return 0;
+  return (mtdCost / mtdDays) * daysInMonth;
+}

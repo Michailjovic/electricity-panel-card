@@ -656,7 +656,7 @@ const PRE_TARIFFS = {
     holiday: { starts: ["02:20", "07:00", "15:20"], offsets: [240, 80, 160] }
   }
 };
-const EP_VERSION = "5.1.8";
+const EP_VERSION = "5.1.9";
 function slotTimeMs(base, hm) {
   const [h2, m2] = hm.split(":").map(Number);
   const d2 = new Date(base);
@@ -900,6 +900,10 @@ function accumulateTariffWhFromStats(bucketsList, ntFractionFn) {
     }
   }
   return { ntWh, vtWh, hasData };
+}
+function estimateMonthCost(mtdCost, mtdDays, daysInMonth) {
+  if (mtdDays <= 0) return 0;
+  return mtdCost / mtdDays * daysInMonth;
 }
 var __defProp$1 = Object.defineProperty;
 var __getOwnPropDesc$1 = Object.getOwnPropertyDescriptor;
@@ -1896,7 +1900,14 @@ const STRINGS = {
     nt_started_early: "NT started early — planned {time}",
     nt_should_end: "NT should have ended at {time} ({mins} min ago)",
     nt_ended_early: "NT ended early — planned {time}",
-    hdo_mismatch: "doesn't match schedule"
+    hdo_mismatch: "doesn't match schedule",
+    schedule_tab: "Schedule",
+    costs_tab: "Costs",
+    period_7d: "7 days",
+    period_month: "Month",
+    cost_estimate_month: "Estimated month total",
+    cost_avg_day: "Average {price}/day",
+    no_cost_data: "No data yet"
   },
   cs: {
     nt_low: "NT — nízký tarif",
@@ -1929,7 +1940,14 @@ const STRINGS = {
     nt_started_early: "NT začal dříve — plán {time}",
     nt_should_end: "NT měl skončit v {time} (před {mins} min)",
     nt_ended_early: "NT skončil dříve — plán {time}",
-    hdo_mismatch: "neodpovídá rozvrhu"
+    hdo_mismatch: "neodpovídá rozvrhu",
+    schedule_tab: "Rozvrh",
+    costs_tab: "Náklady",
+    period_7d: "7 dní",
+    period_month: "Měsíc",
+    cost_estimate_month: "Odhad do konce měsíce",
+    cost_avg_day: "Průměr {price}/den",
+    no_cost_data: "Zatím žádná data"
   }
 };
 function resolveLang(config, hass) {
@@ -1960,9 +1978,14 @@ let ElectricityPanelCard = class extends i {
     this._expanded = /* @__PURE__ */ new Set();
     this._showTomorrow = false;
     this._scheduleExpanded = false;
+    this._scheduleTab = "schedule";
+    this._costsPeriod = "today";
     this._trackedIds = [];
     this._historyCache = /* @__PURE__ */ new Map();
     this._statsCache = /* @__PURE__ */ new Map();
+    this._rangeStatsCache = /* @__PURE__ */ new Map();
+    this._rangeFetching = false;
+    this._rangeFetchedThrough = 0;
     this._historyFetching = false;
     this._refetchQueued = false;
     this._historyWindowEnd = 0;
@@ -2007,6 +2030,9 @@ let ElectricityPanelCard = class extends i {
     if (!appearanceOnly) {
       this._historyCache.clear();
       this._statsCache.clear();
+      this._rangeStatsCache.clear();
+      this._rangeSwitchHistory = void 0;
+      this._rangeFetchedThrough = 0;
       this._sparkCache.clear();
       clearTimeout(this._refetchDebounce);
       this._refetchDebounce = window.setTimeout(() => {
@@ -2532,6 +2558,84 @@ let ElectricityPanelCard = class extends i {
       this._log("stats fetch failed — cost calc falls back to raw history for all entities:", err);
     }
   }
+  /** Fáze 3.3 (ROADMAP.md): the Náklady tab's "7 dní"/"Měsíc" periods need a
+   *  wider window than the always-on today/5minute fetch — 31 days of hourly
+   *  statistics for the whole-installation entities (main_meter phases) plus
+   *  the matching hdo.switch history. Lazy: only triggered when the tab is
+   *  actually opened, so sessions that never look at costs never pay for it.
+   *  A fixed 31-day lookback (not "since the 1st") keeps "7 dní" a full
+   *  rolling week even on the 1st/2nd of the month. */
+  async _fetchRangeData() {
+    var _a2, _b, _c, _d, _e;
+    if (!this._hass || this._rangeFetching) return;
+    const hdo = (_a2 = this._config) == null ? void 0 : _a2.hdo;
+    const mm = (_b = this._config) == null ? void 0 : _b.main_meter;
+    const ids = [mm == null ? void 0 : mm.power_l1, mm == null ? void 0 : mm.power_l2, mm == null ? void 0 : mm.power_l3].filter((id) => !!id);
+    if (ids.length === 0) return;
+    this._rangeFetching = true;
+    const nowMs = Date.now();
+    const startMs = nowMs - 31 * 864e5;
+    const PERIOD_MS = 36e5;
+    try {
+      const wattsMul = /* @__PURE__ */ new Map();
+      for (const id of ids) {
+        const unit = ((_d = (_c = this._hass.states[id]) == null ? void 0 : _c.attributes) == null ? void 0 : _d["unit_of_measurement"]) ?? "";
+        wattsMul.set(id, unit === "kW" ? 1e3 : unit === "MW" ? 1e6 : 1);
+      }
+      const raw = await this._hass.callWS({
+        type: "recorder/statistics_during_period",
+        start_time: new Date(startMs).toISOString(),
+        end_time: new Date(nowMs).toISOString(),
+        statistic_ids: ids,
+        period: "hour",
+        types: ["mean"]
+      });
+      let withStats = 0;
+      for (const id of ids) {
+        const entries = raw == null ? void 0 : raw[id];
+        if (!Array.isArray(entries) || entries.length === 0) {
+          this._rangeStatsCache.delete(id);
+          continue;
+        }
+        const mul = wattsMul.get(id) ?? 1;
+        const buckets = entries.map((e2) => {
+          const s2 = typeof e2.start === "number" ? e2.start < 1e12 ? e2.start * 1e3 : e2.start : new Date(e2.start).getTime();
+          const mean = typeof e2.mean === "number" ? e2.mean * mul : NaN;
+          return { start: s2, end: s2 + PERIOD_MS, mean };
+        }).filter((b2) => !isNaN(b2.start) && !isNaN(b2.mean));
+        if (buckets.length > 0) {
+          this._rangeStatsCache.set(id, buckets);
+          withStats++;
+        } else {
+          this._rangeStatsCache.delete(id);
+        }
+      }
+      if (hdo == null ? void 0 : hdo.switch) {
+        const hdoRaw = await this._hass.callWS({
+          type: "history/history_during_period",
+          start_time: new Date(startMs).toISOString(),
+          entity_ids: [hdo.switch],
+          minimal_response: true,
+          no_attributes: true,
+          significant_changes_only: false
+        });
+        const entries = hdoRaw == null ? void 0 : hdoRaw[hdo.switch];
+        this._rangeSwitchHistory = Array.isArray(entries) ? entries.map((e2) => {
+          const stateStr = e2.s ?? e2.state ?? "";
+          const tSec = e2.lc ?? e2.lu;
+          const t2 = tSec !== void 0 ? tSec * 1e3 : e2.last_changed ? new Date(e2.last_changed).getTime() : NaN;
+          return { t: t2, v: stateStr === "on" ? 1 : 0 };
+        }).filter((p2) => !isNaN(p2.t)) : void 0;
+      }
+      this._rangeFetchedThrough = nowMs;
+      this._log(`range stats: ${withStats}/${ids.length} entities, switch history ${((_e = this._rangeSwitchHistory) == null ? void 0 : _e.length) ?? 0} entries`);
+      this.requestUpdate();
+    } catch (err) {
+      this._log('range stats fetch failed — 7d/month costs will show "no data":', err);
+    } finally {
+      this._rangeFetching = false;
+    }
+  }
   /** Precedence (Fáze 1.1, zafixováno — see utils.ts isNTAt): real HDO switch
    *  history is authoritative once it covers `t`; the tariff schedule is a
    *  fallback for times before the first history entry and for the future;
@@ -2592,6 +2696,78 @@ let ElectricityPanelCard = class extends i {
     if (cost < 5e-3) return "";
     const cur = hdo.currency ?? "Kč";
     return `${cost.toFixed(2)} ${cur}`;
+  }
+  /** Fáze 3.3 (ROADMAP.md): whole-installation NT/VT cost breakdown backing
+   *  the Náklady tab — main_meter phases only (the house's real total, same
+   *  entities the main-meter cost badge already uses for 'today'), not a sum
+   *  of individual circuits (would double count anything downstream of the
+   *  meter). 'today' reuses exactly `_calcDailyCost`'s data sources
+   *  (5minute stats → raw history fallback, per entity); '7d'/'month' read
+   *  the wider hourly range `_fetchRangeData` lazily populates and have no
+   *  further fallback — an entity missing from `_rangeStatsCache` just
+   *  doesn't contribute (surfaced to the UI as "no data" only if nothing at
+   *  all comes back). Past days pass `windows: undefined` to
+   *  `ntFractionOfInterval` deliberately: a schedule describes upcoming NT
+   *  windows, not history, so historical hours can only be judged from the
+   *  real switch history (or, failing that, today's live switch state as the
+   *  least-bad fallback for the rare gap history doesn't reach). */
+  _calcCostBreakdown(period) {
+    var _a2, _b, _c;
+    const hdo = this._config.hdo;
+    if (!hdo || !hdo.nt_price && !hdo.vt_price) return void 0;
+    const ntP = parseFloat(hdo.nt_price) || 0;
+    const vtP = parseFloat(hdo.vt_price) || 0;
+    const mm = this._config.main_meter;
+    const ids = [mm == null ? void 0 : mm.power_l1, mm == null ? void 0 : mm.power_l2, mm == null ? void 0 : mm.power_l3].filter((id) => !!id);
+    if (ids.length === 0) return void 0;
+    let ntWh = 0, vtWh = 0, hasData = false;
+    if (period === "today") {
+      const midnight = /* @__PURE__ */ new Date();
+      midnight.setHours(0, 0, 0, 0);
+      const midnightMs = midnight.getTime();
+      const windows = (_a2 = this._scheduleWindows(0)) == null ? void 0 : _a2.windows;
+      const hdoHist = hdo.switch ? this._historyCache.get(hdo.switch) : void 0;
+      const switchOn = this._isOn(hdo.switch);
+      const ntFractionFn = (s2, e2) => ntFractionOfInterval(s2, e2, hdoHist, windows, switchOn);
+      for (const id of ids) {
+        const stats = this._statsCache.get(id);
+        if (stats && stats.length > 0) {
+          const r2 = accumulateTariffWhFromStats([stats], ntFractionFn);
+          ntWh += r2.ntWh;
+          vtWh += r2.vtWh;
+          hasData = hasData || r2.hasData;
+        } else {
+          const raw = (_b = this._historyCache.get(id)) == null ? void 0 : _b.filter((p2) => p2.t >= midnightMs);
+          const r2 = accumulateTariffWh([raw], (t2) => this._isNTAt(t2));
+          ntWh += r2.ntWh;
+          vtWh += r2.vtWh;
+          hasData = hasData || r2.hasData;
+        }
+      }
+    } else {
+      const nowMs = Date.now();
+      const sinceMs = period === "7d" ? nowMs - 7 * 864e5 : (() => {
+        const d2 = /* @__PURE__ */ new Date();
+        d2.setDate(1);
+        d2.setHours(0, 0, 0, 0);
+        return d2.getTime();
+      })();
+      const switchOn = this._isOn(hdo.switch);
+      const ntFractionFn = (s2, e2) => ntFractionOfInterval(s2, e2, this._rangeSwitchHistory, void 0, switchOn);
+      for (const id of ids) {
+        const stats = (_c = this._rangeStatsCache.get(id)) == null ? void 0 : _c.filter((b2) => b2.start >= sinceMs && b2.start < nowMs);
+        if (stats && stats.length > 0) {
+          const r2 = accumulateTariffWhFromStats([stats], ntFractionFn);
+          ntWh += r2.ntWh;
+          vtWh += r2.vtWh;
+          hasData = hasData || r2.hasData;
+        }
+      }
+    }
+    if (!hasData) return void 0;
+    const ntCost = ntWh / 1e3 * ntP;
+    const vtCost = vtWh / 1e3 * vtP;
+    return { ntWh, vtWh, ntCost, vtCost, cost: ntCost + vtCost, kWh: (ntWh + vtWh) / 1e3 };
   }
   _renderSparkline(entityId, noLabels = false) {
     if (!entityId) return A;
@@ -2696,52 +2872,144 @@ let ElectricityPanelCard = class extends i {
     }
     const exp = this._scheduleExpanded;
     const currentSlot = slots.find((s2) => s2.isCurrent);
+    const showCostsTab = this._hasPrices();
+    const tab = showCostsTab ? this._scheduleTab : "schedule";
     return b`
       <div class="schedule-block">
-        <div class="schedule-title" role="button" tabindex="0"
-          aria-expanded=${exp ? "true" : "false"}
-          @click=${() => {
+        ${showCostsTab ? b`
+          <div class="sblock-tabs">
+            <div class="sblock-tab ${tab === "schedule" ? "active" : ""}" role="button" tabindex="0"
+              @click=${() => {
+      this._scheduleTab = "schedule";
+    }}
+              @keydown=${(e2) => {
+      if (e2.key === "Enter" || e2.key === " ") {
+        e2.preventDefault();
+        this._scheduleTab = "schedule";
+      }
+    }}>
+              ${this._t("schedule_tab")}
+            </div>
+            <div class="sblock-tab ${tab === "costs" ? "active" : ""}" role="button" tabindex="0"
+              @click=${() => {
+      this._scheduleTab = "costs";
+      if (this._costsPeriod !== "today" && Date.now() - this._rangeFetchedThrough > 3e5) void this._fetchRangeData();
+    }}
+              @keydown=${(e2) => {
+      if (e2.key === "Enter" || e2.key === " ") {
+        e2.preventDefault();
+        this._scheduleTab = "costs";
+        if (this._costsPeriod !== "today" && Date.now() - this._rangeFetchedThrough > 3e5) void this._fetchRangeData();
+      }
+    }}>
+              ${this._t("costs_tab")}
+            </div>
+          </div>
+        ` : A}
+        ${tab === "costs" ? this._renderCostsPanel() : b`
+          <div class="schedule-title" role="button" tabindex="0"
+            aria-expanded=${exp ? "true" : "false"}
+            @click=${() => {
       this._scheduleExpanded = !exp;
     }}
-          @keydown=${(e2) => {
+            @keydown=${(e2) => {
       if (e2.key === "Enter" || e2.key === " ") {
         e2.preventDefault();
         this._scheduleExpanded = !exp;
       }
     }}>
-          <span class="schedule-when">${showing ? this._t("tomorrow") : this._t("today")}</span>
-          <span class="schedule-day">${this._t(dt)}</span>
-          ${!exp && currentSlot ? b`
-            <span class="stariff ${currentSlot.type}" style="margin-left:4px">${currentSlot.type.toUpperCase()}</span>
-            <span class="nt-remaining-inline">${currentSlot.label}</span>
-          ` : A}
-          <div class="schedule-nav">
-            ${exp && remaining !== null ? b`<span class="nt-remaining">${this._fmtMins(remaining)} ${this._t("nt_left")} · ${this._fmtMins(totalNT)} ${this._t("total")}</span>` : A}
-            ${exp ? b`
-              <button class="sday-btn" @click=${(e2) => {
+            <span class="schedule-when">${showing ? this._t("tomorrow") : this._t("today")}</span>
+            <span class="schedule-day">${this._t(dt)}</span>
+            ${!exp && currentSlot ? b`
+              <span class="stariff ${currentSlot.type}" style="margin-left:4px">${currentSlot.type.toUpperCase()}</span>
+              <span class="nt-remaining-inline">${currentSlot.label}</span>
+            ` : A}
+            <div class="schedule-nav">
+              ${exp && remaining !== null ? b`<span class="nt-remaining">${this._fmtMins(remaining)} ${this._t("nt_left")} · ${this._fmtMins(totalNT)} ${this._t("total")}</span>` : A}
+              ${exp ? b`
+                <button class="sday-btn" @click=${(e2) => {
       e2.stopPropagation();
       this._showTomorrow = !this._showTomorrow;
     }}>
-                ${showing ? this._t("today") : this._t("tomorrow")}
-              </button>` : A}
-            <ha-icon icon="${exp ? "mdi:chevron-up" : "mdi:chevron-down"}" class="schedule-chevron"></ha-icon>
+                  ${showing ? this._t("today") : this._t("tomorrow")}
+                </button>` : A}
+              <ha-icon icon="${exp ? "mdi:chevron-up" : "mdi:chevron-down"}" class="schedule-chevron"></ha-icon>
+            </div>
           </div>
-        </div>
-        ${this._renderTimeline(slots, !showing)}
-        ${exp ? b`
-          <div class="schedule-rows">
-            ${slots.map((sl) => b`
-              <div class="srow ${sl.isPast ? "past" : sl.isCurrent ? "active" : "future"} ${sl.type}">
-                <span class="stariff ${sl.type}">${sl.type.toUpperCase()}</span>
-                <span class="srow-time">${sl.label}</span>
-                <div class="srow-track">
-                  <div class="srow-fill ${sl.type}" style="width:${sl.pct.toFixed(1)}%"></div>
+          ${this._renderTimeline(slots, !showing)}
+          ${exp ? b`
+            <div class="schedule-rows">
+              ${slots.map((sl) => b`
+                <div class="srow ${sl.isPast ? "past" : sl.isCurrent ? "active" : "future"} ${sl.type}">
+                  <span class="stariff ${sl.type}">${sl.type.toUpperCase()}</span>
+                  <span class="srow-time">${sl.label}</span>
+                  <div class="srow-track">
+                    <div class="srow-fill ${sl.type}" style="width:${sl.pct.toFixed(1)}%"></div>
+                  </div>
+                  ${sl.isCurrent ? b`<span class="snow ${sl.type}">${this._t("now")}</span>` : b`<span class="sdur">${sl.durStr}</span>`}
                 </div>
-                ${sl.isCurrent ? b`<span class="snow ${sl.type}">${this._t("now")}</span>` : b`<span class="sdur">${sl.durStr}</span>`}
-              </div>
-            `)}
+              `)}
+            </div>
+          ` : A}
+        `}
+      </div>
+    `;
+  }
+  /** Fáze 3.3 (ROADMAP.md): the Náklady tab body — period pills, NT/VT
+   *  stacked bar + legend, total, and (7 dní/Měsíc only) a secondary line
+   *  (average per day / estimated month total). Mirrors the 3.1 mockup's
+   *  variant C layout, restyled with the card's actual `--ep-*` tokens and
+   *  existing `.nt`/`.vt` color classes instead of the mockup's hardcoded hex. */
+  _renderCostsPanel() {
+    const hdo = this._config.hdo;
+    const cur = hdo.currency ?? "Kč";
+    const period = this._costsPeriod;
+    const breakdown = this._calcCostBreakdown(period);
+    let secondary = A;
+    if (breakdown && period === "month") {
+      const now = /* @__PURE__ */ new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const mtdDays = (now.getTime() - monthStart.getTime()) / 864e5;
+      const est = estimateMonthCost(breakdown.cost, mtdDays, daysInMonth);
+      secondary = b`<div class="cost-est">${this._t("cost_estimate_month")}: ~${est.toFixed(0)} ${cur}</div>`;
+    } else if (breakdown && period === "7d") {
+      const avgDay = breakdown.cost / 7;
+      secondary = b`<div class="cost-est">${this._t("cost_avg_day", { price: `${avgDay.toFixed(2)} ${cur}` })}</div>`;
+    }
+    const totalWh = breakdown ? breakdown.ntWh + breakdown.vtWh : 0;
+    const ntPct = totalWh > 0 ? breakdown.ntWh / totalWh * 100 : 0;
+    const vtPct = 100 - ntPct;
+    return b`
+      <div class="cost-panel">
+        <div class="cost-pills">
+          <span class="cost-pill ${period === "today" ? "active" : ""}"
+            @click=${() => {
+      this._costsPeriod = "today";
+    }}>${this._t("today")}</span>
+          <span class="cost-pill ${period === "7d" ? "active" : ""}"
+            @click=${() => {
+      this._costsPeriod = "7d";
+      if (Date.now() - this._rangeFetchedThrough > 3e5) void this._fetchRangeData();
+    }}>${this._t("period_7d")}</span>
+          <span class="cost-pill ${period === "month" ? "active" : ""}"
+            @click=${() => {
+      this._costsPeriod = "month";
+      if (Date.now() - this._rangeFetchedThrough > 3e5) void this._fetchRangeData();
+    }}>${this._t("period_month")}</span>
+        </div>
+        ${breakdown ? b`
+          <div class="cost-stack">
+            <div class="cost-seg nt" style="flex:${Math.max(ntPct, 1e-3)}"></div>
+            <div class="cost-seg vt" style="flex:${Math.max(vtPct, 1e-3)}"></div>
           </div>
-        ` : A}
+          <div class="cost-legend">
+            <span class="cost-leg nt">NT ${(breakdown.ntWh / 1e3).toFixed(1)} kWh · ${breakdown.ntCost.toFixed(2)} ${cur}</span>
+            <span class="cost-leg vt">VT ${(breakdown.vtWh / 1e3).toFixed(1)} kWh · ${breakdown.vtCost.toFixed(2)} ${cur}</span>
+          </div>
+          <div class="cost-total">${breakdown.cost.toFixed(2)} ${cur}</div>
+          ${secondary}
+        ` : b`<div class="cost-empty">${this._t("no_cost_data")}</div>`}
       </div>
     `;
   }
@@ -3219,6 +3487,25 @@ ElectricityPanelCard.styles = i$3`
     .snow.vt { background: rgba(239,68,68,.12); color: #ef4444; }
     .sdur { font-size: 10px; color: var(--ep-text-dim); white-space: nowrap; text-align: right; }
 
+    .sblock-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+    .sblock-tab { flex: 1; text-align: center; font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px; padding: 5px 0; border-radius: 6px; color: var(--ep-text-dim); cursor: pointer; user-select: none; }
+    .sblock-tab:hover { color: var(--ep-text-mid); }
+    .sblock-tab.active { background: var(--ep-accent-bg); color: var(--ep-text); }
+
+    .cost-pills { display: flex; gap: 6px; margin-bottom: 10px; }
+    .cost-pill { font-size: 10px; padding: 3px 9px; border-radius: 12px; border: 0.5px solid var(--ep-border); background: var(--ep-bg); color: var(--ep-accent); cursor: pointer; white-space: nowrap; font-weight: 500; }
+    .cost-pill:hover { background: var(--ep-border); }
+    .cost-pill.active { background: var(--ep-accent-bg); border-color: var(--ep-accent); color: var(--ep-text); }
+    .cost-stack { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+    .cost-seg.nt { background: #22c55e; }
+    .cost-seg.vt { background: #ef4444; }
+    .cost-legend { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 10px; font-size: 11px; color: var(--ep-text-mid); }
+    .cost-leg.nt { color: #22c55e; }
+    .cost-leg.vt { color: #ef4444; }
+    .cost-total { font-size: 20px; font-weight: 500; color: var(--ep-text); margin: 10px 0 2px; letter-spacing: -0.3px; }
+    .cost-est { font-size: 11px; color: var(--ep-text-dim); margin-top: 6px; padding-top: 6px; border-top: 0.5px solid var(--ep-border); }
+    .cost-empty { font-size: 11px; color: var(--ep-text-dim); text-align: center; padding: 10px 0; }
+
     .timeline-bar { display: flex; height: 4px; border-radius: 2px; overflow: hidden; margin-bottom: 8px; gap: 1px; position: relative; }
     .tl-seg { border-radius: 1px; transition: opacity .3s; }
     .tl-seg.nt { background: #22c55e; }
@@ -3353,6 +3640,12 @@ __decorateClass([
 __decorateClass([
   r()
 ], ElectricityPanelCard.prototype, "_scheduleExpanded", 2);
+__decorateClass([
+  r()
+], ElectricityPanelCard.prototype, "_scheduleTab", 2);
+__decorateClass([
+  r()
+], ElectricityPanelCard.prototype, "_costsPeriod", 2);
 ElectricityPanelCard = __decorateClass([
   t("electricity-panel-card")
 ], ElectricityPanelCard);

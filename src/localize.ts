@@ -35,6 +35,13 @@ const STRINGS: Record<EpLang, Record<string, string>> = {
     nt_should_end: 'NT should have ended at {time} ({mins} min ago)',
     nt_ended_early: 'NT ended early — planned {time}',
     hdo_mismatch: "doesn't match schedule",
+    schedule_tab: 'Schedule',
+    costs_tab: 'Costs',
+    period_7d: '7 days',
+    period_month: 'Month',
+    cost_estimate_month: 'Estimated month total',
+    cost_avg_day: 'Average {price}/day',
+    no_cost_data: 'No data yet',
   },
   cs: {
     nt_low: 'NT — nízký tarif',
@@ -68,6 +75,13 @@ const STRINGS: Record<EpLang, Record<string, string>> = {
     nt_should_end: 'NT měl skončit v {time} (před {mins} min)',
     nt_ended_early: 'NT skončil dříve — plán {time}',
     hdo_mismatch: 'neodpovídá rozvrhu',
+    schedule_tab: 'Rozvrh',
+    costs_tab: 'Náklady',
+    period_7d: '7 dní',
+    period_month: 'Měsíc',
+    cost_estimate_month: 'Odhad do konce měsíce',
+    cost_avg_day: 'Průměr {price}/den',
+    no_cost_data: 'Zatím žádná data',
   },
 };
 

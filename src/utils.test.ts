@@ -20,6 +20,7 @@ import {
   calcCost,
   ntFractionOfInterval,
   accumulateTariffWhFromStats,
+  estimateMonthCost,
   type HistPoint,
   type Window,
   type StatBucket,
@@ -653,5 +654,20 @@ describe('accumulateTariffWhFromStats (Fáze 3.2)', () => {
   it('ignores empty/missing series and reports hasData=false when nothing usable', () => {
     const { hasData } = accumulateTariffWhFromStats([undefined, []], () => 1);
     expect(hasData).toBe(false);
+  });
+});
+
+describe('estimateMonthCost (Fáze 3.3)', () => {
+  it('extrapolates linearly from the month-to-date average', () => {
+    expect(estimateMonthCost(300, 10, 30)).toBeCloseTo(900, 5);
+  });
+
+  it('handles fractional mtdDays (elapsed time, not whole-day count)', () => {
+    expect(estimateMonthCost(150, 5.5, 31)).toBeCloseTo((150 / 5.5) * 31, 5);
+  });
+
+  it('returns 0 when no time has elapsed yet (avoids division by zero)', () => {
+    expect(estimateMonthCost(0, 0, 30)).toBe(0);
+    expect(estimateMonthCost(50, -1, 30)).toBe(0);
   });
 });

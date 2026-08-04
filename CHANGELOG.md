@@ -5,6 +5,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.1.9] — 2026-08-03
+*Fáze 3.3 (ROADMAP.md) — Náklady tab in the schedule block (design variant C from 3.1).*
+
+### ✨ Added
+
+- **Schedule block now has two tabs: „Rozvrh" and „Náklady"** — only shown
+  once `hdo.nt_price`/`vt_price` are configured, so cards without cost
+  tracking are unchanged. „Rozvrh" stays the default view.
+- **Náklady tab**: period switcher (Dnes / 7 dní / Měsíc), NT/VT stacked bar
+  + legend (kWh and cost per tariff), running total, and for 7 dní/Měsíc a
+  secondary line (average per day / estimated month total via linear
+  month-to-date extrapolation).
+- Totals are the whole-installation cost (`main_meter` phases — the same
+  entities the main-meter cost badge already used for "today"), not a sum of
+  individual circuits.
+- "7 dní"/"Měsíc" are backed by a new lazy fetch (`_fetchRangeData`): 31 days
+  of hourly `recorder/statistics_during_period` for `main_meter` phases plus
+  matching `hdo.switch` history, requested only the first time the Náklady
+  tab is opened — sessions that never look at costs never pay for it. No
+  fallback to raw history for this range (that's exactly the payload Fáze
+  3.2 avoids); an entity without long-term statistics simply doesn't
+  contribute to the 7d/month total.
+- "Dnes" reuses the exact data path `_calcDailyCost` already used (5-minute
+  stats → raw-history fallback per entity, Fáze 3.2) — unchanged.
+
 ## [5.1.8] — 2026-08-03
 *Fáze 3.2 (ROADMAP.md) — daily cost calc prefers long-term statistics over raw history.*
 
