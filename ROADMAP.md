@@ -133,6 +133,29 @@ informačně hustá — nové prvky musí být sbalitelné a volitelné.
       zkontrolovat, že `main_meter` fáze mají statistiky (navazuje na
       ověření z 3.2) a že částky za 7 dní/měsíc dávají smysl.
 
+### 3.3b Přesnost: energy senzory místo mean-W aproximace
+Vzniklo z otázky (2026-08-04), jak vlastně HA ukládá historii a jestli se
+dá napojit na Energy dashboard přímo. Zjištění: dlouhodobé (hodinové)
+statistiky se nemažou nikdy — jen krátkodobé 5minutové a raw historie
+(`purge_keep_days`, výchozích 10 dní) se downsamplují do nich a pak mažou.
+Takže 3.2/3.3 na to už byly napojené správně. Energy dashboard navíc nemá
+vlastní úložiště — čte/zapisuje do stejných `statistics` tabulek přes
+stejné WS API. Rozdíl je jen v tom, na jaký typ senzoru se dashboard dívá:
+skutečný energy (kWh, `state_class: total_increasing`) místo power (W,
+`measurement`) — pro energy senzor HA v `statistics_during_period` vrací
+přesnou `change` hodnotu (bez aproximace mean × doba).
+
+- [x] `main_meter.energy_today` / `circuit.energy` (existující config pole,
+      dosud jen pro zobrazení) — v5.1.10 mají přednost před power senzory
+      všude, kde se počítá cena (badge hlavního měřiče, badge okruhů, Náklady
+      tab, všechna 3 období). Fallback na power (Fáze 3.2) jen když energy
+      senzor nemá use statistiky.
+- [ ] **Ověřit na reálné instanci:** debug log `energy stats: N/M energy
+      entities have usable 5minute 'change' statistics` — potřeba
+      zkontrolovat, že se to skutečně použije místo power aproximace a že
+      částky sedí (zvlášť po půlnočním resetu `energy_today`, HA by ho měl
+      zvládnout sám přes `last_reset`, ale chceme to vidět na reálných datech).
+
 ---
 
 ## Fáze 4 — Komunita a publikace → v6.0.0

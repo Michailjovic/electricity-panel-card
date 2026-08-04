@@ -573,3 +573,45 @@ export function estimateMonthCost(mtdCost: number, mtdDays: number, daysInMonth:
   if (mtdDays <= 0) return 0;
   return (mtdCost / mtdDays) * daysInMonth;
 }
+
+/**
+ * Post-3.3 (ROADMAP.md — grew out of a question about how HA's Energy
+ * dashboard stores its data): one `recorder/statistics_during_period`
+ * `'change'` bucket for a true energy (kWh) sensor — `wh` is the exact
+ * energy consumed during `[start, end)`, already converted to Wh. Unlike
+ * `StatBucket.mean` (an averaged instantaneous power reading multiplied by
+ * bucket duration — an approximation), this is a direct measurement: HA's
+ * statistics engine derives it from the sensor's own cumulative counter and
+ * handles meter resets (`state_class: total`/`total_increasing`) itself, so
+ * there's nothing to reconstruct here.
+ */
+export interface EnergyBucket {
+  start: number;
+  end: number;
+  wh: number;
+}
+
+/**
+ * Energy-sensor counterpart to `accumulateTariffWhFromStats` — no
+ * `mean * duration` step since `wh` is already the bucket's real
+ * consumption. Negative values (a counter glitch HA's reset-handling didn't
+ * catch) are clamped to zero, same defensive stance as the power-based
+ * accumulators.
+ */
+export function accumulateTariffWhFromEnergyBuckets(
+  bucketsList: Array<EnergyBucket[] | undefined>,
+  ntFractionFn: (start: number, end: number) => number
+): { ntWh: number; vtWh: number; hasData: boolean } {
+  let ntWh = 0, vtWh = 0, hasData = false;
+  for (const buckets of bucketsList) {
+    if (!buckets || buckets.length === 0) continue;
+    hasData = true;
+    for (const b of buckets) {
+      const wh = Math.max(0, b.wh);
+      const ntFrac = ntFractionFn(b.start, b.end);
+      ntWh += wh * ntFrac;
+      vtWh += wh * (1 - ntFrac);
+    }
+  }
+  return { ntWh, vtWh, hasData };
+}

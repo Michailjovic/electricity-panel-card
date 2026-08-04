@@ -29,11 +29,13 @@ import {
   ntFractionOfInterval,
   accumulateTariffWhFromStats,
   estimateMonthCost,
+  accumulateTariffWhFromEnergyBuckets,
   type DaySlot,
   type Window,
   type HdoStatus,
   type StatBucket,
   type HistPoint,
+  type EnergyBucket,
 } from './utils.js';
 
 @customElement('electricity-panel-card')
@@ -92,6 +94,15 @@ export class ElectricityPanelCard extends LitElement {
    *  `_historyCache`'s today-only entry for that entity so `_isNTAt`'s
    *  "today only" assumption (Fáze 1.1) stays true for the always-on path. */
   private _rangeSwitchHistory: HistPoint[] | undefined;
+  /** Post-3.3 (ROADMAP.md): exact 'change' statistics for entities with a
+   *  real energy (kWh) sensor configured (`main_meter.energy_today`,
+   *  `circuit.energy`) — preferred over the mean-W approximation in
+   *  `_statsCache`/`_rangeStatsCache` wherever one exists. `_energyStatsCache`
+   *  is today/5minute (always-on, circuit badges need it); the range one is
+   *  hourly and only ever holds `main_meter.energy_today` (lazy, Náklady tab
+   *  7d/month only). */
+  private _energyStatsCache = new Map<string, EnergyBucket[]>();
+  private _rangeEnergyStatsCache = new Map<string, EnergyBucket[]>();
   private _rangeFetching = false;
   /** Timestamp the range fetch last completed through — 0 means never
    *  fetched. Re-fetched on tab-open if older than 5 minutes, same cadence
@@ -143,7 +154,9 @@ export class ElectricityPanelCard extends LitElement {
     if (!appearanceOnly) {
       this._historyCache.clear();
       this._statsCache.clear();
+      this._energyStatsCache.clear();
       this._rangeStatsCache.clear();
+      this._rangeEnergyStatsCache.clear();
       this._rangeSwitchHistory = undefined;
       this._rangeFetchedThrough = 0;
       this._sparkCache.clear();
@@ -532,6 +545,19 @@ export class ElectricityPanelCard extends LitElement {
     return [...new Set(ids)];
   }
 
+  /** Post-3.3 (ROADMAP.md): every configured true energy (kWh) sensor —
+   *  `main_meter.energy_today` plus each circuit's `energy` — that cost calc
+   *  should prefer over its power-sensor(s) mean-based approximation. Only
+   *  meaningful when prices are configured; callers already gate on
+   *  `_hasPrices()` same as `_graphEntityIds`. */
+  private _energyEntityIds(): string[] {
+    if (!this._config) return [];
+    const ids: string[] = [];
+    if (this._config.main_meter?.energy_today) ids.push(this._config.main_meter.energy_today);
+    for (const c of this._config.circuits ?? []) { if (c.energy) ids.push(c.energy); }
+    return [...new Set(ids)];
+  }
+
   private async _fetchHistory(): Promise<void> {
     if (!this._hass || !this._config) return;
     if (this._historyFetching) {
@@ -633,6 +659,15 @@ export class ElectricityPanelCard extends LitElement {
       if (this._hasPrices() && graphIds.length > 0) {
         await this._fetchStatistics(graphIds, wattsMul, midnight.getTime(), nowMs);
       }
+      // Post-3.3: exact energy-sensor statistics, preferred over the above
+      // wherever a true kWh sensor is configured — always-on (not lazy like
+      // the 7d/month range fetch) because per-circuit cost badges on the
+      // main card face need 'today' regardless of whether the Náklady tab
+      // is even open.
+      const energyIds = this._hasPrices() ? this._energyEntityIds() : [];
+      if (energyIds.length > 0) {
+        await this._fetchEnergyStatistics(energyIds, midnight.getTime(), nowMs);
+      }
       this.requestUpdate();
     } catch (err) {
       console.warn('[ep-card] history fetch failed:', err);
@@ -710,6 +745,62 @@ export class ElectricityPanelCard extends LitElement {
     }
   }
 
+  /** Post-3.3 (ROADMAP.md): exact 'change' statistics for real energy (kWh)
+   *  sensors — a direct measurement (HA computes it from the sensor's own
+   *  cumulative counter, resets included), not the mean-W-times-duration
+   *  approximation `_fetchStatistics` above produces for power sensors.
+   *  Preferred wherever available; `_calcDailyCost`/`_calcCostBreakdown` fall
+   *  back to the power-sensor path per entity when it isn't. Requesting
+   *  `types: ['change']` for these ids in the *same* call as `_fetchStatistics`'s
+   *  `types: ['mean']` isn't possible — the WS command's `types` applies to
+   *  the whole request — hence a separate call here. */
+  private async _fetchEnergyStatistics(ids: string[], dayStartMs: number, nowMs: number): Promise<void> {
+    if (!this._hass) return;
+    const PERIOD_MS = 300_000; // '5minute' — same resolution as _fetchStatistics
+    type StatEntry = { start: number | string; change?: number | null };
+    try {
+      const raw = await this._hass.callWS<Record<string, Array<StatEntry>>>({
+        type: 'recorder/statistics_during_period',
+        start_time: new Date(dayStartMs).toISOString(),
+        end_time: new Date(nowMs).toISOString(),
+        statistic_ids: ids,
+        period: '5minute',
+        types: ['change'],
+      });
+      let withStats = 0;
+      for (const id of ids) {
+        const entries = raw?.[id];
+        if (!Array.isArray(entries) || entries.length === 0) {
+          this._energyStatsCache.delete(id);
+          this._log(`energy stats: ${id} has no 5minute 'change' statistics — its cost falls back to the configured power sensor(s), if any`);
+          continue;
+        }
+        // 'change' is reported in the statistic's own unit — energy sensors
+        // are virtually always kWh, but handle Wh/MWh defensively too.
+        const unit = (this._hass.states[id]?.attributes?.['unit_of_measurement'] as string) ?? 'kWh';
+        const whMul = unit === 'Wh' ? 1 : unit === 'MWh' ? 1_000_000 : 1000;
+        const buckets: EnergyBucket[] = entries
+          .map((e): EnergyBucket => {
+            const s = typeof e.start === 'number'
+              ? (e.start < 1e12 ? e.start * 1000 : e.start)
+              : new Date(e.start).getTime();
+            const wh = typeof e.change === 'number' ? e.change * whMul : NaN;
+            return { start: s, end: s + PERIOD_MS, wh };
+          })
+          .filter(b => !isNaN(b.start) && !isNaN(b.wh));
+        if (buckets.length > 0) {
+          this._energyStatsCache.set(id, buckets);
+          withStats++;
+        } else {
+          this._energyStatsCache.delete(id);
+        }
+      }
+      this._log(`energy stats: ${withStats}/${ids.length} energy entities have usable 5minute 'change' statistics`);
+    } catch (err) {
+      this._log('energy stats fetch failed — cost calc falls back to configured power sensor(s):', err);
+    }
+  }
+
   /** Fáze 3.3 (ROADMAP.md): the Náklady tab's "7 dní"/"Měsíc" periods need a
    *  wider window than the always-on today/5minute fetch — 31 days of hourly
    *  statistics for the whole-installation entities (main_meter phases) plus
@@ -722,48 +813,86 @@ export class ElectricityPanelCard extends LitElement {
     const hdo = this._config?.hdo;
     const mm = this._config?.main_meter;
     const ids = [mm?.power_l1, mm?.power_l2, mm?.power_l3].filter((id): id is string => !!id);
-    if (ids.length === 0) return;
+    const energyId = mm?.energy_today;
+    if (ids.length === 0 && !energyId) return;
     this._rangeFetching = true;
     const nowMs = Date.now();
     const startMs = nowMs - 31 * 86_400_000;
     const PERIOD_MS = 3_600_000; // 'hour' — 31 days at 5minute would be a heavy payload for little gain here
     try {
-      const wattsMul = new Map<string, number>();
-      for (const id of ids) {
-        const unit = (this._hass.states[id]?.attributes?.['unit_of_measurement'] as string) ?? '';
-        wattsMul.set(id, unit === 'kW' ? 1000 : unit === 'MW' ? 1_000_000 : 1);
-      }
-      type StatEntry = { start: number | string; mean?: number | null };
-      const raw = await this._hass.callWS<Record<string, Array<StatEntry>>>({
-        type: 'recorder/statistics_during_period',
-        start_time: new Date(startMs).toISOString(),
-        end_time: new Date(nowMs).toISOString(),
-        statistic_ids: ids,
-        period: 'hour',
-        types: ['mean'],
-      });
-      let withStats = 0;
-      for (const id of ids) {
-        const entries = raw?.[id];
-        if (!Array.isArray(entries) || entries.length === 0) {
-          this._rangeStatsCache.delete(id);
-          continue;
+      if (ids.length > 0) {
+        const wattsMul = new Map<string, number>();
+        for (const id of ids) {
+          const unit = (this._hass.states[id]?.attributes?.['unit_of_measurement'] as string) ?? '';
+          wattsMul.set(id, unit === 'kW' ? 1000 : unit === 'MW' ? 1_000_000 : 1);
         }
-        const mul = wattsMul.get(id) ?? 1;
-        const buckets: StatBucket[] = entries
-          .map((e): StatBucket => {
-            const s = typeof e.start === 'number'
-              ? (e.start < 1e12 ? e.start * 1000 : e.start)
-              : new Date(e.start).getTime();
-            const mean = typeof e.mean === 'number' ? e.mean * mul : NaN;
-            return { start: s, end: s + PERIOD_MS, mean };
-          })
-          .filter(b => !isNaN(b.start) && !isNaN(b.mean));
-        if (buckets.length > 0) {
-          this._rangeStatsCache.set(id, buckets);
-          withStats++;
+        type StatEntry = { start: number | string; mean?: number | null };
+        const raw = await this._hass.callWS<Record<string, Array<StatEntry>>>({
+          type: 'recorder/statistics_during_period',
+          start_time: new Date(startMs).toISOString(),
+          end_time: new Date(nowMs).toISOString(),
+          statistic_ids: ids,
+          period: 'hour',
+          types: ['mean'],
+        });
+        let withStats = 0;
+        for (const id of ids) {
+          const entries = raw?.[id];
+          if (!Array.isArray(entries) || entries.length === 0) {
+            this._rangeStatsCache.delete(id);
+            continue;
+          }
+          const mul = wattsMul.get(id) ?? 1;
+          const buckets: StatBucket[] = entries
+            .map((e): StatBucket => {
+              const s = typeof e.start === 'number'
+                ? (e.start < 1e12 ? e.start * 1000 : e.start)
+                : new Date(e.start).getTime();
+              const mean = typeof e.mean === 'number' ? e.mean * mul : NaN;
+              return { start: s, end: s + PERIOD_MS, mean };
+            })
+            .filter(b => !isNaN(b.start) && !isNaN(b.mean));
+          if (buckets.length > 0) {
+            this._rangeStatsCache.set(id, buckets);
+            withStats++;
+          } else {
+            this._rangeStatsCache.delete(id);
+          }
+        }
+        this._log(`range stats: ${withStats}/${ids.length} power entities have usable hourly statistics`);
+      }
+      // Post-3.3: exact hourly 'change' statistics for main_meter.energy_today,
+      // preferred over the mean-power path above when available — same
+      // reasoning as `_fetchEnergyStatistics` for the today/5minute case.
+      if (energyId) {
+        type EnergyEntry = { start: number | string; change?: number | null };
+        const rawEnergy = await this._hass.callWS<Record<string, Array<EnergyEntry>>>({
+          type: 'recorder/statistics_during_period',
+          start_time: new Date(startMs).toISOString(),
+          end_time: new Date(nowMs).toISOString(),
+          statistic_ids: [energyId],
+          period: 'hour',
+          types: ['change'],
+        });
+        const entries = rawEnergy?.[energyId];
+        if (Array.isArray(entries) && entries.length > 0) {
+          const unit = (this._hass.states[energyId]?.attributes?.['unit_of_measurement'] as string) ?? 'kWh';
+          const whMul = unit === 'Wh' ? 1 : unit === 'MWh' ? 1_000_000 : 1000;
+          const buckets: EnergyBucket[] = entries
+            .map((e): EnergyBucket => {
+              const s = typeof e.start === 'number'
+                ? (e.start < 1e12 ? e.start * 1000 : e.start)
+                : new Date(e.start).getTime();
+              const wh = typeof e.change === 'number' ? e.change * whMul : NaN;
+              return { start: s, end: s + PERIOD_MS, wh };
+            })
+            .filter(b => !isNaN(b.start) && !isNaN(b.wh));
+          if (buckets.length > 0) this._rangeEnergyStatsCache.set(energyId, buckets);
+          else this._rangeEnergyStatsCache.delete(energyId);
+          this._log(`range energy stats: ${energyId} — ${buckets.length} hourly buckets`);
         } else {
-          this._rangeStatsCache.delete(id);
+          this._rangeEnergyStatsCache.delete(energyId);
+          this._log(`range energy stats: ${energyId} has no hourly 'change' statistics — 7d/month falls back to power sensors, if configured`);
         }
       }
       if (hdo?.switch) {
@@ -787,7 +916,7 @@ export class ElectricityPanelCard extends LitElement {
           : undefined;
       }
       this._rangeFetchedThrough = nowMs;
-      this._log(`range stats: ${withStats}/${ids.length} entities, switch history ${this._rangeSwitchHistory?.length ?? 0} entries`);
+      this._log(`range fetch done — switch history ${this._rangeSwitchHistory?.length ?? 0} entries`);
       this.requestUpdate();
     } catch (err) {
       this._log('range stats fetch failed — 7d/month costs will show "no data":', err);
@@ -815,16 +944,14 @@ export class ElectricityPanelCard extends LitElement {
     );
   }
 
-  /** Accumulate today's energy cost across one or more power entities (W).
-   *  Fáze 3.2 (ROADMAP.md): each entity independently prefers its
-   *  `_statsCache` (recorder/statistics_during_period, 5minute buckets) when
-   *  available, and only falls back to `_historyCache`'s raw-history
-   *  trapezoidal integration (Fáze 1.1, unchanged) when that entity has no
-   *  usable statistics yet. Mixing sources per-entity (rather than an
-   *  all-or-nothing choice for the whole call) means a 3-phase circuit where
-   *  only L1 has statistics still gets the recorder-load benefit for L1
-   *  without losing L2/L3's cost. Both paths produce Wh and sum losslessly. */
-  private _calcDailyCost(...entityIds: (string | undefined)[]): string {
+  /** Accumulate today's energy cost for one circuit/meter. Priority chain
+   *  (post-3.3, ROADMAP.md): `energyId` — a configured real kWh sensor's
+   *  exact `_energyStatsCache` 'change' buckets — is preferred whenever it
+   *  has data; `powerIds` (Fáze 3.2/1.1: mean-stats then raw-history
+   *  trapezoidal, per entity) is the fallback, used only when the energy
+   *  sensor produced nothing, so a circuit with both configured never double
+   *  counts. Both paths produce Wh and sum losslessly. */
+  private _calcDailyCost(energyId: string | undefined, ...powerIds: (string | undefined)[]): string {
     const hdo = this._config.hdo;
     if (!hdo || (!hdo.nt_price && !hdo.vt_price)) return '';
     const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
@@ -838,59 +965,17 @@ export class ElectricityPanelCard extends LitElement {
     const ntFractionFn = (s: number, e: number) => ntFractionOfInterval(s, e, hdoHist, windows, switchOn);
 
     let ntWh = 0, vtWh = 0, hasData = false;
-    for (const id of entityIds) {
-      if (!id) continue;
-      const stats = this._statsCache.get(id);
-      if (stats && stats.length > 0) {
-        const r = accumulateTariffWhFromStats([stats], ntFractionFn);
-        ntWh += r.ntWh; vtWh += r.vtWh; hasData = hasData || r.hasData;
-      } else {
-        const raw = this._historyCache.get(id)?.filter(p => p.t >= midnightMs);
-        const r = accumulateTariffWh([raw], (t) => this._isNTAt(t));
+
+    if (energyId) {
+      const buckets = this._energyStatsCache.get(energyId);
+      if (buckets && buckets.length > 0) {
+        const r = accumulateTariffWhFromEnergyBuckets([buckets], ntFractionFn);
         ntWh += r.ntWh; vtWh += r.vtWh; hasData = hasData || r.hasData;
       }
     }
-    if (!hasData) return '';
-    const cost = calcCost(ntWh, vtWh, ntP, vtP);
-    if (cost < 0.005) return '';
-    const cur = hdo.currency ?? 'Kč';
-    return `${cost.toFixed(2)} ${cur}`;
-  }
-
-  /** Fáze 3.3 (ROADMAP.md): whole-installation NT/VT cost breakdown backing
-   *  the Náklady tab — main_meter phases only (the house's real total, same
-   *  entities the main-meter cost badge already uses for 'today'), not a sum
-   *  of individual circuits (would double count anything downstream of the
-   *  meter). 'today' reuses exactly `_calcDailyCost`'s data sources
-   *  (5minute stats → raw history fallback, per entity); '7d'/'month' read
-   *  the wider hourly range `_fetchRangeData` lazily populates and have no
-   *  further fallback — an entity missing from `_rangeStatsCache` just
-   *  doesn't contribute (surfaced to the UI as "no data" only if nothing at
-   *  all comes back). Past days pass `windows: undefined` to
-   *  `ntFractionOfInterval` deliberately: a schedule describes upcoming NT
-   *  windows, not history, so historical hours can only be judged from the
-   *  real switch history (or, failing that, today's live switch state as the
-   *  least-bad fallback for the rare gap history doesn't reach). */
-  private _calcCostBreakdown(period: 'today' | '7d' | 'month'):
-    { ntWh: number; vtWh: number; ntCost: number; vtCost: number; cost: number; kWh: number } | undefined {
-    const hdo = this._config.hdo;
-    if (!hdo || (!hdo.nt_price && !hdo.vt_price)) return undefined;
-    const ntP = parseFloat(hdo.nt_price as unknown as string) || 0;
-    const vtP = parseFloat(hdo.vt_price as unknown as string) || 0;
-    const mm = this._config.main_meter;
-    const ids = [mm?.power_l1, mm?.power_l2, mm?.power_l3].filter((id): id is string => !!id);
-    if (ids.length === 0) return undefined;
-
-    let ntWh = 0, vtWh = 0, hasData = false;
-
-    if (period === 'today') {
-      const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
-      const midnightMs = midnight.getTime();
-      const windows = this._scheduleWindows(0)?.windows;
-      const hdoHist = hdo.switch ? this._historyCache.get(hdo.switch) : undefined;
-      const switchOn = this._isOn(hdo.switch);
-      const ntFractionFn = (s: number, e: number) => ntFractionOfInterval(s, e, hdoHist, windows, switchOn);
-      for (const id of ids) {
+    if (!hasData) {
+      for (const id of powerIds) {
+        if (!id) continue;
         const stats = this._statsCache.get(id);
         if (stats && stats.length > 0) {
           const r = accumulateTariffWhFromStats([stats], ntFractionFn);
@@ -901,6 +986,72 @@ export class ElectricityPanelCard extends LitElement {
           ntWh += r.ntWh; vtWh += r.vtWh; hasData = hasData || r.hasData;
         }
       }
+    }
+    if (!hasData) return '';
+    const cost = calcCost(ntWh, vtWh, ntP, vtP);
+    if (cost < 0.005) return '';
+    const cur = hdo.currency ?? 'Kč';
+    return `${cost.toFixed(2)} ${cur}`;
+  }
+
+  /** Fáze 3.3 (ROADMAP.md): whole-installation NT/VT cost breakdown backing
+   *  the Náklady tab — main_meter only (the house's real total, same entity
+   *  the main-meter cost badge already uses), not a sum of individual
+   *  circuits (would double count anything downstream of the meter).
+   *  Post-3.3: `energyId` (`main_meter.energy_today`'s exact 'change'
+   *  statistics) is preferred over `powerIds` (mean-based, Fáze 3.2) exactly
+   *  like `_calcDailyCost`. 'today' reuses `_energyStatsCache`/`_statsCache`/
+   *  `_historyCache` (5minute stats → raw history fallback, per entity);
+   *  '7d'/'month' read the wider hourly range `_fetchRangeData` lazily
+   *  populates (`_rangeEnergyStatsCache`/`_rangeStatsCache`) and have no
+   *  further fallback — nothing missing from those just doesn't contribute
+   *  (surfaced to the UI as "no data" only if nothing at all comes back).
+   *  Past days pass `windows: undefined` to `ntFractionOfInterval`
+   *  deliberately: a schedule describes upcoming NT windows, not history, so
+   *  historical hours can only be judged from the real switch history (or,
+   *  failing that, today's live switch state as the least-bad fallback for
+   *  the rare gap history doesn't reach). */
+  private _calcCostBreakdown(period: 'today' | '7d' | 'month'):
+    { ntWh: number; vtWh: number; ntCost: number; vtCost: number; cost: number; kWh: number } | undefined {
+    const hdo = this._config.hdo;
+    if (!hdo || (!hdo.nt_price && !hdo.vt_price)) return undefined;
+    const ntP = parseFloat(hdo.nt_price as unknown as string) || 0;
+    const vtP = parseFloat(hdo.vt_price as unknown as string) || 0;
+    const mm = this._config.main_meter;
+    const energyId = mm?.energy_today;
+    const powerIds = [mm?.power_l1, mm?.power_l2, mm?.power_l3].filter((id): id is string => !!id);
+    if (!energyId && powerIds.length === 0) return undefined;
+
+    let ntWh = 0, vtWh = 0, hasData = false;
+
+    if (period === 'today') {
+      const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+      const midnightMs = midnight.getTime();
+      const windows = this._scheduleWindows(0)?.windows;
+      const hdoHist = hdo.switch ? this._historyCache.get(hdo.switch) : undefined;
+      const switchOn = this._isOn(hdo.switch);
+      const ntFractionFn = (s: number, e: number) => ntFractionOfInterval(s, e, hdoHist, windows, switchOn);
+
+      if (energyId) {
+        const buckets = this._energyStatsCache.get(energyId);
+        if (buckets && buckets.length > 0) {
+          const r = accumulateTariffWhFromEnergyBuckets([buckets], ntFractionFn);
+          ntWh += r.ntWh; vtWh += r.vtWh; hasData = hasData || r.hasData;
+        }
+      }
+      if (!hasData) {
+        for (const id of powerIds) {
+          const stats = this._statsCache.get(id);
+          if (stats && stats.length > 0) {
+            const r = accumulateTariffWhFromStats([stats], ntFractionFn);
+            ntWh += r.ntWh; vtWh += r.vtWh; hasData = hasData || r.hasData;
+          } else {
+            const raw = this._historyCache.get(id)?.filter(p => p.t >= midnightMs);
+            const r = accumulateTariffWh([raw], (t) => this._isNTAt(t));
+            ntWh += r.ntWh; vtWh += r.vtWh; hasData = hasData || r.hasData;
+          }
+        }
+      }
     } else {
       const nowMs = Date.now();
       const sinceMs = period === '7d'
@@ -908,11 +1059,21 @@ export class ElectricityPanelCard extends LitElement {
         : (() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.getTime(); })();
       const switchOn = this._isOn(hdo.switch);
       const ntFractionFn = (s: number, e: number) => ntFractionOfInterval(s, e, this._rangeSwitchHistory, undefined, switchOn);
-      for (const id of ids) {
-        const stats = this._rangeStatsCache.get(id)?.filter(b => b.start >= sinceMs && b.start < nowMs);
-        if (stats && stats.length > 0) {
-          const r = accumulateTariffWhFromStats([stats], ntFractionFn);
+
+      if (energyId) {
+        const buckets = this._rangeEnergyStatsCache.get(energyId)?.filter(b => b.start >= sinceMs && b.start < nowMs);
+        if (buckets && buckets.length > 0) {
+          const r = accumulateTariffWhFromEnergyBuckets([buckets], ntFractionFn);
           ntWh += r.ntWh; vtWh += r.vtWh; hasData = hasData || r.hasData;
+        }
+      }
+      if (!hasData) {
+        for (const id of powerIds) {
+          const stats = this._rangeStatsCache.get(id)?.filter(b => b.start >= sinceMs && b.start < nowMs);
+          if (stats && stats.length > 0) {
+            const r = accumulateTariffWhFromStats([stats], ntFractionFn);
+            ntWh += r.ntWh; vtWh += r.vtWh; hasData = hasData || r.hasData;
+          }
         }
       }
     }
@@ -1275,7 +1436,7 @@ export class ElectricityPanelCard extends LitElement {
             </span>
             <span class="metric-small">
               ${m.energy_today ? html`${this._kwh(m.energy_today).toFixed(1)} ${this._t('kwh_today')}` : nothing}
-              ${(() => { const cr = this._calcDailyCost(m.power_l1, m.power_l2, m.power_l3); return cr ? html`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : nothing; })()}
+              ${(() => { const cr = this._calcDailyCost(m.energy_today, m.power_l1, m.power_l2, m.power_l3); return cr ? html`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : nothing; })()}
               ${m.voltage && voltage > 0 ? html`<span class="metric-sep">·</span>${voltage.toFixed(0)} V` : nothing}
               ${this._ageBadge(m.power_l1 ?? m.power_l2 ?? m.power_l3 ?? m.energy_today)}
             </span>
@@ -1316,7 +1477,7 @@ export class ElectricityPanelCard extends LitElement {
     const barColor = this._loadColor(loadPct);
     const expanded = this._expanded.has(c.id);
     const hasDevices = (c.devices?.length ?? 0) > 0;
-    const costRate = power > 0 ? this._calcDailyCost(c.power) : '';
+    const costRate = power > 0 ? this._calcDailyCost(c.energy, c.power) : '';
     const ntHint = this._ntHint(power);
 
     return html`
@@ -1484,8 +1645,8 @@ export class ElectricityPanelCard extends LitElement {
     // (summing total + phases would double-count the energy).
     const costRate = totalPower > 0
       ? (c.power
-          ? this._calcDailyCost(c.power)
-          : this._calcDailyCost(c.power_l1, c.power_l2, c.power_l3))
+          ? this._calcDailyCost(c.energy, c.power)
+          : this._calcDailyCost(c.energy, c.power_l1, c.power_l2, c.power_l3))
       : '';
     const ntHint = this._ntHint(totalPower);
 

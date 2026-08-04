@@ -21,9 +21,11 @@ import {
   ntFractionOfInterval,
   accumulateTariffWhFromStats,
   estimateMonthCost,
+  accumulateTariffWhFromEnergyBuckets,
   type HistPoint,
   type Window,
   type StatBucket,
+  type EnergyBucket,
 } from './utils.js';
 import type { TariffDay } from './types.js';
 
@@ -669,5 +671,41 @@ describe('estimateMonthCost (Fáze 3.3)', () => {
   it('returns 0 when no time has elapsed yet (avoids division by zero)', () => {
     expect(estimateMonthCost(0, 0, 30)).toBe(0);
     expect(estimateMonthCost(50, -1, 30)).toBe(0);
+  });
+});
+
+describe('accumulateTariffWhFromEnergyBuckets (post-3.3)', () => {
+  it('uses the bucket wh directly — no mean*duration step', () => {
+    const buckets: EnergyBucket[] = [{ start: 0, end: 3_600_000, wh: 1234 }];
+    const { ntWh, vtWh, hasData } = accumulateTariffWhFromEnergyBuckets([buckets], () => 1);
+    expect(hasData).toBe(true);
+    expect(ntWh).toBe(1234);
+    expect(vtWh).toBe(0);
+  });
+
+  it('splits a single bucket across NT/VT using a fractional ntFractionFn', () => {
+    const buckets: EnergyBucket[] = [{ start: 0, end: 3_600_000, wh: 1000 }];
+    const { ntWh, vtWh } = accumulateTariffWhFromEnergyBuckets([buckets], () => 0.25);
+    expect(ntWh).toBeCloseTo(250, 5);
+    expect(vtWh).toBeCloseTo(750, 5);
+  });
+
+  it('sums multiple independent bucket series', () => {
+    const a: EnergyBucket[] = [{ start: 0, end: 3_600_000, wh: 1000 }];
+    const b: EnergyBucket[] = [{ start: 0, end: 3_600_000, wh: 500 }];
+    const { ntWh } = accumulateTariffWhFromEnergyBuckets([a, b], () => 1);
+    expect(ntWh).toBeCloseTo(1500, 5);
+  });
+
+  it('clamps a negative wh (counter glitch) to zero instead of subtracting cost', () => {
+    const buckets: EnergyBucket[] = [{ start: 0, end: 3_600_000, wh: -50 }];
+    const { ntWh, vtWh } = accumulateTariffWhFromEnergyBuckets([buckets], () => 1);
+    expect(ntWh).toBe(0);
+    expect(vtWh).toBe(0);
+  });
+
+  it('ignores empty/missing series and reports hasData=false when nothing usable', () => {
+    const { hasData } = accumulateTariffWhFromEnergyBuckets([undefined, []], () => 1);
+    expect(hasData).toBe(false);
   });
 });

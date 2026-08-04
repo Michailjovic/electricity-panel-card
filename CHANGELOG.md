@@ -5,6 +5,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.1.10] — 2026-08-04
+*Post-3.3 (ROADMAP.md) — cost calc prefers real energy (kWh) sensors over the power-mean approximation, wherever configured.*
+
+### ✨ Added
+
+- **Exact cost from energy sensors**: when `main_meter.energy_today` or a
+  circuit's `energy` field is configured, cost calc now requests
+  `recorder/statistics_during_period` with `types: ['change']` on that
+  entity — HA's own computed delta from the sensor's cumulative counter
+  (resets handled by HA itself), not `mean_W × duration`. Falls back to the
+  existing power-sensor path (mean statistics, then raw history) per entity
+  when the energy sensor has no usable statistics, so nothing regresses for
+  setups without one.
+- Applies everywhere cost is shown: main-meter badge, per-circuit badges,
+  and the Náklady tab (all three periods — today/7 dní/měsíc).
+- New `accumulateTariffWhFromEnergyBuckets` (utils.ts) — same NT/VT-split
+  shape as the power-based accumulators, just without the mean*duration step
+  since the bucket's `wh` is already the real measured consumption.
+- Debug log reports per-entity whether the energy sensor's statistics were
+  usable (`energy stats: N/M energy entities have usable 5minute 'change'
+  statistics`).
+- Prompted by a question about how HA's Energy dashboard stores its data:
+  it turns out to read/write the exact same `recorder` statistics tables we
+  already use — no separate system to tap into — but its convention of
+  pointing at a true energy sensor rather than power is worth adopting where
+  the hardware supports it.
+
 ## [5.1.9] — 2026-08-03
 *Fáze 3.3 (ROADMAP.md) — Náklady tab in the schedule block (design variant C from 3.1).*
 

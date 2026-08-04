@@ -656,7 +656,7 @@ const PRE_TARIFFS = {
     holiday: { starts: ["02:20", "07:00", "15:20"], offsets: [240, 80, 160] }
   }
 };
-const EP_VERSION = "5.1.9";
+const EP_VERSION = "5.1.10";
 function slotTimeMs(base, hm) {
   const [h2, m2] = hm.split(":").map(Number);
   const d2 = new Date(base);
@@ -904,6 +904,20 @@ function accumulateTariffWhFromStats(bucketsList, ntFractionFn) {
 function estimateMonthCost(mtdCost, mtdDays, daysInMonth) {
   if (mtdDays <= 0) return 0;
   return mtdCost / mtdDays * daysInMonth;
+}
+function accumulateTariffWhFromEnergyBuckets(bucketsList, ntFractionFn) {
+  let ntWh = 0, vtWh = 0, hasData = false;
+  for (const buckets of bucketsList) {
+    if (!buckets || buckets.length === 0) continue;
+    hasData = true;
+    for (const b2 of buckets) {
+      const wh = Math.max(0, b2.wh);
+      const ntFrac = ntFractionFn(b2.start, b2.end);
+      ntWh += wh * ntFrac;
+      vtWh += wh * (1 - ntFrac);
+    }
+  }
+  return { ntWh, vtWh, hasData };
 }
 var __defProp$1 = Object.defineProperty;
 var __getOwnPropDesc$1 = Object.getOwnPropertyDescriptor;
@@ -1984,6 +1998,8 @@ let ElectricityPanelCard = class extends i {
     this._historyCache = /* @__PURE__ */ new Map();
     this._statsCache = /* @__PURE__ */ new Map();
     this._rangeStatsCache = /* @__PURE__ */ new Map();
+    this._energyStatsCache = /* @__PURE__ */ new Map();
+    this._rangeEnergyStatsCache = /* @__PURE__ */ new Map();
     this._rangeFetching = false;
     this._rangeFetchedThrough = 0;
     this._historyFetching = false;
@@ -2030,7 +2046,9 @@ let ElectricityPanelCard = class extends i {
     if (!appearanceOnly) {
       this._historyCache.clear();
       this._statsCache.clear();
+      this._energyStatsCache.clear();
       this._rangeStatsCache.clear();
+      this._rangeEnergyStatsCache.clear();
       this._rangeSwitchHistory = void 0;
       this._rangeFetchedThrough = 0;
       this._sparkCache.clear();
@@ -2410,6 +2428,21 @@ let ElectricityPanelCard = class extends i {
     }
     return [...new Set(ids)];
   }
+  /** Post-3.3 (ROADMAP.md): every configured true energy (kWh) sensor —
+   *  `main_meter.energy_today` plus each circuit's `energy` — that cost calc
+   *  should prefer over its power-sensor(s) mean-based approximation. Only
+   *  meaningful when prices are configured; callers already gate on
+   *  `_hasPrices()` same as `_graphEntityIds`. */
+  _energyEntityIds() {
+    var _a2;
+    if (!this._config) return [];
+    const ids = [];
+    if ((_a2 = this._config.main_meter) == null ? void 0 : _a2.energy_today) ids.push(this._config.main_meter.energy_today);
+    for (const c2 of this._config.circuits ?? []) {
+      if (c2.energy) ids.push(c2.energy);
+    }
+    return [...new Set(ids)];
+  }
   async _fetchHistory() {
     var _a2, _b, _c, _d;
     if (!this._hass || !this._config) return;
@@ -2496,6 +2529,10 @@ let ElectricityPanelCard = class extends i {
       if (this._hasPrices() && graphIds.length > 0) {
         await this._fetchStatistics(graphIds, wattsMul, midnight.getTime(), nowMs);
       }
+      const energyIds = this._hasPrices() ? this._energyEntityIds() : [];
+      if (energyIds.length > 0) {
+        await this._fetchEnergyStatistics(energyIds, midnight.getTime(), nowMs);
+      }
       this.requestUpdate();
     } catch (err) {
       console.warn("[ep-card] history fetch failed:", err);
@@ -2558,6 +2595,55 @@ let ElectricityPanelCard = class extends i {
       this._log("stats fetch failed — cost calc falls back to raw history for all entities:", err);
     }
   }
+  /** Post-3.3 (ROADMAP.md): exact 'change' statistics for real energy (kWh)
+   *  sensors — a direct measurement (HA computes it from the sensor's own
+   *  cumulative counter, resets included), not the mean-W-times-duration
+   *  approximation `_fetchStatistics` above produces for power sensors.
+   *  Preferred wherever available; `_calcDailyCost`/`_calcCostBreakdown` fall
+   *  back to the power-sensor path per entity when it isn't. Requesting
+   *  `types: ['change']` for these ids in the *same* call as `_fetchStatistics`'s
+   *  `types: ['mean']` isn't possible — the WS command's `types` applies to
+   *  the whole request — hence a separate call here. */
+  async _fetchEnergyStatistics(ids, dayStartMs, nowMs) {
+    var _a2, _b;
+    if (!this._hass) return;
+    const PERIOD_MS = 3e5;
+    try {
+      const raw = await this._hass.callWS({
+        type: "recorder/statistics_during_period",
+        start_time: new Date(dayStartMs).toISOString(),
+        end_time: new Date(nowMs).toISOString(),
+        statistic_ids: ids,
+        period: "5minute",
+        types: ["change"]
+      });
+      let withStats = 0;
+      for (const id of ids) {
+        const entries = raw == null ? void 0 : raw[id];
+        if (!Array.isArray(entries) || entries.length === 0) {
+          this._energyStatsCache.delete(id);
+          this._log(`energy stats: ${id} has no 5minute 'change' statistics — its cost falls back to the configured power sensor(s), if any`);
+          continue;
+        }
+        const unit = ((_b = (_a2 = this._hass.states[id]) == null ? void 0 : _a2.attributes) == null ? void 0 : _b["unit_of_measurement"]) ?? "kWh";
+        const whMul = unit === "Wh" ? 1 : unit === "MWh" ? 1e6 : 1e3;
+        const buckets = entries.map((e2) => {
+          const s2 = typeof e2.start === "number" ? e2.start < 1e12 ? e2.start * 1e3 : e2.start : new Date(e2.start).getTime();
+          const wh = typeof e2.change === "number" ? e2.change * whMul : NaN;
+          return { start: s2, end: s2 + PERIOD_MS, wh };
+        }).filter((b2) => !isNaN(b2.start) && !isNaN(b2.wh));
+        if (buckets.length > 0) {
+          this._energyStatsCache.set(id, buckets);
+          withStats++;
+        } else {
+          this._energyStatsCache.delete(id);
+        }
+      }
+      this._log(`energy stats: ${withStats}/${ids.length} energy entities have usable 5minute 'change' statistics`);
+    } catch (err) {
+      this._log("energy stats fetch failed — cost calc falls back to configured power sensor(s):", err);
+    }
+  }
   /** Fáze 3.3 (ROADMAP.md): the Náklady tab's "7 dní"/"Měsíc" periods need a
    *  wider window than the always-on today/5minute fetch — 31 days of hourly
    *  statistics for the whole-installation entities (main_meter phases) plus
@@ -2566,48 +2652,78 @@ let ElectricityPanelCard = class extends i {
    *  A fixed 31-day lookback (not "since the 1st") keeps "7 dní" a full
    *  rolling week even on the 1st/2nd of the month. */
   async _fetchRangeData() {
-    var _a2, _b, _c, _d, _e;
+    var _a2, _b, _c, _d, _e, _f, _g;
     if (!this._hass || this._rangeFetching) return;
     const hdo = (_a2 = this._config) == null ? void 0 : _a2.hdo;
     const mm = (_b = this._config) == null ? void 0 : _b.main_meter;
     const ids = [mm == null ? void 0 : mm.power_l1, mm == null ? void 0 : mm.power_l2, mm == null ? void 0 : mm.power_l3].filter((id) => !!id);
-    if (ids.length === 0) return;
+    const energyId = mm == null ? void 0 : mm.energy_today;
+    if (ids.length === 0 && !energyId) return;
     this._rangeFetching = true;
     const nowMs = Date.now();
     const startMs = nowMs - 31 * 864e5;
     const PERIOD_MS = 36e5;
     try {
-      const wattsMul = /* @__PURE__ */ new Map();
-      for (const id of ids) {
-        const unit = ((_d = (_c = this._hass.states[id]) == null ? void 0 : _c.attributes) == null ? void 0 : _d["unit_of_measurement"]) ?? "";
-        wattsMul.set(id, unit === "kW" ? 1e3 : unit === "MW" ? 1e6 : 1);
-      }
-      const raw = await this._hass.callWS({
-        type: "recorder/statistics_during_period",
-        start_time: new Date(startMs).toISOString(),
-        end_time: new Date(nowMs).toISOString(),
-        statistic_ids: ids,
-        period: "hour",
-        types: ["mean"]
-      });
-      let withStats = 0;
-      for (const id of ids) {
-        const entries = raw == null ? void 0 : raw[id];
-        if (!Array.isArray(entries) || entries.length === 0) {
-          this._rangeStatsCache.delete(id);
-          continue;
+      if (ids.length > 0) {
+        const wattsMul = /* @__PURE__ */ new Map();
+        for (const id of ids) {
+          const unit = ((_d = (_c = this._hass.states[id]) == null ? void 0 : _c.attributes) == null ? void 0 : _d["unit_of_measurement"]) ?? "";
+          wattsMul.set(id, unit === "kW" ? 1e3 : unit === "MW" ? 1e6 : 1);
         }
-        const mul = wattsMul.get(id) ?? 1;
-        const buckets = entries.map((e2) => {
-          const s2 = typeof e2.start === "number" ? e2.start < 1e12 ? e2.start * 1e3 : e2.start : new Date(e2.start).getTime();
-          const mean = typeof e2.mean === "number" ? e2.mean * mul : NaN;
-          return { start: s2, end: s2 + PERIOD_MS, mean };
-        }).filter((b2) => !isNaN(b2.start) && !isNaN(b2.mean));
-        if (buckets.length > 0) {
-          this._rangeStatsCache.set(id, buckets);
-          withStats++;
+        const raw = await this._hass.callWS({
+          type: "recorder/statistics_during_period",
+          start_time: new Date(startMs).toISOString(),
+          end_time: new Date(nowMs).toISOString(),
+          statistic_ids: ids,
+          period: "hour",
+          types: ["mean"]
+        });
+        let withStats = 0;
+        for (const id of ids) {
+          const entries = raw == null ? void 0 : raw[id];
+          if (!Array.isArray(entries) || entries.length === 0) {
+            this._rangeStatsCache.delete(id);
+            continue;
+          }
+          const mul = wattsMul.get(id) ?? 1;
+          const buckets = entries.map((e2) => {
+            const s2 = typeof e2.start === "number" ? e2.start < 1e12 ? e2.start * 1e3 : e2.start : new Date(e2.start).getTime();
+            const mean = typeof e2.mean === "number" ? e2.mean * mul : NaN;
+            return { start: s2, end: s2 + PERIOD_MS, mean };
+          }).filter((b2) => !isNaN(b2.start) && !isNaN(b2.mean));
+          if (buckets.length > 0) {
+            this._rangeStatsCache.set(id, buckets);
+            withStats++;
+          } else {
+            this._rangeStatsCache.delete(id);
+          }
+        }
+        this._log(`range stats: ${withStats}/${ids.length} power entities have usable hourly statistics`);
+      }
+      if (energyId) {
+        const rawEnergy = await this._hass.callWS({
+          type: "recorder/statistics_during_period",
+          start_time: new Date(startMs).toISOString(),
+          end_time: new Date(nowMs).toISOString(),
+          statistic_ids: [energyId],
+          period: "hour",
+          types: ["change"]
+        });
+        const entries = rawEnergy == null ? void 0 : rawEnergy[energyId];
+        if (Array.isArray(entries) && entries.length > 0) {
+          const unit = ((_f = (_e = this._hass.states[energyId]) == null ? void 0 : _e.attributes) == null ? void 0 : _f["unit_of_measurement"]) ?? "kWh";
+          const whMul = unit === "Wh" ? 1 : unit === "MWh" ? 1e6 : 1e3;
+          const buckets = entries.map((e2) => {
+            const s2 = typeof e2.start === "number" ? e2.start < 1e12 ? e2.start * 1e3 : e2.start : new Date(e2.start).getTime();
+            const wh = typeof e2.change === "number" ? e2.change * whMul : NaN;
+            return { start: s2, end: s2 + PERIOD_MS, wh };
+          }).filter((b2) => !isNaN(b2.start) && !isNaN(b2.wh));
+          if (buckets.length > 0) this._rangeEnergyStatsCache.set(energyId, buckets);
+          else this._rangeEnergyStatsCache.delete(energyId);
+          this._log(`range energy stats: ${energyId} — ${buckets.length} hourly buckets`);
         } else {
-          this._rangeStatsCache.delete(id);
+          this._rangeEnergyStatsCache.delete(energyId);
+          this._log(`range energy stats: ${energyId} has no hourly 'change' statistics — 7d/month falls back to power sensors, if configured`);
         }
       }
       if (hdo == null ? void 0 : hdo.switch) {
@@ -2628,7 +2744,7 @@ let ElectricityPanelCard = class extends i {
         }).filter((p2) => !isNaN(p2.t)) : void 0;
       }
       this._rangeFetchedThrough = nowMs;
-      this._log(`range stats: ${withStats}/${ids.length} entities, switch history ${((_e = this._rangeSwitchHistory) == null ? void 0 : _e.length) ?? 0} entries`);
+      this._log(`range fetch done — switch history ${((_g = this._rangeSwitchHistory) == null ? void 0 : _g.length) ?? 0} entries`);
       this.requestUpdate();
     } catch (err) {
       this._log('range stats fetch failed — 7d/month costs will show "no data":', err);
@@ -2652,16 +2768,14 @@ let ElectricityPanelCard = class extends i {
       this._isOn(hdo.switch)
     );
   }
-  /** Accumulate today's energy cost across one or more power entities (W).
-   *  Fáze 3.2 (ROADMAP.md): each entity independently prefers its
-   *  `_statsCache` (recorder/statistics_during_period, 5minute buckets) when
-   *  available, and only falls back to `_historyCache`'s raw-history
-   *  trapezoidal integration (Fáze 1.1, unchanged) when that entity has no
-   *  usable statistics yet. Mixing sources per-entity (rather than an
-   *  all-or-nothing choice for the whole call) means a 3-phase circuit where
-   *  only L1 has statistics still gets the recorder-load benefit for L1
-   *  without losing L2/L3's cost. Both paths produce Wh and sum losslessly. */
-  _calcDailyCost(...entityIds) {
+  /** Accumulate today's energy cost for one circuit/meter. Priority chain
+   *  (post-3.3, ROADMAP.md): `energyId` — a configured real kWh sensor's
+   *  exact `_energyStatsCache` 'change' buckets — is preferred whenever it
+   *  has data; `powerIds` (Fáze 3.2/1.1: mean-stats then raw-history
+   *  trapezoidal, per entity) is the fallback, used only when the energy
+   *  sensor produced nothing, so a circuit with both configured never double
+   *  counts. Both paths produce Wh and sum losslessly. */
+  _calcDailyCost(energyId, ...powerIds) {
     var _a2, _b;
     const hdo = this._config.hdo;
     if (!hdo || !hdo.nt_price && !hdo.vt_price) return "";
@@ -2675,61 +2789,18 @@ let ElectricityPanelCard = class extends i {
     const switchOn = this._isOn(hdo.switch);
     const ntFractionFn = (s2, e2) => ntFractionOfInterval(s2, e2, hdoHist, windows, switchOn);
     let ntWh = 0, vtWh = 0, hasData = false;
-    for (const id of entityIds) {
-      if (!id) continue;
-      const stats = this._statsCache.get(id);
-      if (stats && stats.length > 0) {
-        const r2 = accumulateTariffWhFromStats([stats], ntFractionFn);
-        ntWh += r2.ntWh;
-        vtWh += r2.vtWh;
-        hasData = hasData || r2.hasData;
-      } else {
-        const raw = (_b = this._historyCache.get(id)) == null ? void 0 : _b.filter((p2) => p2.t >= midnightMs);
-        const r2 = accumulateTariffWh([raw], (t2) => this._isNTAt(t2));
+    if (energyId) {
+      const buckets = this._energyStatsCache.get(energyId);
+      if (buckets && buckets.length > 0) {
+        const r2 = accumulateTariffWhFromEnergyBuckets([buckets], ntFractionFn);
         ntWh += r2.ntWh;
         vtWh += r2.vtWh;
         hasData = hasData || r2.hasData;
       }
     }
-    if (!hasData) return "";
-    const cost = calcCost(ntWh, vtWh, ntP, vtP);
-    if (cost < 5e-3) return "";
-    const cur = hdo.currency ?? "Kč";
-    return `${cost.toFixed(2)} ${cur}`;
-  }
-  /** Fáze 3.3 (ROADMAP.md): whole-installation NT/VT cost breakdown backing
-   *  the Náklady tab — main_meter phases only (the house's real total, same
-   *  entities the main-meter cost badge already uses for 'today'), not a sum
-   *  of individual circuits (would double count anything downstream of the
-   *  meter). 'today' reuses exactly `_calcDailyCost`'s data sources
-   *  (5minute stats → raw history fallback, per entity); '7d'/'month' read
-   *  the wider hourly range `_fetchRangeData` lazily populates and have no
-   *  further fallback — an entity missing from `_rangeStatsCache` just
-   *  doesn't contribute (surfaced to the UI as "no data" only if nothing at
-   *  all comes back). Past days pass `windows: undefined` to
-   *  `ntFractionOfInterval` deliberately: a schedule describes upcoming NT
-   *  windows, not history, so historical hours can only be judged from the
-   *  real switch history (or, failing that, today's live switch state as the
-   *  least-bad fallback for the rare gap history doesn't reach). */
-  _calcCostBreakdown(period) {
-    var _a2, _b, _c;
-    const hdo = this._config.hdo;
-    if (!hdo || !hdo.nt_price && !hdo.vt_price) return void 0;
-    const ntP = parseFloat(hdo.nt_price) || 0;
-    const vtP = parseFloat(hdo.vt_price) || 0;
-    const mm = this._config.main_meter;
-    const ids = [mm == null ? void 0 : mm.power_l1, mm == null ? void 0 : mm.power_l2, mm == null ? void 0 : mm.power_l3].filter((id) => !!id);
-    if (ids.length === 0) return void 0;
-    let ntWh = 0, vtWh = 0, hasData = false;
-    if (period === "today") {
-      const midnight = /* @__PURE__ */ new Date();
-      midnight.setHours(0, 0, 0, 0);
-      const midnightMs = midnight.getTime();
-      const windows = (_a2 = this._scheduleWindows(0)) == null ? void 0 : _a2.windows;
-      const hdoHist = hdo.switch ? this._historyCache.get(hdo.switch) : void 0;
-      const switchOn = this._isOn(hdo.switch);
-      const ntFractionFn = (s2, e2) => ntFractionOfInterval(s2, e2, hdoHist, windows, switchOn);
-      for (const id of ids) {
+    if (!hasData) {
+      for (const id of powerIds) {
+        if (!id) continue;
         const stats = this._statsCache.get(id);
         if (stats && stats.length > 0) {
           const r2 = accumulateTariffWhFromStats([stats], ntFractionFn);
@@ -2744,6 +2815,75 @@ let ElectricityPanelCard = class extends i {
           hasData = hasData || r2.hasData;
         }
       }
+    }
+    if (!hasData) return "";
+    const cost = calcCost(ntWh, vtWh, ntP, vtP);
+    if (cost < 5e-3) return "";
+    const cur = hdo.currency ?? "Kč";
+    return `${cost.toFixed(2)} ${cur}`;
+  }
+  /** Fáze 3.3 (ROADMAP.md): whole-installation NT/VT cost breakdown backing
+   *  the Náklady tab — main_meter only (the house's real total, same entity
+   *  the main-meter cost badge already uses), not a sum of individual
+   *  circuits (would double count anything downstream of the meter).
+   *  Post-3.3: `energyId` (`main_meter.energy_today`'s exact 'change'
+   *  statistics) is preferred over `powerIds` (mean-based, Fáze 3.2) exactly
+   *  like `_calcDailyCost`. 'today' reuses `_energyStatsCache`/`_statsCache`/
+   *  `_historyCache` (5minute stats → raw history fallback, per entity);
+   *  '7d'/'month' read the wider hourly range `_fetchRangeData` lazily
+   *  populates (`_rangeEnergyStatsCache`/`_rangeStatsCache`) and have no
+   *  further fallback — nothing missing from those just doesn't contribute
+   *  (surfaced to the UI as "no data" only if nothing at all comes back).
+   *  Past days pass `windows: undefined` to `ntFractionOfInterval`
+   *  deliberately: a schedule describes upcoming NT windows, not history, so
+   *  historical hours can only be judged from the real switch history (or,
+   *  failing that, today's live switch state as the least-bad fallback for
+   *  the rare gap history doesn't reach). */
+  _calcCostBreakdown(period) {
+    var _a2, _b, _c, _d;
+    const hdo = this._config.hdo;
+    if (!hdo || !hdo.nt_price && !hdo.vt_price) return void 0;
+    const ntP = parseFloat(hdo.nt_price) || 0;
+    const vtP = parseFloat(hdo.vt_price) || 0;
+    const mm = this._config.main_meter;
+    const energyId = mm == null ? void 0 : mm.energy_today;
+    const powerIds = [mm == null ? void 0 : mm.power_l1, mm == null ? void 0 : mm.power_l2, mm == null ? void 0 : mm.power_l3].filter((id) => !!id);
+    if (!energyId && powerIds.length === 0) return void 0;
+    let ntWh = 0, vtWh = 0, hasData = false;
+    if (period === "today") {
+      const midnight = /* @__PURE__ */ new Date();
+      midnight.setHours(0, 0, 0, 0);
+      const midnightMs = midnight.getTime();
+      const windows = (_a2 = this._scheduleWindows(0)) == null ? void 0 : _a2.windows;
+      const hdoHist = hdo.switch ? this._historyCache.get(hdo.switch) : void 0;
+      const switchOn = this._isOn(hdo.switch);
+      const ntFractionFn = (s2, e2) => ntFractionOfInterval(s2, e2, hdoHist, windows, switchOn);
+      if (energyId) {
+        const buckets = this._energyStatsCache.get(energyId);
+        if (buckets && buckets.length > 0) {
+          const r2 = accumulateTariffWhFromEnergyBuckets([buckets], ntFractionFn);
+          ntWh += r2.ntWh;
+          vtWh += r2.vtWh;
+          hasData = hasData || r2.hasData;
+        }
+      }
+      if (!hasData) {
+        for (const id of powerIds) {
+          const stats = this._statsCache.get(id);
+          if (stats && stats.length > 0) {
+            const r2 = accumulateTariffWhFromStats([stats], ntFractionFn);
+            ntWh += r2.ntWh;
+            vtWh += r2.vtWh;
+            hasData = hasData || r2.hasData;
+          } else {
+            const raw = (_b = this._historyCache.get(id)) == null ? void 0 : _b.filter((p2) => p2.t >= midnightMs);
+            const r2 = accumulateTariffWh([raw], (t2) => this._isNTAt(t2));
+            ntWh += r2.ntWh;
+            vtWh += r2.vtWh;
+            hasData = hasData || r2.hasData;
+          }
+        }
+      }
     } else {
       const nowMs = Date.now();
       const sinceMs = period === "7d" ? nowMs - 7 * 864e5 : (() => {
@@ -2754,13 +2894,24 @@ let ElectricityPanelCard = class extends i {
       })();
       const switchOn = this._isOn(hdo.switch);
       const ntFractionFn = (s2, e2) => ntFractionOfInterval(s2, e2, this._rangeSwitchHistory, void 0, switchOn);
-      for (const id of ids) {
-        const stats = (_c = this._rangeStatsCache.get(id)) == null ? void 0 : _c.filter((b2) => b2.start >= sinceMs && b2.start < nowMs);
-        if (stats && stats.length > 0) {
-          const r2 = accumulateTariffWhFromStats([stats], ntFractionFn);
+      if (energyId) {
+        const buckets = (_c = this._rangeEnergyStatsCache.get(energyId)) == null ? void 0 : _c.filter((b2) => b2.start >= sinceMs && b2.start < nowMs);
+        if (buckets && buckets.length > 0) {
+          const r2 = accumulateTariffWhFromEnergyBuckets([buckets], ntFractionFn);
           ntWh += r2.ntWh;
           vtWh += r2.vtWh;
           hasData = hasData || r2.hasData;
+        }
+      }
+      if (!hasData) {
+        for (const id of powerIds) {
+          const stats = (_d = this._rangeStatsCache.get(id)) == null ? void 0 : _d.filter((b2) => b2.start >= sinceMs && b2.start < nowMs);
+          if (stats && stats.length > 0) {
+            const r2 = accumulateTariffWhFromStats([stats], ntFractionFn);
+            ntWh += r2.ntWh;
+            vtWh += r2.vtWh;
+            hasData = hasData || r2.hasData;
+          }
         }
       }
     }
@@ -3101,7 +3252,7 @@ let ElectricityPanelCard = class extends i {
             <span class="metric-small">
               ${m2.energy_today ? b`${this._kwh(m2.energy_today).toFixed(1)} ${this._t("kwh_today")}` : A}
               ${(() => {
-      const cr = this._calcDailyCost(m2.power_l1, m2.power_l2, m2.power_l3);
+      const cr = this._calcDailyCost(m2.energy_today, m2.power_l1, m2.power_l2, m2.power_l3);
       return cr ? b`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : A;
     })()}
               ${m2.voltage && voltage > 0 ? b`<span class="metric-sep">·</span>${voltage.toFixed(0)} V` : A}
@@ -3141,7 +3292,7 @@ let ElectricityPanelCard = class extends i {
     const barColor = this._loadColor(loadPct);
     const expanded = this._expanded.has(c2.id);
     const hasDevices = (((_a2 = c2.devices) == null ? void 0 : _a2.length) ?? 0) > 0;
-    const costRate = power > 0 ? this._calcDailyCost(c2.power) : "";
+    const costRate = power > 0 ? this._calcDailyCost(c2.energy, c2.power) : "";
     const ntHint = this._ntHint(power);
     return b`
       <div class="circuit-card ${c2.critical ? "critical" : ""} ${c2.switch && isOn ? "is-on" : ""}">
@@ -3275,7 +3426,7 @@ let ElectricityPanelCard = class extends i {
     const barColor = this._loadColor(loadPct);
     const expanded = this._expanded.has(c2.id);
     const hasDevices = (((_a2 = c2.devices) == null ? void 0 : _a2.length) ?? 0) > 0;
-    const costRate = totalPower > 0 ? c2.power ? this._calcDailyCost(c2.power) : this._calcDailyCost(c2.power_l1, c2.power_l2, c2.power_l3) : "";
+    const costRate = totalPower > 0 ? c2.power ? this._calcDailyCost(c2.energy, c2.power) : this._calcDailyCost(c2.energy, c2.power_l1, c2.power_l2, c2.power_l3) : "";
     const ntHint = this._ntHint(totalPower);
     return b`
       <div class="three-phase-card ${c2.critical ? "critical" : ""} ${c2.switch && isOn ? "is-on" : ""}">
