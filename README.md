@@ -36,7 +36,6 @@ Configured entirely through a built-in GUI editor. No YAML editing required.
 - **Holiday-aware schedule** — workday sensor + public holiday sensor (e.g. `calendar.czechia`) pick the correct weekday/weekend/holiday NT programme, including tomorrow's view
 - **"Wait for NT" hint** (opt-in) — during VT, running circuits show the next NT start and the percentage saving
 - **Sparkline power graphs** — time-aligned history graphs on main meter and circuit phase cells
-- **Localized** — English and Czech, following the HA profile language
 - **Theming** — built-in dark design, or `follow_theme: true` to adapt to the active HA theme
 - **GUI config editor** — full visual editor with entity searchboxes; no manual YAML required
 
@@ -93,7 +92,7 @@ All configuration is done through the built-in card editor — click **Edit** on
 
 The editor sections:
 
-**Appearance & behaviour** — follow HA theme colours, language (auto / en / cs), debug logging.
+**Appearance & behaviour** — follow HA theme colours, debug logging.
 
 **Graph settings** — history window (1–24 h), sparkline colour/labels/reference lines, per-area visibility toggles, last-updated age badge.
 
@@ -131,6 +130,81 @@ sensor.shelly_heating_zone_1_power
 ## Examples
 
 See the [`examples/`](examples/) folder for a standalone HDO dashboard YAML view (uses `custom:button-card` + `card-mod`).
+
+---
+
+## Recommended automations
+
+The card is intentionally a **visual layer only** — it doesn't call services or fire alerts itself, so nothing it shows can accidentally trip a breaker or send a notification on its own. Pair it with a few small Home Assistant automations instead; here are the ones that map directly to what the card already surfaces (load bar, HDO bar).
+
+**Boiler / water heater on NT** — shift a big flexible load to the cheap tariff window instead of watching the HDO bar manually:
+
+```yaml
+automation:
+  - alias: "Boiler on at NT start"
+    trigger:
+      - platform: state
+        entity_id: switch.hdo          # your HDO switch — see Requirements table
+        to: "on"                       # adjust to whichever state your switch reports as NT
+    condition:
+      - condition: state
+        entity_id: input_boolean.boiler_auto   # optional manual override toggle
+        state: "on"
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.boiler
+
+  - alias: "Boiler off at NT end"
+    trigger:
+      - platform: state
+        entity_id: switch.hdo
+        to: "off"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.boiler
+```
+
+**Circuit overload notification** — mirrors the card's load-bar pulse at 95 % of rated current, but as a push notification instead of something you have to be looking at the dashboard to notice:
+
+```yaml
+automation:
+  - alias: "Circuit 08 — approaching overload"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.circuit_08_kitchen_left_current
+        above: 14.25            # 95 % of a 15 A breaker — adjust to your rating
+        for: "00:02:00"         # debounce brief spikes
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          title: "⚡ Circuit Kitchen — near overload"
+          message: >
+            {{ states('sensor.circuit_08_kitchen_left_current') }} A
+            (limit 15 A)
+```
+
+**Main breaker overload** — same idea for the whole-panel main breaker, checking all three phases:
+
+```yaml
+automation:
+  - alias: "Main breaker — approaching overload"
+    trigger:
+      - platform: template
+        value_template: >
+          {{ [states('sensor.main_meter_current_l1')|float(0),
+              states('sensor.main_meter_current_l2')|float(0),
+              states('sensor.main_meter_current_l3')|float(0)] | max > 22.8 }}
+        for: "00:01:00"
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          title: "⚡ Main breaker — near overload"
+          message: "One phase has exceeded 95 % of its rated current."
+```
+
+Adjust entity IDs, thresholds, and the `notify.*` service to your own setup — these are starting points, not drop-in config.
 
 ---
 

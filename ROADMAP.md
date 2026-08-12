@@ -107,14 +107,11 @@ informačně hustá — nové prvky musí být sbalitelné a volitelné.
       beze změny). Nová `ntFractionOfInterval` dělí bucket přesně podle
       switch-transition/window bodů (ne jen midpoint test) — přesnější než
       raw-history metoda i pro hrubší 5min/hour granularitu.
-- [ ] **Ověřit na reálné instanci:** `debug: true` teď loguje kolik
-      trackovaných entit má use statistiky (`stats: N/M entities have usable
-      5minute statistics`). Nutné zkontrolovat u Michaličových power entit
-      (main_meter fáze, okruhy) — vyžaduje `state_class: measurement`
-      nastavený na senzoru; bez toho HA statistiky vůbec nezaznamenává.
-- [ ] Zúžit raw-history fetch zpět na `graph_hours` (dnes jde kvůli cost
-      calc až k půlnoci) — odloženo do potvrzení výše, ať se neztratí
-      fallback bezpečnostní síť dřív, než víme, že statistiky fungují
+- [x] **Ověřeno na reálné instanci** (2026-08-12) — statistiky fungují.
+- [x] Zúžit raw-history fetch zpět na `graph_hours` — v5.1.11. Raw history je
+      teď zase čistě graf/sparkline okno; cost calc jede přes statistiky
+      (midnight-anchored vlastním WS voláním), raw-history fallback zůstává
+      jen pro entity bez statistik.
 
 ### 3.3 Souhrn nákladů
 - [x] Dle vítězného návrhu z 3.1 (varianta C) — v5.1.9. Blok rozvrhu má
@@ -125,13 +122,8 @@ informačně hustá — nové prvky musí být sbalitelné a volitelné.
       okruhů). Odhad měsíce = lineární extrapolace z průměru měsíce k datu
       (`estimateMonthCost`) — záměrně bez váhování všední/víkend nebo podle
       poměru NT/VT v rozvrhu; pokud to bude nepřesné, doladíme.
-- [ ] **Ověřit na reálné instanci:** „7 dní"/„Měsíc" běží na nové
-      `_fetchRangeData` (31 dní hodinových statistik + širší historie
-      HDO switche), natahuje se líně až při prvním otevření záložky
-      Náklady. Bez fallbacku na raw historii pro tento rozsah — entita bez
-      dlouhodobých statistik do 7d/měsíc součtu prostě nepřispěje. Nutné
-      zkontrolovat, že `main_meter` fáze mají statistiky (navazuje na
-      ověření z 3.2) a že částky za 7 dní/měsíc dávají smysl.
+- [x] **Ověřeno na reálné instanci** (2026-08-12) — 7 dní/Měsíc počítá
+      správně, částky sedí.
 
 ### 3.3b Přesnost: energy senzory místo mean-W aproximace
 Vzniklo z otázky (2026-08-04), jak vlastně HA ukládá historii a jestli se
@@ -160,10 +152,17 @@ přesnou `change` hodnotu (bez aproximace mean × doba).
 
 ## Fáze 4 — Komunita a publikace → v6.0.0
 
-- [ ] README sekce **Recommended automations** — místo akčních alertů v kartě
-      doporučit hotové HA automatizace (overload notifikace, bojler na NT, …);
-      karta zůstává čistě vizuální vrstva
-- [ ] Finální polish: projít cs/en texty, aktualizovat screenshoty, projít a11y
+- [x] README sekce **Recommended automations** — v5.1.11. 3 YAML příklady
+      (bojler on/off na NT, per-okruh overload notifikace, hlavní jistič
+      overload notifikace) + poznámka, že karta zůstává čistě vizuální vrstva
+- [x] **Rozhodnuto (2026-08-12): karta bude jen anglicky.** Cs lokalizace
+      odstraněna celá — v5.1.12. `localize.ts` zjednodušen na jednu
+      anglickou sadu, config pole `language` pryč, editor ztratil selektor
+      Language (nikdy neměl cs verzi, byl tedy nekonzistentní). README
+      aktualizováno. Breaking change (viz CHANGELOG), ale bez dopadu na
+      YAML configy — `language` klíč karta jednoduše ignoruje.
+- [ ] Aktualizovat screenshoty, projít a11y — a11y potřebuje živě
+      renderovanou kartu, screenshoty reálný dashboard; zatím neřešeno.
 - [ ] Test zájmu: post ve Facebook skupině Home Assistant CZ/SK
 - [ ] Při reálném zájmu: submission do HACS default store (repo už splňuje
       technické požadavky — validace, dist, README s obrázky)

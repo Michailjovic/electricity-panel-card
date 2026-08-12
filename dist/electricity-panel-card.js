@@ -656,7 +656,7 @@ const PRE_TARIFFS = {
     holiday: { starts: ["02:20", "07:00", "15:20"], offsets: [240, 80, 160] }
   }
 };
-const EP_VERSION = "5.1.10";
+const EP_VERSION = "5.1.12";
 function slotTimeMs(base, hm) {
   const [h2, m2] = hm.split(":").map(Number);
   const d2 = new Date(base);
@@ -1244,7 +1244,6 @@ let ElectricityPanelEditor = class extends i {
       </details>`;
   }
   _renderAppearanceSection() {
-    const lang = this._config.language ?? "auto";
     return b`
       <details class="section">
         <summary>Appearance & behaviour</summary>
@@ -1257,14 +1256,6 @@ let ElectricityPanelEditor = class extends i {
           <span class="field-hint">
             Off = built-in dark design. On = card adapts to the active HA theme (light/dark).
           </span>
-          <div class="field" style="margin-top:8px;">
-            <label>Language</label>
-            <select @change=${(e2) => this._set(["language"], e2.target.value === "auto" ? "" : e2.target.value)}>
-              <option value="auto" ?selected=${lang === "auto"}>Auto (from HA profile)</option>
-              <option value="en" ?selected=${lang === "en"}>English</option>
-              <option value="cs" ?selected=${lang === "cs"}>Čeština</option>
-            </select>
-          </div>
           <div class="field checkbox" style="margin-top:8px;">
             <input type="checkbox" id="ep-debug" .checked=${this._config.debug ?? false}
               @change=${(e2) => this._set(["debug"], e2.target.checked)} />
@@ -1883,96 +1874,47 @@ ElectricityPanelEditor = __decorateClass$1([
   t("electricity-panel-editor")
 ], ElectricityPanelEditor);
 const STRINGS = {
-  en: {
-    nt_low: "NT — low tariff",
-    vt_high: "VT — high tariff",
-    hdo_unavailable: "HDO — state unavailable",
-    ends_in: "ends in",
-    switching: "switching…",
-    today: "Today",
-    tomorrow: "Tomorrow",
-    weekday: "weekday",
-    weekend: "weekend",
-    holiday: "holiday",
-    nt_left: "NT left",
-    total: "total",
-    now: "Now",
-    main_meter: "Main meter",
-    three_phase_section: "3-phase circuits",
-    single_phase_section: "Single-phase breakers",
-    devices: "devices",
-    hide: "hide",
-    kwh_today: "kWh today",
-    turn_on: "Turn on",
-    turn_off: "Turn off",
-    confirm_turn_on: 'Turn ON circuit "{name}"?',
-    confirm_turn_off: 'Turn OFF circuit "{name}"?',
-    nt_in: "NT in",
-    save_pct: "save",
-    from_schedule: "from schedule",
-    nt_should_start: "NT should have started at {time} ({mins} min ago)",
-    nt_started_early: "NT started early — planned {time}",
-    nt_should_end: "NT should have ended at {time} ({mins} min ago)",
-    nt_ended_early: "NT ended early — planned {time}",
-    hdo_mismatch: "doesn't match schedule",
-    schedule_tab: "Schedule",
-    costs_tab: "Costs",
-    period_7d: "7 days",
-    period_month: "Month",
-    cost_estimate_month: "Estimated month total",
-    cost_avg_day: "Average {price}/day",
-    no_cost_data: "No data yet"
-  },
-  cs: {
-    nt_low: "NT — nízký tarif",
-    vt_high: "VT — vysoký tarif",
-    hdo_unavailable: "HDO — stav nedostupný",
-    ends_in: "konec za",
-    switching: "přepíná se…",
-    today: "Dnes",
-    tomorrow: "Zítra",
-    weekday: "všední den",
-    weekend: "víkend",
-    holiday: "svátek",
-    nt_left: "zbývá NT",
-    total: "celkem",
-    now: "Teď",
-    main_meter: "Hlavní elektroměr",
-    three_phase_section: "Třífázové okruhy",
-    single_phase_section: "Jednofázové jističe",
-    devices: "zařízení",
-    hide: "skrýt",
-    kwh_today: "kWh dnes",
-    turn_on: "Zapnout",
-    turn_off: "Vypnout",
-    confirm_turn_on: 'Opravdu ZAPNOUT okruh „{name}"?',
-    confirm_turn_off: 'Opravdu VYPNOUT okruh „{name}"?',
-    nt_in: "NT za",
-    save_pct: "úspora",
-    from_schedule: "podle rozvrhu",
-    nt_should_start: "NT měl začít v {time} (před {mins} min)",
-    nt_started_early: "NT začal dříve — plán {time}",
-    nt_should_end: "NT měl skončit v {time} (před {mins} min)",
-    nt_ended_early: "NT skončil dříve — plán {time}",
-    hdo_mismatch: "neodpovídá rozvrhu",
-    schedule_tab: "Rozvrh",
-    costs_tab: "Náklady",
-    period_7d: "7 dní",
-    period_month: "Měsíc",
-    cost_estimate_month: "Odhad do konce měsíce",
-    cost_avg_day: "Průměr {price}/den",
-    no_cost_data: "Zatím žádná data"
-  }
+  nt_low: "NT — low tariff",
+  vt_high: "VT — high tariff",
+  hdo_unavailable: "HDO — state unavailable",
+  ends_in: "ends in",
+  switching: "switching…",
+  today: "Today",
+  tomorrow: "Tomorrow",
+  weekday: "weekday",
+  weekend: "weekend",
+  holiday: "holiday",
+  nt_left: "NT left",
+  total: "total",
+  now: "Now",
+  main_meter: "Main meter",
+  three_phase_section: "3-phase circuits",
+  single_phase_section: "Single-phase breakers",
+  devices: "devices",
+  hide: "hide",
+  kwh_today: "kWh today",
+  turn_on: "Turn on",
+  turn_off: "Turn off",
+  confirm_turn_on: 'Turn ON circuit "{name}"?',
+  confirm_turn_off: 'Turn OFF circuit "{name}"?',
+  nt_in: "NT in",
+  save_pct: "save",
+  from_schedule: "from schedule",
+  nt_should_start: "NT should have started at {time} ({mins} min ago)",
+  nt_started_early: "NT started early — planned {time}",
+  nt_should_end: "NT should have ended at {time} ({mins} min ago)",
+  nt_ended_early: "NT ended early — planned {time}",
+  hdo_mismatch: "doesn't match schedule",
+  schedule_tab: "Schedule",
+  costs_tab: "Costs",
+  period_7d: "7 days",
+  period_month: "Month",
+  cost_estimate_month: "Estimated month total",
+  cost_avg_day: "Average {price}/day",
+  no_cost_data: "No data yet"
 };
-function resolveLang(config, hass) {
-  var _a2;
-  const cfg = config == null ? void 0 : config.language;
-  if (cfg === "en" || cfg === "cs") return cfg;
-  const haLang = ((_a2 = hass == null ? void 0 : hass.locale) == null ? void 0 : _a2.language) ?? "";
-  return haLang.startsWith("cs") ? "cs" : "en";
-}
-function localize(lang, key, vars) {
-  let str = STRINGS[lang][key] ?? STRINGS.en[key] ?? key;
+function localize(key, vars) {
+  let str = STRINGS[key] ?? key;
   if (vars) for (const [k2, v2] of Object.entries(vars)) str = str.replace(`{${k2}}`, v2);
   return str;
 }
@@ -2135,11 +2077,8 @@ let ElectricityPanelCard = class extends i {
     const st = (_b = (_a2 = this.hass) == null ? void 0 : _a2.states[id]) == null ? void 0 : _b.state;
     return st !== void 0 && st !== "unavailable" && st !== "unknown";
   }
-  _lang() {
-    return resolveLang(this._config, this._hass);
-  }
   _t(key, vars) {
-    return localize(this._lang(), key, vars);
+    return localize(key, vars);
   }
   _log(...args) {
     var _a2;
@@ -2287,8 +2226,7 @@ let ElectricityPanelCard = class extends i {
   }
   // ── Full-day schedule builder ──────────────────────────────────────────────
   _fmtTime(ms) {
-    const loc = this._lang() === "cs" ? "cs-CZ" : "en-GB";
-    return new Date(ms).toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" });
+    return new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
   }
   /** [dayStart, dayEnd) for today (offset 0) or tomorrow (offset 1), DST-safe. */
   _dayBounds(dayOffset) {
@@ -2458,7 +2396,7 @@ let ElectricityPanelCard = class extends i {
     const nowMs = Date.now();
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
-    const startMs = this._hasPrices() ? Math.min(nowMs - hours * 36e5, midnight.getTime()) : nowMs - hours * 36e5;
+    const startMs = nowMs - hours * 36e5;
     const graphStart = new Date(startMs).toISOString();
     const midnightStr = midnight.toISOString();
     const wattsMul = /* @__PURE__ */ new Map();

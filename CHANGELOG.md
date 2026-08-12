@@ -5,6 +5,41 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.1.12] — 2026-08-12
+*Fáze 4 (ROADMAP.md) — rozhodnuto: karta bude jen anglicky, cs lokalizace odstraněna.*
+
+### ⚠️ Breaking
+
+- **Config `language` odstraněn.** Karta i editor jsou nyní čistě anglicky —
+  žádný cs/en přepínač, žádné `language: 'auto' | 'en' | 'cs'` pole v
+  configu. Pokud ho máš v YAML nastavené, klidně ho smaž — karta ho už
+  nečte, žádnou chybu tím ale nezpůsobí.
+- `localize.ts` zjednodušen na jednu anglickou sadu řetězců, `_t()` v
+  `electricity-panel-card.ts` volá `localize(key, vars)` bez jazykového
+  parametru. Editor ztratil selektor **Language** v sekci Appearance &
+  behaviour (nikdy neměl cs verzi, byl tedy zbytečný).
+- README: smazán bod „Localized — English and Czech" a zmínka o
+  jazykovém poli v popisu editoru.
+
+## [5.1.11] — 2026-08-12
+*Fáze 3.2 (ROADMAP.md) uzavřena — statistiky ověřené na reálné instanci, raw-history fetch zúžen zpět na `graph_hours`.*
+
+### 🔧 Changed
+
+- Raw-history WS fetch (`history/history_during_period`) se už nerozšiřuje
+  na půlnoc, když jsou nastavené ceny — statistiky (`_fetchStatistics` /
+  `_fetchEnergyStatistics`) mají vlastní midnight-anchored dotaz nezávisle
+  na tomhle okně a jsou teď ověřená primární cesta výpočtu ceny. Raw history
+  je opět čistě okno pro graf/sparkline (`graph_hours`); trapezoidní
+  raw-history fallback v `_calcDailyCost` funguje jen pro entity bez
+  usable statistik — pro ně nově pokrývá jen posledních `graph_hours`
+  hodin místo celého dne od půlnoci.
+
+### ✅ Ověřeno
+
+- Fáze 3.2 a 3.3 (long-term statistics, 7 dní/Měsíc) potvrzeny funkční na
+  reálné instanci (main_meter fáze mají usable statistiky).
+
 ## [5.1.10] — 2026-08-04
 *Post-3.3 (ROADMAP.md) — cost calc prefers real energy (kWh) sensors over the power-mean approximation, wherever configured.*
 

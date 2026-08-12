@@ -344,7 +344,6 @@ export class ElectricityPanelEditor extends LitElement {
   }
 
   private _renderAppearanceSection(): TemplateResult {
-    const lang = this._config.language ?? 'auto';
     return html`
       <details class="section">
         <summary>Appearance & behaviour</summary>
@@ -357,14 +356,6 @@ export class ElectricityPanelEditor extends LitElement {
           <span class="field-hint">
             Off = built-in dark design. On = card adapts to the active HA theme (light/dark).
           </span>
-          <div class="field" style="margin-top:8px;">
-            <label>Language</label>
-            <select @change=${(e: Event) => this._set(['language'], (e.target as HTMLSelectElement).value === 'auto' ? '' : (e.target as HTMLSelectElement).value)}>
-              <option value="auto" ?selected=${lang === 'auto'}>Auto (from HA profile)</option>
-              <option value="en" ?selected=${lang === 'en'}>English</option>
-              <option value="cs" ?selected=${lang === 'cs'}>Čeština</option>
-            </select>
-          </div>
           <div class="field checkbox" style="margin-top:8px;">
             <input type="checkbox" id="ep-debug" .checked=${this._config.debug ?? false}
               @change=${(e: Event) => this._set(['debug'], (e.target as HTMLInputElement).checked)} />

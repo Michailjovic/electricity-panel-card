@@ -1,4 +1,4 @@
-export const EP_VERSION = '5.1.10';
+export const EP_VERSION = '5.1.12';
 
 // ── Home Assistant types ────────────────────────────────────────────────────
 
@@ -181,8 +181,6 @@ export interface ElectricityPanelConfig {
   show_age_badge?: boolean;
   /** Follow the active HA theme colours instead of the built-in dark palette (default: false) */
   follow_theme?: boolean;
-  /** UI language: 'auto' (from HA profile), 'en' or 'cs' (default: auto) */
-  language?: 'auto' | 'en' | 'cs';
   /** Enable verbose console logging for history fetch debugging (default: false) */
   debug?: boolean;
   /** During VT, show a per-circuit hint with next NT start and potential saving (default: false) */

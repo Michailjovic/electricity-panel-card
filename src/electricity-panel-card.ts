@@ -3,7 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import './electricity-panel-editor.js';
 import { PRE_TARIFFS } from './tariff-presets.js';
 import { EP_VERSION } from './types.js';
-import { localize, resolveLang, type EpLang } from './localize.js';
+import { localize } from './localize.js';
 import type {
   HomeAssistant,
   ElectricityPanelConfig,
@@ -230,12 +230,8 @@ export class ElectricityPanelCard extends LitElement {
     return st !== undefined && st !== 'unavailable' && st !== 'unknown';
   }
 
-  private _lang(): EpLang {
-    return resolveLang(this._config, this._hass);
-  }
-
   private _t(key: string, vars?: Record<string, string>): string {
-    return localize(this._lang(), key, vars);
+    return localize(key, vars);
   }
 
   private _log(...args: unknown[]): void {
@@ -402,8 +398,7 @@ export class ElectricityPanelCard extends LitElement {
   // ── Full-day schedule builder ──────────────────────────────────────────────
 
   private _fmtTime(ms: number): string {
-    const loc = this._lang() === 'cs' ? 'cs-CZ' : 'en-GB';
-    return new Date(ms).toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
+    return new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   }
 
   /** [dayStart, dayEnd) for today (offset 0) or tomorrow (offset 1), DST-safe. */
@@ -572,11 +567,15 @@ export class ElectricityPanelCard extends LitElement {
     const hours = this._config.graph_hours ?? 3;
     const nowMs = Date.now();
     const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
-    // Daily cost integrates since midnight — when prices are configured the
-    // power history window must cover the whole day, not just graph_hours.
-    const startMs = this._hasPrices()
-      ? Math.min(nowMs - hours * 3_600_000, midnight.getTime())
-      : nowMs - hours * 3_600_000;
+    // Post-3.2 (ROADMAP.md, verified 2026-08-12): daily cost used to force this
+    // window back to midnight so the raw-history trapezoidal fallback had the
+    // whole day to integrate. Now that long-term statistics (_fetchStatistics/
+    // _fetchEnergyStatistics below, each with their own midnight-anchored WS
+    // call) are confirmed working, raw history is back to being purely the
+    // graph/sparkline window — the per-entity cost fallback in _calcDailyCost
+    // only loses "since midnight" coverage for entities that have *neither*
+    // energy nor power statistics, which is now the rare case, not the norm.
+    const startMs = nowMs - hours * 3_600_000;
     const graphStart = new Date(startMs).toISOString();
     const midnightStr = midnight.toISOString();
     // HA 2023.3+ compressed format: s=state, lu=last_updated, lc=last_changed (unix float seconds)
