@@ -72,6 +72,12 @@ export class ElectricityPanelCard extends LitElement {
    *  step, not the first thing the card shows. */
   @state() private _scheduleTab: 'schedule' | 'costs' = 'schedule';
   @state() private _costsPeriod: 'today' | '7d' | 'month' = 'today';
+  /** Odloženo/zamítnuto → un-deferred (ROADMAP.md, 2026-08-12): transient
+   *  override for the sparkline window (1h/3h/6h/24h buttons), independent
+   *  of `graph_hours` config — resets to config on reload. `undefined` means
+   *  "use config default". Not persisted: this is a viewing convenience, not
+   *  a card setting. */
+  @state() private _sparkWindowHours?: number;
 
   private _timer?: number;
   private _historyTimer?: number;
@@ -112,14 +118,22 @@ export class ElectricityPanelCard extends LitElement {
   private _refetchQueued = false;
   /** Timestamp of the last successful history fetch — right edge of sparkline x-axis */
   private _historyWindowEnd = 0;
-  /** Computed sparkline paths, keyed by entity_id; invalidated on new data / new window */
+  /** Computed sparkline paths, keyed by entity_id; invalidated on new data / new
+   *  window. `hours` joined the invalidation key alongside `data`/`windowEnd`
+   *  once the window became switchable at runtime (`_sparkWindowHours`) — it
+   *  used to only ever come from static config, so it never needed to be a
+   *  cache-busting input before. `hoverPts` carries each plotted point's SVG
+   *  x/y alongside its source t/v so the hover tooltip can look up "nearest
+   *  point" by x without recomputing the whole path. */
   private _sparkCache = new Map<string, {
     data: Array<{t: number; v: number}>;
     windowEnd: number;
+    hours: number;
     line: string;
     area: string;
     vMin: number;
     vMax: number;
+    hoverPts: Array<{x: number; y: number; t: number; v: number}>;
   }>();
 
   override connectedCallback(): void {
@@ -553,6 +567,81 @@ export class ElectricityPanelCard extends LitElement {
     return [...new Set(ids)];
   }
 
+  /** ROADMAP.md "Interaktivní sparkliny" (un-deferred 2026-08-12): the runtime
+   *  window override wins over config so the 1h/3h/6h/24h buttons can change
+   *  what's plotted without touching `graph_hours` in the saved config. */
+  private _effectiveGraphHours(): number {
+    return this._sparkWindowHours ?? this._config?.graph_hours ?? 3;
+  }
+
+  private static readonly SPARK_WINDOWS = [1, 3, 6, 24];
+
+  /** One control for the whole card, not per-sparkline — all sparklines
+   *  already share one x-axis (`_renderSparkline`'s comment above), so one
+   *  switch is enough and keeps the extra UI to a single row instead of one
+   *  per circuit. Rendered once from `_renderMainMeter`. */
+  private _renderSparkWindowSwitch(): TemplateResult {
+    const active = this._effectiveGraphHours();
+    const color = this._config.sparkline_color ?? '#ef4444';
+    return html`
+      <div class="spark-win-switch">
+        ${ElectricityPanelCard.SPARK_WINDOWS.map(h => html`
+          <button type="button" class="spark-win-btn ${active === h ? 'active' : ''}"
+            style=${active === h ? `border-color:${color};color:${color}` : ''}
+            @click=${() => this._setSparkWindow(h)}>${h}h</button>
+        `)}
+      </div>`;
+  }
+
+  private _setSparkWindow(hours: number): void {
+    if (this._sparkWindowHours === hours) return;
+    this._sparkWindowHours = hours;
+    void this._fetchHistory();
+  }
+
+  /** Direct DOM writes, not `requestUpdate()` — a card with several sparklines
+   *  (main meter × 3 phases + per-circuit) would otherwise re-run the whole
+   *  render() on every pointermove. This is exactly the "listeners and
+   *  re-renders" cost the ROADMAP flagged when this was deferred; writing
+   *  straight to the hover line/dot/tooltip nodes sidesteps it entirely. The
+   *  30 s countdown timer's requestUpdate() reuses the same DOM nodes (lit
+   *  only replaces what its own bindings touch), so this state survives it. */
+  private _onSparkMove(e: PointerEvent, entityId: string): void {
+    const cached = this._sparkCache.get(entityId);
+    const pts = cached?.hoverPts;
+    if (!pts || pts.length === 0) return;
+    const svg = e.currentTarget as SVGSVGElement;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width === 0) return;
+    const relX = ((e.clientX - rect.left) / rect.width) * 100; // svg viewBox is 0..100 wide
+    let nearest = pts[0], bestDist = Infinity;
+    for (const p of pts) {
+      const d = Math.abs(p.x - relX);
+      if (d < bestDist) { bestDist = d; nearest = p; }
+    }
+    const wrap = svg.parentElement;
+    if (!wrap) return;
+    const line = wrap.querySelector<SVGLineElement>('.spark-hover-line');
+    const dot = wrap.querySelector<SVGCircleElement>('.spark-hover-dot');
+    const tooltip = wrap.querySelector<HTMLDivElement>('.spark-tooltip');
+    if (line) { line.setAttribute('x1', `${nearest.x}`); line.setAttribute('x2', `${nearest.x}`); line.setAttribute('visibility', 'visible'); }
+    if (dot) { dot.setAttribute('cx', `${nearest.x}`); dot.setAttribute('cy', `${nearest.y}`); dot.setAttribute('visibility', 'visible'); }
+    if (tooltip) {
+      tooltip.textContent = `${this._fmtW(nearest.v)} · ${this._fmtTime(nearest.t)}`;
+      tooltip.style.left = `${nearest.x}%`;
+      tooltip.style.visibility = 'visible';
+    }
+  }
+
+  private _onSparkLeave(e: PointerEvent): void {
+    const wrap = (e.currentTarget as SVGSVGElement).parentElement;
+    if (!wrap) return;
+    wrap.querySelector('.spark-hover-line')?.setAttribute('visibility', 'hidden');
+    wrap.querySelector('.spark-hover-dot')?.setAttribute('visibility', 'hidden');
+    const tooltip = wrap.querySelector<HTMLDivElement>('.spark-tooltip');
+    if (tooltip) tooltip.style.visibility = 'hidden';
+  }
+
   private async _fetchHistory(): Promise<void> {
     if (!this._hass || !this._config) return;
     if (this._historyFetching) {
@@ -564,7 +653,7 @@ export class ElectricityPanelCard extends LitElement {
     const hdoSwitch = this._config.hdo?.switch;
     if (graphIds.length === 0 && !hdoSwitch) return;
     this._historyFetching = true;
-    const hours = this._config.graph_hours ?? 3;
+    const hours = this._effectiveGraphHours();
     const nowMs = Date.now();
     const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
     // Post-3.2 (ROADMAP.md, verified 2026-08-12): daily cost used to force this
@@ -1097,8 +1186,8 @@ export class ElectricityPanelCard extends LitElement {
     // The x-axis is anchored to [windowEnd − graph_hours, windowEnd] so all
     // sparklines share the same time scale and are visually comparable.
     let cached = this._sparkCache.get(entityId);
-    if (!cached || cached.data !== data || cached.windowEnd !== this._historyWindowEnd) {
-      const hours = this._config.graph_hours ?? 3;
+    if (!cached || cached.data !== data || cached.windowEnd !== this._historyWindowEnd || cached.hours !== this._effectiveGraphHours()) {
+      const hours = this._effectiveGraphHours();
       const windowEnd = this._historyWindowEnd || data[data.length - 1].t;
       const windowStart = windowEnd - hours * 3_600_000;
       // Trim to the display window; carry the last value before the window in
@@ -1130,7 +1219,8 @@ export class ElectricityPanelCard extends LitElement {
         line += ` C ${cx},${p0.y.toFixed(1)} ${cx},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
       }
       const area = `${line} L ${coords[coords.length - 1].x.toFixed(1)},${H} L ${coords[0].x.toFixed(1)},${H} Z`;
-      cached = { data, windowEnd: this._historyWindowEnd, line, area, vMin, vMax };
+      const hoverPts = pts.map((p, i) => ({ x: coords[i].x, y: coords[i].y, t: p.t, v: p.v }));
+      cached = { data, windowEnd: this._historyWindowEnd, hours, line, area, vMin, vMax, hoverPts };
       this._sparkCache.set(entityId, cached);
     }
 
@@ -1150,7 +1240,9 @@ export class ElectricityPanelCard extends LitElement {
     return html`
       <div class="sparkline-wrap">
         ${labelPos === 'left' ? lblEl : nothing}
-        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="sparkline">
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="sparkline"
+          @pointermove=${(e: PointerEvent) => this._onSparkMove(e, entityId)}
+          @pointerleave=${(e: PointerEvent) => this._onSparkLeave(e)}>
           <defs>
             <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
@@ -1165,7 +1257,10 @@ export class ElectricityPanelCard extends LitElement {
             class="spark-ref${showRef ? '' : ' spark-hidden'}" style="stroke:${refColor}"/>
           <line x1="0" y1="${yMin}" x2="${W}" y2="${yMin}"
             class="spark-ref${showRef ? '' : ' spark-hidden'}" style="stroke:${refColor}"/>
+          <line class="spark-hover-line" x1="0" y1="0" x2="0" y2="${H}" visibility="hidden"/>
+          <circle class="spark-hover-dot" r="2.2" style="fill:${color}" visibility="hidden"/>
         </svg>
+        <div class="spark-tooltip"></div>
         ${labelPos === 'right' ? lblEl : nothing}
       </div>`;
   }
@@ -1441,6 +1536,7 @@ export class ElectricityPanelCard extends LitElement {
             </span>
           </div>
         </div>
+        ${this._config.sparkline_main_meter !== false ? this._renderSparkWindowSwitch() : nothing}
         <div class="phases-grid">
           ${phases.map(p => html`
             <div class="phase-cell">
@@ -1999,8 +2095,8 @@ export class ElectricityPanelCard extends LitElement {
     .note-icon { --mdc-icon-size: 12px; color: var(--ep-text-dim); flex-shrink: 0; }
     .note-row .device-name { font-style: italic; }
 
-    .sparkline-wrap { display: flex; align-items: stretch; width: 100%; height: 38px; margin-top: 6px; }
-    .sparkline { flex: 1; min-width: 0; display: block; overflow: visible; }
+    .sparkline-wrap { position: relative; display: flex; align-items: stretch; width: 100%; height: 38px; margin-top: 6px; }
+    .sparkline { flex: 1; min-width: 0; display: block; overflow: visible; cursor: crosshair; }
     .spark-lbls { width: 40px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 2px 2px; pointer-events: none; }
     .spark-lbls-left { align-items: flex-start; }
     .spark-lbls-right { align-items: flex-end; }
@@ -2008,6 +2104,20 @@ export class ElectricityPanelCard extends LitElement {
     .spark-lbl-min { font-size: 8px; color: rgba(255,255,255,.45); text-shadow: 0 0 3px var(--ep-bg), 0 0 3px var(--ep-bg); white-space: nowrap; font-family: inherit; }
     .spark-ref { stroke-width: 1px; stroke-dasharray: 3 3; }
     .spark-hidden { display: none; }
+    .spark-hover-line { stroke: rgba(255,255,255,.35); stroke-width: .5; pointer-events: none; }
+    .spark-hover-dot { pointer-events: none; }
+    .spark-tooltip {
+      position: absolute; top: -2px; transform: translate(-50%, -100%);
+      background: var(--ep-surface); border: 0.5px solid var(--ep-border);
+      border-radius: 6px; padding: 2px 6px; font-size: 10px; color: var(--ep-text-mid);
+      white-space: nowrap; pointer-events: none; visibility: hidden; z-index: 1;
+    }
+    .spark-win-switch { display: flex; gap: 4px; margin: 6px 0 2px; }
+    .spark-win-btn {
+      flex: 1; font-size: 10px; padding: 3px 0; border-radius: 6px; cursor: pointer;
+      background: var(--ep-surface); border: 0.5px solid var(--ep-border); color: var(--ep-text-dim);
+    }
+    .spark-win-btn.active { background: var(--ep-accent-bg); }
     .age-badge { font-size: 10px; font-variant-numeric: tabular-nums; }
 
     .nt-hint { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #f59e0b; opacity: .85; margin-top: 6px; }

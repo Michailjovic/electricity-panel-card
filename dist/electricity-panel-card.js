@@ -656,7 +656,7 @@ const PRE_TARIFFS = {
     holiday: { starts: ["02:20", "07:00", "15:20"], offsets: [240, 80, 160] }
   }
 };
-const EP_VERSION = "5.1.12";
+const EP_VERSION = "5.2.0";
 function slotTimeMs(base, hm) {
   const [h2, m2] = hm.split(":").map(Number);
   const d2 = new Date(base);
@@ -2381,6 +2381,87 @@ let ElectricityPanelCard = class extends i {
     }
     return [...new Set(ids)];
   }
+  /** ROADMAP.md "Interaktivní sparkliny" (un-deferred 2026-08-12): the runtime
+   *  window override wins over config so the 1h/3h/6h/24h buttons can change
+   *  what's plotted without touching `graph_hours` in the saved config. */
+  _effectiveGraphHours() {
+    var _a2;
+    return this._sparkWindowHours ?? ((_a2 = this._config) == null ? void 0 : _a2.graph_hours) ?? 3;
+  }
+  /** One control for the whole card, not per-sparkline — all sparklines
+   *  already share one x-axis (`_renderSparkline`'s comment above), so one
+   *  switch is enough and keeps the extra UI to a single row instead of one
+   *  per circuit. Rendered once from `_renderMainMeter`. */
+  _renderSparkWindowSwitch() {
+    const active = this._effectiveGraphHours();
+    const color = this._config.sparkline_color ?? "#ef4444";
+    return b`
+      <div class="spark-win-switch">
+        ${ElectricityPanelCard.SPARK_WINDOWS.map((h2) => b`
+          <button type="button" class="spark-win-btn ${active === h2 ? "active" : ""}"
+            style=${active === h2 ? `border-color:${color};color:${color}` : ""}
+            @click=${() => this._setSparkWindow(h2)}>${h2}h</button>
+        `)}
+      </div>`;
+  }
+  _setSparkWindow(hours) {
+    if (this._sparkWindowHours === hours) return;
+    this._sparkWindowHours = hours;
+    void this._fetchHistory();
+  }
+  /** Direct DOM writes, not `requestUpdate()` — a card with several sparklines
+   *  (main meter × 3 phases + per-circuit) would otherwise re-run the whole
+   *  render() on every pointermove. This is exactly the "listeners and
+   *  re-renders" cost the ROADMAP flagged when this was deferred; writing
+   *  straight to the hover line/dot/tooltip nodes sidesteps it entirely. The
+   *  30 s countdown timer's requestUpdate() reuses the same DOM nodes (lit
+   *  only replaces what its own bindings touch), so this state survives it. */
+  _onSparkMove(e2, entityId) {
+    const cached = this._sparkCache.get(entityId);
+    const pts = cached == null ? void 0 : cached.hoverPts;
+    if (!pts || pts.length === 0) return;
+    const svg = e2.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width === 0) return;
+    const relX = (e2.clientX - rect.left) / rect.width * 100;
+    let nearest = pts[0], bestDist = Infinity;
+    for (const p2 of pts) {
+      const d2 = Math.abs(p2.x - relX);
+      if (d2 < bestDist) {
+        bestDist = d2;
+        nearest = p2;
+      }
+    }
+    const wrap = svg.parentElement;
+    if (!wrap) return;
+    const line = wrap.querySelector(".spark-hover-line");
+    const dot = wrap.querySelector(".spark-hover-dot");
+    const tooltip = wrap.querySelector(".spark-tooltip");
+    if (line) {
+      line.setAttribute("x1", `${nearest.x}`);
+      line.setAttribute("x2", `${nearest.x}`);
+      line.setAttribute("visibility", "visible");
+    }
+    if (dot) {
+      dot.setAttribute("cx", `${nearest.x}`);
+      dot.setAttribute("cy", `${nearest.y}`);
+      dot.setAttribute("visibility", "visible");
+    }
+    if (tooltip) {
+      tooltip.textContent = `${this._fmtW(nearest.v)} · ${this._fmtTime(nearest.t)}`;
+      tooltip.style.left = `${nearest.x}%`;
+      tooltip.style.visibility = "visible";
+    }
+  }
+  _onSparkLeave(e2) {
+    var _a2, _b;
+    const wrap = e2.currentTarget.parentElement;
+    if (!wrap) return;
+    (_a2 = wrap.querySelector(".spark-hover-line")) == null ? void 0 : _a2.setAttribute("visibility", "hidden");
+    (_b = wrap.querySelector(".spark-hover-dot")) == null ? void 0 : _b.setAttribute("visibility", "hidden");
+    const tooltip = wrap.querySelector(".spark-tooltip");
+    if (tooltip) tooltip.style.visibility = "hidden";
+  }
   async _fetchHistory() {
     var _a2, _b, _c, _d;
     if (!this._hass || !this._config) return;
@@ -2392,7 +2473,7 @@ let ElectricityPanelCard = class extends i {
     const hdoSwitch = (_a2 = this._config.hdo) == null ? void 0 : _a2.switch;
     if (graphIds.length === 0 && !hdoSwitch) return;
     this._historyFetching = true;
-    const hours = this._config.graph_hours ?? 3;
+    const hours = this._effectiveGraphHours();
     const nowMs = Date.now();
     const midnight = /* @__PURE__ */ new Date();
     midnight.setHours(0, 0, 0, 0);
@@ -2867,8 +2948,8 @@ let ElectricityPanelCard = class extends i {
     const labelPos = this._config.sparkline_labels ?? "left";
     const showRef = this._config.sparkline_ref_line ?? false;
     let cached = this._sparkCache.get(entityId);
-    if (!cached || cached.data !== data || cached.windowEnd !== this._historyWindowEnd) {
-      const hours = this._config.graph_hours ?? 3;
+    if (!cached || cached.data !== data || cached.windowEnd !== this._historyWindowEnd || cached.hours !== this._effectiveGraphHours()) {
+      const hours = this._effectiveGraphHours();
       const windowEnd = this._historyWindowEnd || data[data.length - 1].t;
       const windowStart = windowEnd - hours * 36e5;
       const pts = [];
@@ -2898,7 +2979,8 @@ let ElectricityPanelCard = class extends i {
         line += ` C ${cx},${p0.y.toFixed(1)} ${cx},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
       }
       const area = `${line} L ${coords[coords.length - 1].x.toFixed(1)},${H2} L ${coords[0].x.toFixed(1)},${H2} Z`;
-      cached = { data, windowEnd: this._historyWindowEnd, line, area, vMin, vMax };
+      const hoverPts = pts.map((p2, i2) => ({ x: coords[i2].x, y: coords[i2].y, t: p2.t, v: p2.v }));
+      cached = { data, windowEnd: this._historyWindowEnd, hours, line, area, vMin, vMax, hoverPts };
       this._sparkCache.set(entityId, cached);
     }
     const gid = `sg_${entityId.replace(/[^a-z0-9]/gi, "_")}`;
@@ -2914,7 +2996,9 @@ let ElectricityPanelCard = class extends i {
     return b`
       <div class="sparkline-wrap">
         ${labelPos === "left" ? lblEl : A}
-        <svg viewBox="0 0 ${W} ${H2}" preserveAspectRatio="none" class="sparkline">
+        <svg viewBox="0 0 ${W} ${H2}" preserveAspectRatio="none" class="sparkline"
+          @pointermove=${(e2) => this._onSparkMove(e2, entityId)}
+          @pointerleave=${(e2) => this._onSparkLeave(e2)}>
           <defs>
             <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
@@ -2929,7 +3013,10 @@ let ElectricityPanelCard = class extends i {
             class="spark-ref${showRef ? "" : " spark-hidden"}" style="stroke:${refColor}"/>
           <line x1="0" y1="${yMin}" x2="${W}" y2="${yMin}"
             class="spark-ref${showRef ? "" : " spark-hidden"}" style="stroke:${refColor}"/>
+          <line class="spark-hover-line" x1="0" y1="0" x2="0" y2="${H2}" visibility="hidden"/>
+          <circle class="spark-hover-dot" r="2.2" style="fill:${color}" visibility="hidden"/>
         </svg>
+        <div class="spark-tooltip"></div>
         ${labelPos === "right" ? lblEl : A}
       </div>`;
   }
@@ -3198,6 +3285,7 @@ let ElectricityPanelCard = class extends i {
             </span>
           </div>
         </div>
+        ${this._config.sparkline_main_meter !== false ? this._renderSparkWindowSwitch() : A}
         <div class="phases-grid">
           ${phases.map((p2) => b`
             <div class="phase-cell">
@@ -3461,6 +3549,7 @@ let ElectricityPanelCard = class extends i {
     `;
   }
 };
+ElectricityPanelCard.SPARK_WINDOWS = [1, 3, 6, 24];
 ElectricityPanelCard.styles = i$3`
     :host { display: block; container-type: inline-size; }
     ha-card {
@@ -3700,8 +3789,8 @@ ElectricityPanelCard.styles = i$3`
     .note-icon { --mdc-icon-size: 12px; color: var(--ep-text-dim); flex-shrink: 0; }
     .note-row .device-name { font-style: italic; }
 
-    .sparkline-wrap { display: flex; align-items: stretch; width: 100%; height: 38px; margin-top: 6px; }
-    .sparkline { flex: 1; min-width: 0; display: block; overflow: visible; }
+    .sparkline-wrap { position: relative; display: flex; align-items: stretch; width: 100%; height: 38px; margin-top: 6px; }
+    .sparkline { flex: 1; min-width: 0; display: block; overflow: visible; cursor: crosshair; }
     .spark-lbls { width: 40px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 2px 2px; pointer-events: none; }
     .spark-lbls-left { align-items: flex-start; }
     .spark-lbls-right { align-items: flex-end; }
@@ -3709,6 +3798,20 @@ ElectricityPanelCard.styles = i$3`
     .spark-lbl-min { font-size: 8px; color: rgba(255,255,255,.45); text-shadow: 0 0 3px var(--ep-bg), 0 0 3px var(--ep-bg); white-space: nowrap; font-family: inherit; }
     .spark-ref { stroke-width: 1px; stroke-dasharray: 3 3; }
     .spark-hidden { display: none; }
+    .spark-hover-line { stroke: rgba(255,255,255,.35); stroke-width: .5; pointer-events: none; }
+    .spark-hover-dot { pointer-events: none; }
+    .spark-tooltip {
+      position: absolute; top: -2px; transform: translate(-50%, -100%);
+      background: var(--ep-surface); border: 0.5px solid var(--ep-border);
+      border-radius: 6px; padding: 2px 6px; font-size: 10px; color: var(--ep-text-mid);
+      white-space: nowrap; pointer-events: none; visibility: hidden; z-index: 1;
+    }
+    .spark-win-switch { display: flex; gap: 4px; margin: 6px 0 2px; }
+    .spark-win-btn {
+      flex: 1; font-size: 10px; padding: 3px 0; border-radius: 6px; cursor: pointer;
+      background: var(--ep-surface); border: 0.5px solid var(--ep-border); color: var(--ep-text-dim);
+    }
+    .spark-win-btn.active { background: var(--ep-accent-bg); }
     .age-badge { font-size: 10px; font-variant-numeric: tabular-nums; }
 
     .nt-hint { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #f59e0b; opacity: .85; margin-top: 6px; }
@@ -3735,6 +3838,9 @@ __decorateClass([
 __decorateClass([
   r()
 ], ElectricityPanelCard.prototype, "_costsPeriod", 2);
+__decorateClass([
+  r()
+], ElectricityPanelCard.prototype, "_sparkWindowHours", 2);
 ElectricityPanelCard = __decorateClass([
   t("electricity-panel-card")
 ], ElectricityPanelCard);

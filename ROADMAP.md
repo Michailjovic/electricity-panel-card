@@ -173,7 +173,7 @@ přesnou `change` hodnotu (bez aproximace mean × doba).
 
 | Položka | Stav | Poznámka |
 |---|---|---|
-| Interaktivní sparkliny (tooltip, přepínání okna na kartě) | **Odloženo** | Malý přínos na hustém dashboardu, přidává listenery a re-rendery. Konfigurace okna zůstává v GUI. Revize po Fázi 3. |
+| Interaktivní sparkliny (tooltip, přepínání okna na kartě) | **Hotovo — v5.2.0** | Implementováno 2026-08-12 podle schváleného mockupu. Hover tooltip + tlačítka 1h/3h/6h/24h u hlavního měřiče. Řešeno bez performance rizika, které bylo důvodem odkladu — přímá DOM manipulace místo lit re-renderu. |
 | Neměřený zbytek okruhu | **Zamítnuto** | Rozdíly měřidel různých výrobců jsou očekávané, informace netřeba trvale zobrazovat. |
 | FVE režim (export, self-consumption) | **Odloženo** | Hodnota až pro veřejné publikum — po Fázi 4. |
 | Spotové ceny (OTE) | **Odloženo** | Tamtéž; potenciálně silný odlišovák pro HACS verzi. |

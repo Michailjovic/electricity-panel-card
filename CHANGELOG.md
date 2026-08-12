@@ -5,6 +5,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.2.0] — 2026-08-12
+*ROADMAP.md "Interaktivní sparkliny" — un-deferred po Fázi 3, podle schváleného mockupu.*
+
+### ✨ Added
+
+- **Hover tooltip na sparkline grafech** — najetí myší/prstem ukáže hodnotu
+  (W/kW) a čas v daném bodě, s vodicí čárou a tečkou. Implementováno přímou
+  DOM manipulací (ne přes lit `requestUpdate()`), aby se předešlo přesně
+  tomu, co bylo důvodem odkladu — re-render celé karty na každý pohyb myši.
+  30s countdown timer i tak sdílí stejné DOM uzly, takže hover stav přežije.
+- **Přepínání časového okna přímo na kartě** — tlačítka 1h/3h/6h/24h u
+  hlavního měřiče. Jedno tlačítko pro celou kartu (ne per-sparkline) —
+  všechny sparkliny (hlavní měřič, 3fázové i 1fázové okruhy) sdílí stejnou
+  časovou osu, takže víc přepínačů by bylo redundantní. Kliknutí přenačte
+  historii z HA (`_fetchHistory`) s novým oknem; `graph_hours` v configu
+  zůstává nedotčené — jde o dočasné zobrazovací přebití, ne uloženou
+  hodnotu (resetuje se při reloadu karty).
+- Cache invalidace sparkline path (`_sparkCache`) rozšířena o `hours` —
+  dřív se okno měnilo jen přes statický config, teď runtime přepínačem,
+  takže bez tohoto klíče by se po přepnutí okna zobrazila zastaralá cesta.
+
 ## [5.1.12] — 2026-08-12
 *Fáze 4 (ROADMAP.md) — rozhodnuto: karta bude jen anglicky, cs lokalizace odstraněna.*
 
