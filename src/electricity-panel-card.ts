@@ -300,6 +300,18 @@ export class ElectricityPanelCard extends LitElement {
     return `${w.toFixed(0)} W`;
   }
 
+  /** Design pass (2026-08-12, live-dashboard review): nt_price/vt_price are
+   *  entered as free-text config values, so the HDO bar previously rendered
+   *  whatever precision the user's source sensor happened to have — real
+   *  spot-tariff sensors round-trip through the HA UI at full float
+   *  precision (e.g. 4.61453), which reads as noise next to a 2-decimal
+   *  currency. Rounded for display only; the raw value is still what
+   *  feeds the actual cost math elsewhere. */
+  private _fmtPrice(price: string | number | undefined): string {
+    const n = parseFloat(price as unknown as string);
+    return isNaN(n) ? '' : n.toFixed(2);
+  }
+
   private _kwh(entityId?: string): number {
     if (!entityId) return 0;
     const entity = this.hass?.states[entityId];
@@ -1455,7 +1467,7 @@ export class ElectricityPanelCard extends LitElement {
               <div class="hdo-label">${isNT ? this._t('nt_low') : this._t('vt_high')}
                 <span class="hdo-src-badge">${this._t('from_schedule')}</span>
               </div>
-              ${price ? html`<div class="hdo-sub">${price} ${cur}/kWh</div>` : nothing}
+              ${price ? html`<div class="hdo-sub">${this._fmtPrice(price)} ${cur}/kWh</div>` : nothing}
             </div>
           </div>
         `;
@@ -1485,7 +1497,7 @@ export class ElectricityPanelCard extends LitElement {
         <div class="hdo-dot ${isNT ? 'nt' : 'vt'}"></div>
         <div class="hdo-info">
           <div class="hdo-label">${isNT ? this._t('nt_low') : this._t('vt_high')}</div>
-          ${price ? html`<div class="hdo-sub">${price} ${cur}/kWh</div>` : nothing}
+          ${price ? html`<div class="hdo-sub">${this._fmtPrice(price)} ${cur}/kWh</div>` : nothing}
           ${slotPct >= 0 ? html`
             <div class="hdo-prog"><div class="hdo-prog-fill" style="width:${slotPct.toFixed(1)}%"></div></div>
           ` : nothing}
@@ -1972,9 +1984,14 @@ export class ElectricityPanelCard extends LitElement {
     .sdur { font-size: 10px; color: var(--ep-text-dim); white-space: nowrap; text-align: right; }
 
     .sblock-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
-    .sblock-tab { flex: 1; text-align: center; font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px; padding: 5px 0; border-radius: 6px; color: var(--ep-text-dim); cursor: pointer; user-select: none; }
-    .sblock-tab:hover { color: var(--ep-text-mid); }
-    .sblock-tab.active { background: var(--ep-accent-bg); color: var(--ep-text); }
+    /* Design pass (2026-08-12): the inactive tab used to be bare text with no
+       border — nothing distinguished it from a plain label, so it didn't read
+       as clickable until hovered. A resting border (removed only once active,
+       where the filled background already signals state) fixes that without
+       adding a second accent colour. */
+    .sblock-tab { flex: 1; text-align: center; font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px; padding: 5px 0; border-radius: 6px; border: 0.5px solid var(--ep-border); color: var(--ep-text-dim); cursor: pointer; user-select: none; }
+    .sblock-tab:hover { color: var(--ep-text-mid); border-color: var(--ep-border2); }
+    .sblock-tab.active { background: var(--ep-accent-bg); border-color: transparent; color: var(--ep-text); }
 
     .cost-pills { display: flex; gap: 6px; margin-bottom: 10px; }
     .cost-pill { font-size: 10px; padding: 3px 9px; border-radius: 12px; border: 0.5px solid var(--ep-border); background: var(--ep-bg); color: var(--ep-accent); cursor: pointer; white-space: nowrap; font-weight: 500; }
@@ -2051,7 +2068,14 @@ export class ElectricityPanelCard extends LitElement {
     .metric-primary.inactive { color: var(--ep-text-faint); }
     .metric-small { font-size: 11px; color: var(--ep-text-dim); display: flex; flex-wrap: wrap; align-items: center; gap: 1px 2px; }
     .metric-sep { opacity: .4; margin: 0 1px; }
-    .cost-rate { color: #f59e0b; font-weight: 500; }
+    /* Design pass (2026-08-12): was #f59e0b, same amber as the age-badge's
+       "stale data" warning colour (_ageBadge, age_warn_color) — the two had
+       no relation to each other but looked like the same signal next to each
+       other on a circuit card. Reusing --ep-accent instead keeps cost visually
+       distinct from staleness warnings, and matches the card's existing
+       "highlighted small label" colour (.meter-title, .ch-sum) rather than
+       inventing a third accent hue. */
+    .cost-rate { color: var(--ep-accent); font-weight: 500; }
 
     .badge { font-size: 9px; padding: 2px 5px; border-radius: 4px; font-weight: 500; flex-shrink: 0; letter-spacing: .3px; }
     .badge-info  { background: var(--ep-badge-bg); color: var(--ep-badge-fg); }

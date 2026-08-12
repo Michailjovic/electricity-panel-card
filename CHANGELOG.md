@@ -5,6 +5,36 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.2.1] — 2026-08-13
+*Design pass — review na živém dashboardu (`living-room/electricity`), viz design-critique v konverzaci.*
+
+### 🎨 Changed
+
+- **Ceny zaokrouhleny na 2 desetinná místa v HDO baru** — `nt_price`/`vt_price`
+  se dřív vypisovaly s plnou přesností zdrojového senzoru (např.
+  `4.61453 Kč/kWh`), teď `4.61 Kč/kWh`. Nová `_fmtPrice()`; jen zobrazení,
+  výpočet nákladů je beze změny.
+- **`.cost-rate` (cena u okruhu) už nekoliduje barvou s age-badge warningem** —
+  obojí bylo `#f59e0b`, takže "tohle tě stojí peníze" a "tahle data jsou
+  zastaralá" splývaly. Cena teď používá `var(--ep-accent)` (stejná barva
+  jako `.meter-title`/`.ch-sum`), age-badge si nechává svůj vlastní
+  amber/red stale-warning systém beze změny.
+- **Neaktivní záložka Rozvrh/Náklady má teď klidový obrys** — dřív jen holý
+  text bez jakékoli náznaku klikatelnosti; aktivní stav (vyplněné pozadí)
+  zůstává stejný.
+
+### Nezměněno, ale stojí za zvážení (config, ne kód)
+
+- Referenční linky ve sparkline (`sparkline_ref_line`) a jejich barva
+  (`sparkline_ref_color`) na živém dashboardu byly zapnuté a oranžové —
+  přidávají do 38px grafu další 2 čáry + 2 čísla navrch trendu. Karta
+  defaultuje na vypnuto; pokud to překáží, jde vypnout v editoru bez
+  zásahu do kódu.
+- Mřížka jednofázových jističů (2 sloupce) má u téměř nečinných okruhů
+  (0 W) stejnou výšku jako u aktivních — kompaktnější "sbalený" řádek pro
+  0 W by uvolnil místo, ale je to nová funkce (skrývání dat podle prahu),
+  ne jen styl — záměrně neimplementováno bez potvrzení.
+
 ## [5.2.0] — 2026-08-12
 *ROADMAP.md "Interaktivní sparkliny" — un-deferred po Fázi 3, podle schváleného mockupu.*
 
