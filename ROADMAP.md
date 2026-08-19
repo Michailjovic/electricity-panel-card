@@ -229,10 +229,13 @@ Nový **volitelný** režim; `view: classic` zůstává výchozí.
       rozvrh a náklady (timeline je jen jednou, nahoře)
 - [x] Čisté funkce + testy: `comparePosition`, `buildRails`, `loadPercent`,
       `phaseShares` (+18 testů, celkem 101)
+- [x] Porovnání rozpadá 3f modul na jeho tři fáze (v5.6.0) — porovnat hlavní
+      jistič s 3f okruhem je otázka o fázích, ne o součtech
+- [x] Vodorovné rolování lišty pro celý rozvaděč v jedné řadě (v5.6.0)
 - [ ] **Fázová bilance u hlavního jističe** — průměr/špička za 24 h / 7 dní /
       30 dní + největší odběry na fázi. Vyžaduje dlouhé okno ze statistik
       (`_rangeStatsCache` už podobná data tahá pro Náklady), proto vyčleněno
-      do samostatného kroku → v5.6.0. **Záměrně bez automatického návrhu
+      do samostatného kroku → v5.7.0. **Záměrně bez automatického návrhu
       přerovnání** — topná sezóna a léto mají jiný profil, jednorázová rada
       by lhala; karta ukáže čísla za zvolené okno a rozhodnutí nechá na
       člověku.
@@ -268,6 +271,8 @@ Nový **volitelný** režim; `view: classic` zůstává výchozí.
 | 5.2 — balíček A (barvy) | 5.3.0 | minor |
 | 5.3 — balíček B (hierarchie) | 5.4.0 | minor |
 | 5.4 — view: panel | 5.5.0 | minor |
+| 5.4 — doladění panelu | 5.5.1, 5.6.0 | patch + minor |
+| 5.4 — fázová bilance | 5.7.0 | minor |
 | 4 — publikace | 6.0.0 | major (public release) |
 
 > Pozn.: řádky Fází 1–3 jsou původní plán, ne to, co se skutečně vydalo —

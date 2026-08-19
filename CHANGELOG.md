@@ -5,6 +5,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.6.0] — 2026-08-19
+*Doladění panel view podle zpětné vazby z živého rozvaděče.*
+
+### 🎨 Changed
+
+- **Porovnání rozpadne 3f modul na jeho tři fáze.** Dřív každý vybraný modul
+  přispěl jednou křivkou (u 3f tou nejzatíženější). Jenže porovnávat hlavní
+  jistič s 3f okruhem je otázka o fázích — „sedí kuchyň na stejné fázi jako
+  bojler?" — a sloučení každé strany do jedné křivky zahodí přesně tu odpověď.
+  Vybrat hlavní jistič a kuchyň teď dá šest křivek na jednom měřítku, barevně
+  odlišených po fázích.
+- **Mřížka porovnání drží tři sloupce, jakmile je mezi vybranými 3f modul** —
+  jinak se L1/L2/L3 jednoho jističe rozlomí přes dva řádky a srovnání se čte
+  mnohem hůř. Pod 560 px přechází na jeden sloupec.
+- **Lišta se dá vodorovně odrolovat.** Kdo má celý rozvaděč v jedné řadě
+  (`rail_size` nastavený na součet všech pozic), toho na úzkém dashboardu
+  moduly nezmáčknou pod čitelnou šířku — lišta se posouvá zleva doprava,
+  stejně jako když se po ní díváš ve skutečnosti. Modul si drží minimum 34 px.
+
+### 🧹 Removed
+
+- Interní pole `sparkPhase` u modulu — po přepsání porovnání ho nikdo nečetl.
+
+---
+
 ## [5.5.1] — 2026-08-19
 
 ### 🐞 Fixed

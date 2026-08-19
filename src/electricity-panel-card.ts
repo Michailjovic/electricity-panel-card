@@ -74,10 +74,6 @@ interface PanelModule {
   critical: boolean;
   /** Entity whose history backs the micro graph and the detail graph */
   sparkId?: string;
-  /** Set when `sparkId` is one phase of a 3-phase module rather than its total
-   *  — the label is shown next to the graph so a single phase is never read
-   *  as the whole breaker. */
-  sparkPhase?: string;
   /** Absent for the synthetic main-breaker module */
   circuit?: Circuit;
 }
@@ -2007,7 +2003,6 @@ export class ElectricityPanelCard extends LitElement {
         hasSwitch: false,
         critical: true,
         sparkId: mainSpark.id,
-        sparkPhase: mainSpark.label,
       });
     }
 
@@ -2042,10 +2037,11 @@ export class ElectricityPanelCard extends LitElement {
         critical: !!c.critical,
         ...(three && !c.power
           ? (() => {
-              const d = this._dominantPhase(
-                [c.power_l1, c.power_l2, c.power_l3],
-                [c.current_l1, c.current_l2, c.current_l3]);
-              return { sparkId: d.id, sparkPhase: d.label };
+              return {
+                sparkId: this._dominantPhase(
+                  [c.power_l1, c.power_l2, c.power_l3],
+                  [c.current_l1, c.current_l2, c.current_l3]).id,
+              };
             })()
           : { sparkId: c.power }),
         circuit: c,
@@ -2401,30 +2397,67 @@ export class ElectricityPanelCard extends LitElement {
       <svg class="ph3-spark" viewBox="0 0 100 ${H}" preserveAspectRatio="none">${g}</svg>`;
   }
 
+  /**
+   * One module expanded into the series worth comparing.
+   *
+   * A 3-phase module contributes three — comparing the main breaker against a
+   * 3-phase circuit is a question about phases ("does the kitchen load the same
+   * phase the boiler does"), and collapsing each side to one curve throws away
+   * exactly the answer. Single-phase modules contribute one.
+   */
+  private _moduleSeries(m: PanelModule): Array<{
+    key: string; label: string; entityId?: string; watts: number; color: string;
+  }> {
+    const c = m.circuit;
+    const mm = this._config.main_meter;
+    const per: Array<string | undefined> = c
+      ? [c.power_l1, c.power_l2, c.power_l3]
+      : [mm?.power_l1, mm?.power_l2, mm?.power_l3];
+
+    if (per.some(Boolean)) {
+      return per.map((id, i) => ({
+        key: `${m.id}:L${i + 1}`,
+        label: `L${i + 1}`,
+        entityId: id,
+        watts: this._watts(id),
+        color: `var(--ep-l${i + 1})`,
+      }));
+    }
+    return [{ key: m.id, label: '', entityId: m.sparkId, watts: m.watts, color: 'var(--ep-neutral)' }];
+  }
+
   private _renderPanelCompare(picked: PanelModule[]): TemplateResult {
-    const paths = picked.map(m => (m.sparkId ? this._sparkPaths(m.sparkId) : undefined));
+    const groups = picked.map(m => ({ m, series: this._moduleSeries(m) }));
+    const flat = groups.flatMap(g => g.series.map(sv => ({ ...sv, m: g.m })));
+    const paths = flat.map(e => (e.entityId ? this._sparkPaths(e.entityId) : undefined));
     const gMax = Math.max(...paths.map(p => p?.vMax ?? 0), 0);
     const gMin = Math.min(...paths.map(p => p?.vMin ?? 0), 0);
     const shared = this._panelSharedY;
+
+    // Když je v porovnání aspoň jeden 3f modul, drž mřížku na třech sloupcích —
+    // jinak se L1/L2/L3 jednoho jističe rozlomí přes dva řádky a porovnání
+    // "sedí kuchyň na stejné fázi jako bojler" se čte mnohem hůř.
+    const tri = groups.some(g => g.series.length === 3);
     return html`
-      <div class="cmp-grid">
-        ${picked.map((m, i) => {
-          const p = paths[i];
-          const localMax = p?.vMax ?? 0;
+      <div class="cmp-grid ${tri ? 'tri' : ''}">
+        ${flat.map((e, i) => {
+          const localMax = paths[i]?.vMax ?? 0;
           return html`
             <div class="cmp-cell">
               <div class="cmp-head">
-                ${m.position ? html`<span class="cmp-num">${m.position}</span>` : nothing}
-                <span class="cmp-name">${m.name}</span>
-                <span class="cmp-val">${this._fmtW(m.watts)}</span>
+                ${e.m.position ? html`<span class="cmp-num">${e.m.position}</span>` : nothing}
+                <span class="cmp-name">${e.m.name}</span>
+                ${e.label
+                  ? html`<span class="cmp-ph ${e.label.toLowerCase()}">${e.label}</span>`
+                  : nothing}
+                <span class="cmp-val">${this._fmtW(e.watts)}</span>
               </div>
               <div class="cmp-scale">
-                ${m.sparkPhase ? html`<span class="cmp-ph">${m.sparkPhase}</span> · ` : nothing}max
-                ${this._fmtW(shared ? gMax : localMax)}${shared ? html` · ${this._t('shared_axis')}` : nothing}
+                max ${this._fmtW(shared ? gMax : localMax)}${shared ? html` · ${this._t('shared_axis')}` : nothing}
               </div>
               ${shared
-                ? this._renderScaledSpark(m.sparkId, gMin, gMax, 'var(--ep-neutral)')
-                : html`<div class="cmp-plain">${this._renderSparkline(m.sparkId, true)}</div>`}
+                ? this._renderScaledSpark(e.entityId, gMin, gMax, e.color)
+                : html`<div class="cmp-plain">${this._renderSparkline(e.entityId, true)}</div>`}
             </div>`;
         })}
       </div>`;
@@ -2916,7 +2949,11 @@ export class ElectricityPanelCard extends LitElement {
         var(--ep-metal-edge) calc(100% - 3px) 100%);
       box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.3); }
     .rail:last-of-type { margin-bottom: 0; }
-    .rail-mods { display: flex; gap: 3px; }
+    /* Jedna dlouhá lišta se na úzkém dashboardu nesmí zmáčknout pod čitelnou
+       šířku modulu — radši ať se dá odrolovat, stejně jako se v reálu díváš
+       po liště zleva doprava. */
+    .rail { overflow-x: auto; scrollbar-width: thin; }
+    .rail-mods { display: flex; gap: 3px; min-width: min-content; }
     /* Neobsazené pozice na poslední liště. Bez nich by flex roztáhl poslední
        modul přes celou šířku a moduly by na každé liště měly jinou velikost —
        reálný rozvaděč má naopak modul vždy stejně široký a lištu dojetou. */
@@ -3039,6 +3076,8 @@ export class ElectricityPanelCard extends LitElement {
 
     /* ── porovnání víc modulů ── */
     .cmp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+    .cmp-grid.tri { grid-template-columns: repeat(3, 1fr); }
+    @container (max-width: 560px) { .cmp-grid.tri { grid-template-columns: 1fr; } }
     .cmp-cell { background: var(--ep-bg); border: 1px solid var(--ep-border);
       border-radius: var(--ep-r-md); padding: 9px 10px; }
     .cmp-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
@@ -3049,7 +3088,11 @@ export class ElectricityPanelCard extends LitElement {
       font-variant-numeric: tabular-nums; }
     .cmp-scale { font-size: 9px; color: var(--ep-text-dim); margin-bottom: 2px;
       font-variant-numeric: tabular-nums; }
-    .cmp-ph { font-weight: 700; color: var(--ep-text-mid); }
+    .cmp-ph { font-size: 9px; font-weight: 700; letter-spacing: .3px; padding: 1px 4px;
+      border-radius: var(--ep-r-sm); flex-shrink: 0; }
+    .cmp-ph.l1 { background: rgba(139,126,232,.18); color: var(--ep-l1); }
+    .cmp-ph.l2 { background: rgba(69,184,172,.18); color: var(--ep-l2); }
+    .cmp-ph.l3 { background: rgba(91,141,239,.18); color: var(--ep-l3); }
     .cmp-cell .ph3-spark { height: 48px; }
     .cmp-plain .sparkline-wrap { height: 48px; margin-top: 0; }
 
