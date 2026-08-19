@@ -5,6 +5,136 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.4.0] — 2026-08-19
+*Balíček B z `docs/DESIGN-REVIEW.md` — hierarchie a rytmus. Opět beze změny
+chování: stejná data, stejné selektory, jen tokeny a rozestupy.*
+
+### 🎨 Changed
+
+- **Tři úrovně povrchu místo jedné.** Hlavní měřič, 3f okruh i 1f jistič měly
+  identický kontejner (stejný povrch, okraj, radius i padding), takže
+  hierarchii nesl jen textový `.section-label`. Nově: hlavní měřič má stín a
+  **žádný okraj**, okruhy povrch + okraj, jističe jen okraj — úroveň je vidět
+  periferním viděním.
+- **Vnořené buňky jsou nově světlejší než rodič.** `.phase-cell` a
+  `.circuit-spark-wrap` používaly `--ep-bg` uvnitř `--ep-surface`, tedy tmavší
+  než rodič — četlo se to jako díra ve kartě, ne jako vystupující prvek. Nový
+  token `--ep-surface-2`. Na světlém tématu se vztah správně obrací (bloky
+  šedé, vnořené buňky bílé).
+- **Typografická škála z devíti velikostí na pět.** Bylo 8/9/10/10/11/11/12/12/14
+  plus 20/22/24 — rozdíl 10 vs. 11 px se nečte jako hierarchie, jen jako
+  nekonzistence. Nově `--ep-fs-micro/meta/body/sub/hero` = 10/11/13/16/24.
+  Nejviditelnější důsledek: hodnota fáze (`.phase-power`) povýšila ze 14 px
+  tlumené šedi na 16 px v `--ep-text` — je to primární údaj, ne popisek.
+- **Tvarosloví sjednoceno.** Sedm hodnot `border-radius` (3/4/5/6/8/9/12) na tři
+  (`--ep-r-sm` 4, `--ep-r-md` 8, `--ep-r-pill`); pět výšek pruhů (2/3/3/4/8) na
+  dvě — 3 px inline (`.srow-track`, `.load-track`), 6 px blok (`.hdo-prog`,
+  `.timeline-bar`, `.cost-stack`). Okraje `0.5px` → `1px`; půlpixel se na
+  různých DPI vykresloval nekonzistentně.
+- **Rozestupy na mřížce po 4 px** místo dosavadních 1/2/3/4/5/6/7/8/10/12/14.
+- **`font-variant-numeric: tabular-nums` všude, kde se čísla mění v čase** —
+  metriky, fázové hodnoty, náklady, popisky sparklinů, délky slotů. Dřív to
+  bylo jen na dvou místech, takže se hodnoty při každé aktualizaci mírně
+  posouvaly do stran.
+- **`--ep-accent` zesílen** z `#6b7db3` na `#7aa2e3`. Po balíčku A nese akcent
+  i stav „zapnuto", takže musí být čitelný na první pohled; `--ep-badge-*`
+  odvozeno od něj. `.meter-title` naopak zešedl na `--ep-text-mid` — nadpis
+  sekce nemusí být barevný.
+
+### ➕ Added
+
+- Tokeny `--ep-surface-2`, `--ep-shadow`, `--ep-fs-*`, `--ep-r-*` v obou
+  paletách (zabudovaná tmavá i `follow_theme`).
+
+### Cena
+
+Karta je vyšší o ~15 % (1003 → 1151 px na 960px širokém dashboardu, měřeno na
+sestavené kartě v obou stavech). Je to cena za vzdušnější rozestupy a větší
+primární hodnoty. Zamýšlená odpověď je volitelný `density: compact` (ROADMAP
+5.5), ne návrat k dosavadní hustotě.
+
+---
+
+## [5.3.0] — 2026-08-19
+*Balíček A z `docs/DESIGN-REVIEW.md` — barevná disciplína. Žádná změna chování,
+jen barvy: co bylo vidět, je vidět dál, ale každá barva teď znamená jednu věc.*
+
+### 🎨 Changed
+
+Zjištění z rozboru: `#22c55e` nesla na kartě současně šest nesouvisejících
+významů (nízký tarif, sepnutý spínač, zapnutá entita, zapnutý okruh přes levý
+okraj, barva sparklinu, segment nákladů). Když barva znamená všechno,
+nesignalizuje nic. Nové pravidlo: **zelená a červená výhradně tarif, amber
+výhradně varování, stav a průběhy neutrálně.**
+
+- **Stav „zapnuto" už není zelený.** `.toggle.on` bylo `#16a34a` a
+  `.status-dot.on` `#22c55e` — obojí nově `var(--ep-accent)`. „Zapnuto" je
+  interakce, ne tarif.
+- **Zelený levý okraj u zapnutého okruhu zrušen.** `.circuit-card.is-on` a
+  `.three-phase-card.is-on` kreslily 2px zelený okraj, ale stav už nesla
+  stavová tečka i přepínač — tři signály pro jeden bit. Navíc u kritického
+  zapnutého okruhu amber okraj zelený stejně přebil, takže jeden signál tiše
+  mizel. Levý okraj teď znamená **výhradně `critical`** a je jednoznačný.
+  Třída `.is-on` zůstává v DOM kvůli `card-mod`, jen už nic nekreslí.
+- **Barva zátěže: neutrál → amber → červená.** `_loadColor()` vracelo pod 55 %
+  zelenou, takže každý klidný okruh vypadal jako signál. Nově pod 15 %
+  `var(--ep-neutral)`, do 55 % `var(--ep-accent)`, pak beze změny amber a
+  červená. Prahy pro varování se nemění.
+- **Výchozí `sparkline_color` je `#7c8ba1`** (neutrální modrošedá) místo
+  `#ef4444`. Červená sparklinu byla stejná jako vysoký tarif a chybové stavy,
+  přitom průběh spotřeby je kontext, ne signál. Explicitně nastavená barva
+  v konfiguraci se nemění.
+- **`.nt-hint` už není amber, ale akcentní.** Tip „za chvíli začne NT" je
+  informace, ne varování — amber zůstává vyhrazený zastaralým datům,
+  přetížení a `critical`.
+
+### ➕ Added
+
+- Nový token `--ep-neutral` v obou paletách (zabudovaná tmavá i `follow_theme`)
+  pro prvky, které jsou kontext, ne signál.
+
+---
+
+## [5.2.2] — 2026-08-19
+*Oprava `follow_theme` — napevno zadané barvy, které se nemapovaly na světlé HA téma.*
+
+### 🐞 Fixed
+
+- **`follow_theme: true` byl jen poloviční.** Mapovaly se `--ep-*` proměnné,
+  ale sedm hodnot zůstávalo napevno v CSS/kódu a na světlém tématu byly
+  nečitelné nebo úplně neviditelné. Nešlo o estetiku — část karty na světlém
+  tématu prostě nešla přečíst.
+  - `.phase-power` bylo `#a0aec0`; na bílé kartě to je kontrast ~1.9:1, tedy
+    pod hranicí čitelnosti. Nově `var(--ep-text-mid)` — v zabudované tmavé
+    paletě je to `#94a3b8`, tedy prakticky totéž co dosavadní `#a0aec0`,
+    takže tmavé téma se opticky nemění.
+  - `.spark-lbl-max` / `.spark-lbl-min` byly `rgba(255,255,255,.75)` a
+    `rgba(255,255,255,.45)` — na světlém tématu bílá na bílé, popisky min/max
+    u sparklinů zmizely beze stopy. Nově `var(--ep-text-mid)` /
+    `var(--ep-text-dim)`; halo přes `--ep-bg` zůstává, právě ono je drží
+    čitelné přes graf v obou tématech.
+  - `.spark-hover-line` byla `rgba(255,255,255,.35)` → `var(--ep-text-dim)`.
+  - `.timeline-now` (ryska „teď" v HDO timeline) byla `#fff` s černým lemem
+    po stranách — na světlém tématu invertovaná. Nově `var(--ep-text)` s
+    prstencem v `--ep-bg`.
+  - `.toggle.off`, `.status-dot.off` a `.status-dot.none` byly `#374151`,
+    což je na světlém pozadí těžká tmavá šeď. Nově `var(--ep-text-faint)`
+    (pod `follow_theme` se mapuje na `--disabled-text-color`).
+
+### 🎨 Changed
+
+- **Výchozí hodnota `sparkline_ref_color` je nově `var(--ep-text-faint)`**
+  místo `rgba(255,255,255,0.35)`. Explicitně nastavená barva v konfiguraci
+  se nemění.
+- **Výchozí hodnota `age_ok_color` je nově `var(--ep-text-faint)`** místo
+  `#374151`. Ta hodnota měla znamenat „tiché, čerstvé", ale na světlém tématu
+  z ní byla výrazná tmavá šeď — přesně naopak. Explicitně nastavená barva
+  se nemění.
+- Editor u obou barev ukazuje hint „Leave unset to follow the theme" a jeho
+  swatch už nesugeruje bílou jako výchozí.
+
+---
+
 ## [5.2.1] — 2026-08-13
 *Design pass — review na živém dashboardu (`living-room/electricity`), viz design-critique v konverzaci.*
 

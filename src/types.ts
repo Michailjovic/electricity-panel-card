@@ -1,4 +1,4 @@
-export const EP_VERSION = '5.2.1';
+export const EP_VERSION = '5.4.0';
 
 // ── Home Assistant types ────────────────────────────────────────────────────
 
@@ -163,13 +163,19 @@ export interface ElectricityPanelConfig {
   circuits?: Circuit[];
   /** History window for sparkline graphs in 3-phase phase cells (hours, 1–24, default 3) */
   graph_hours?: number;
-  /** Sparkline line / fill colour — any CSS colour string (default: #ef4444) */
+  /** Sparkline line / fill colour — any CSS colour string (default: #7c8ba1,
+   *  a neutral blue-grey). It used to be #ef4444, the same red as high tariff
+   *  and error states; the graph is context, not a signal. Must be a concrete
+   *  colour, not `var(...)` — it goes into SVG presentation attributes. */
   sparkline_color?: string;
   /** Where min/max labels appear: left (start of period) | right (current end) | none */
   sparkline_labels?: 'left' | 'right' | 'none';
   /** Draw a horizontal dashed reference line at the min and max values */
   sparkline_ref_line?: boolean;
-  /** Colour of the dashed reference lines — CSS colour string */
+  /** Colour of the dashed reference lines — CSS colour string.
+   *  Unset follows the theme (`var(--ep-text-faint)`); it used to default to
+   *  semi-transparent white, which was invisible under `follow_theme` on a
+   *  light HA theme. */
   sparkline_ref_color?: string;
   /** Show sparkline on main meter phase cells (default: true) */
   sparkline_main_meter?: boolean;
@@ -191,7 +197,8 @@ export interface ElectricityPanelConfig {
   age_warn_minutes?: number;
   /** Minutes since last update before badge turns red (default: 15) */
   age_stale_minutes?: number;
-  /** Badge colour when data is fresh */
+  /** Badge colour when data is fresh. Unset follows the theme
+   *  (`var(--ep-text-faint)`) so "quiet" stays quiet in dark and light alike. */
   age_ok_color?: string;
   /** Badge colour at warn threshold */
   age_warn_color?: string;

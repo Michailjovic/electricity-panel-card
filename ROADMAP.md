@@ -169,6 +169,76 @@ přesnou `change` hodnotu (bez aproximace mean × doba).
 
 ---
 
+## Fáze 5 — Vizuální redesign → v5.2.2 … v5.5.0
+
+Vychází z `docs/DESIGN-REVIEW.md` (rozbor z 2026-08-19). Jádro zjištění: karta
+nepůsobí přeplácaně počtem prvků, ale tím, že spolu příliš prvků soupeří o
+stejnou barvu — `#22c55e` nesla šest nesouvisejících významů, `#f59e0b` čtyři.
+
+Mockupy: `docs/mockup-design-A-B.html` (před/po pro A+B),
+`docs/mockup-koncepty.html` (čtyři koncepty vzhledu, vybrán „Rozvaděč").
+
+### 5.1 Oprava `follow_theme` → v5.2.2
+
+Funkční chyba, ne estetika: sedm napevno zadaných barev se nemapovalo na
+světlé HA téma, takže část karty na něm nešla přečíst.
+
+- [x] `.phase-power`, `.spark-lbl-max/min`, `.spark-hover-line`,
+      `.timeline-now`, `.toggle.off`, `.status-dot.off/.none` → theme proměnné
+- [x] Runtime defaulty `sparkline_ref_color` a `age_ok_color` → theme proměnné
+- [x] Editor: hint „Leave unset to follow the theme", swatch už nesugeruje bílou
+- [x] Ověřeno na sestavené kartě v obou tématech (render harness, ne jen mockup)
+
+### 5.2 Balíček A — barevná disciplína → v5.3.0
+
+Pravidlo: **jedna barva = jeden význam.**
+
+- [x] Zelená/červená výhradně tarif; amber výhradně varování
+      (`.nt-hint` přebarven z amber na akcent — je to informace, ne varování)
+- [x] Stav zapnuto → `--ep-accent` (dnes `#16a34a`), status-dot tamtéž
+- [x] Zrušit zelený `.circuit-card.is-on` levý okraj — stav už nesou tečka
+      a přepínač; `border-left` zůstane výhradně pro `critical`
+- [x] `_loadColor` → neutrál → amber → červená (žádná zelená pod 55 %)
+- [x] Výchozí `sparkline_color` → neutrální modrošedá `#7c8ba1`
+- [x] Nový token `--ep-neutral` v obou paletách
+
+### 5.3 Balíček B — hierarchie a rytmus → v5.4.0
+
+- [x] Tři úrovně povrchu; vnořené buňky **světlejší** než rodič
+      (nový token `--ep-surface-2`; na světlém tématu se vztah obrací)
+- [x] Elevace: hlavní měřič stín bez okraje, okruhy povrch+okraj, jističe okraj
+- [x] Typografická škála 9 velikostí → 5 (10/11/13/16/24)
+- [x] Radius 4/8/999, výšky tracků 3 px inline / 6 px blok, spacing po 4 px
+- [x] `tabular-nums` všude, kde se čísla mění v čase
+- [x] Okraje `0.5px` → `1px`, `--ep-accent` zesílen na `#7aa2e3`
+- [x] Ověřeno: karta vyrostla o ~15 % (1003 → 1151 px) — viz 5.5
+
+### 5.4 `view: panel` — rozvaděč na DIN liště → v5.5.0
+
+Nový **volitelný** režim; `view: classic` zůstává výchozí.
+
+- [ ] Nová config pole: `position` a `phase` u okruhu, blok `panel:`
+      (`rail_size`, `main_breaker`, `module_spark`)
+- [ ] Modul jističe: páčka (červená = zapnuto, konvence evropských jističů),
+      hladina zatížení, fázový proužek, číslo pozice; 3f jistič = 3 moduly
+- [ ] Grafy ve třech úrovních: mikro-graf v modulu → detail s velkým grafem →
+      porovnání více modulů na společné časové ose s přepínačem společné osy Y
+- [ ] 3f detail ukazuje L1/L2/L3 vedle sebe na společném měřítku
+- [ ] Zařízení za jističem v detailu (skupiny, kanály, „hloupá" jako poznámky)
+- [ ] Fázová bilance u hlavního jističe: průměr/špička za 24 h / 7 dní / 30 dní
+      + největší odběry na fázi. **Záměrně bez automatického návrhu přerovnání**
+      — topná sezóna a léto mají jiný profil, jednorázová rada by lhala.
+- [ ] Pořadí v tomto režimu: tarif + timeline dne → rozvaděč → detail →
+      rozvrh a náklady (timeline je jen jednou, nahoře)
+
+### 5.5 Hustota → zvážit po 5.3
+
+- [ ] `density: compact | normal` — balíček B sám zvedá výšku karty o ~14 %;
+      compact (jistič = jeden řádek) je zamýšlená odpověď, ne návrat k dnešnímu
+      rozestupu
+
+---
+
 ## Odloženo / zamítnuto
 
 | Položka | Stav | Poznámka |
@@ -188,4 +258,11 @@ přesnou `change` hodnotu (bez aproximace mean × doba).
 | 1 — testy + midnight merge | 5.2.0 | minor |
 | 2 — rozvrh z entity | 5.3.0 | minor |
 | 3 — statistiky + náklady | 5.4.0+ | minor |
+| 5.1 — oprava follow_theme | 5.2.2 | patch (bugfix) |
+| 5.2 — balíček A (barvy) | 5.3.0 | minor |
+| 5.3 — balíček B (hierarchie) | 5.4.0 | minor |
+| 5.4 — view: panel | 5.5.0 | minor |
 | 4 — publikace | 6.0.0 | major (public release) |
+
+> Pozn.: řádky Fází 1–3 jsou původní plán, ne to, co se skutečně vydalo —
+> Fáze 1–3 doběhly v řadě 5.2.x. Verze u Fáze 5 odpovídají realitě.

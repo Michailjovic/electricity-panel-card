@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Electricity Panel Card — 4 koncepty vzhledu</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   STRÁNKA (není součástí karty)
+   ═══════════════════════════════════════════════════════════════════════════ */
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 18px 16px 60px;
+  font-family: Roboto, -apple-system, "Segoe UI", system-ui, sans-serif;
+  background: #08090d; color: #c3ccda;
+}
+body.light { background: #e9ebef; color: #37414f; }
+.wrap { max-width: 1000px; margin: 0 auto; }
+.page-head h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; letter-spacing: -.3px; }
+.page-head p  { font-size: 12.5px; margin: 0 0 16px; opacity: .6; line-height: 1.55; }
+.page-head code { font-size: 11.5px; padding: 1px 5px; border-radius: 4px; background: rgba(127,127,127,.18); }
+
+.controls {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 18px;
+  padding: 9px 11px; border-radius: 10px;
+  background: rgba(127,127,127,.09); border: 1px solid rgba(127,127,127,.16);
+}
+.ctl-label { font-size: 10px; text-transform: uppercase; letter-spacing: .7px; opacity: .45; }
+.ctl-group { display: flex; gap: 3px; padding: 3px; border-radius: 8px; background: rgba(127,127,127,.12); }
+.ctl-group button {
+  font: inherit; font-size: 11.5px; font-weight: 500; padding: 5px 11px;
+  border: none; border-radius: 6px; cursor: pointer; background: transparent; color: inherit;
+  opacity: .55; transition: all .15s; white-space: nowrap;
+}
+.ctl-group button:hover { opacity: .85; }
+.ctl-group button.on { background: rgba(127,127,127,.3); opacity: 1; }
+
+.concept-head { margin: 0 0 12px; }
+.concept-head h2 { font-size: 15px; font-weight: 600; margin: 0 0 3px; letter-spacing: -.2px; }
+.concept-head .yaml {
+  display: inline-block; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px; padding: 2px 7px; border-radius: 5px; margin-bottom: 6px;
+  background: rgba(127,127,127,.15); opacity: .8;
+}
+.concept-head p { font-size: 12.5px; margin: 0; opacity: .6; line-height: 1.55; max-width: 78ch; }
+.pane { display: none; }
+.pane.on { display: block; }
+
+.why { margin-top: 14px; display: grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 9px; }
+.why div { font-size: 12px; line-height: 1.55; padding: 10px 12px; border-radius: 9px;
+  background: rgba(127,127,127,.07); border: 1px solid rgba(127,127,127,.14); }
+.why b { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; opacity: .75; margin-bottom: 3px; }
+.why.warn div { border-color: rgba(245,158,11,.3); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TOKENY KARTY  (základ = balíčky A + B z předchozího kroku)
+   ═══════════════════════════════════════════════════════════════════════════ */
+.ep {
+  --bg: #0f1116; --surface: #171a21; --surface2: #1f232c;
+  --border: #262b36; --border2: #333a48;
+  --text: #e6eaf2; --mid: #9aa5b8; --dim: #6b7688;
+  --accent: #7aa2e3; --accent-bg: rgba(122,162,227,.14);
+  --nt: #22c55e; --vt: #ef4444; --warn: #f59e0b; --neutral: #7c8ba1;
+  --l1: #8b7ee8; --l2: #45b8ac; --l3: #5b8def;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
+  --metal-a: #2b313d; --metal-b: #1a1e26; --metal-edge: #3c4454;
+  --fs-micro: 10px; --fs-meta: 11px; --fs-body: 13px; --fs-sub: 16px; --fs-hero: 24px;
+  --r-sm: 4px; --r-md: 8px; --r-pill: 999px;
+  background: var(--bg); border-radius: 12px; padding: 14px; color: var(--text);
+  font-size: var(--fs-body);
+}
+body.light .ep {
+  --bg: #f4f5f7; --surface: #ffffff; --surface2: #f7f8fa;
+  --border: rgba(16,24,40,.10); --border2: rgba(16,24,40,.20);
+  --text: #101828; --mid: #475467; --dim: #737d8c;
+  --accent: #2f6fd0; --accent-bg: rgba(47,111,208,.10);
+  --nt: #15803d; --vt: #c02626; --warn: #b45309; --neutral: #8794a8;
+  --l1: #6d5fd6; --l2: #1d8f85; --l3: #2f6fd0;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 4px 12px rgba(16,24,40,.07);
+  --metal-a: #dfe3ea; --metal-b: #c6ccd7; --metal-edge: #aeb6c4;
+}
+.ep .num { font-variant-numeric: tabular-nums; }
+
+/* ── společná hlavička tarifu (kompaktní, sdílí ji každý koncept) ────────── */
+.hdo-strip {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 12px;
+  border-radius: var(--r-md); background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--nt) 26%, transparent); box-shadow: var(--shadow);
+}
+.hdo-strip::before {
+  content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--nt);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--nt) 22%, transparent);
+  animation: pulse 2.5s ease-in-out infinite; flex-shrink: 0;
+}
+@keyframes pulse { 0%,100%{box-shadow:0 0 0 3px color-mix(in srgb,var(--nt) 22%,transparent)} 50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--nt) 7%,transparent)} }
+.hdo-strip .t  { font-size: var(--fs-micro); font-weight: 700; letter-spacing: .8px; text-transform: uppercase; color: var(--nt); }
+.hdo-strip .p  { font-size: var(--fs-meta); color: var(--mid); }
+.hdo-strip .sp { flex: 1; }
+.hdo-strip .cd { font-size: var(--fs-sub); font-weight: 600; color: var(--nt); letter-spacing: -.2px; }
+.hdo-strip .cdl{ font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .6px; color: var(--dim); }
+
+.sec { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .9px; font-weight: 600;
+       color: var(--dim); margin: 18px 0 8px; padding-left: 8px; border-left: 2px solid var(--border2); }
+
+/* ── blok ROZVRH / NÁKLADY — struktura beze změny, jen tokeny A+B ───────── */
+.sblock { background: var(--surface); border-radius: var(--r-md); padding: 12px; margin-bottom: 12px;
+  border: 1px solid var(--border); }
+.sblock-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.sblock-tab { flex: 1; text-align: center; font-size: var(--fs-micro); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .8px; padding: 6px 0; border-radius: var(--r-sm);
+  border: 1px solid var(--border); color: var(--dim); cursor: pointer; user-select: none; }
+.sblock-tab:hover { color: var(--mid); border-color: var(--border2); }
+.sblock-tab.active { background: var(--accent-bg); border-color: transparent; color: var(--accent); }
+
+.s-title { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; cursor: pointer; margin-bottom: 12px; }
+.s-when { font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--mid); }
+.s-day { font-size: var(--fs-micro); font-weight: 500; padding: 2px 8px; border-radius: var(--r-pill);
+  background: var(--accent-bg); color: var(--accent); }
+.s-nav { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.s-left { font-size: var(--fs-meta); color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.s-btn { font: inherit; font-size: var(--fs-micro); font-weight: 500; padding: 3px 10px; border-radius: var(--r-pill);
+  border: 1px solid var(--border2); background: transparent; color: var(--accent); cursor: pointer; }
+.s-chev { color: var(--dim); display: flex; }
+
+.s-timeline { display: flex; height: 6px; border-radius: var(--r-pill); overflow: hidden;
+  margin-bottom: 12px; gap: 1px; position: relative; }
+.s-seg { border-radius: 1px; }
+.s-seg.nt { background: var(--nt); } .s-seg.vt { background: color-mix(in srgb, var(--vt) 40%, transparent); }
+.s-seg.past { opacity: .32; }
+.s-now { position: absolute; top: -2px; bottom: -2px; width: 3px; border-radius: var(--r-pill);
+  background: var(--text); box-shadow: 0 0 0 1.5px var(--surface); }
+
+.s-rows { display: flex; flex-direction: column; gap: 1px; }
+.s-row { display: grid; grid-template-columns: 26px minmax(0,100px) 1fr auto; align-items: center;
+  gap: 8px; padding: 5px 6px; border-radius: var(--r-sm); }
+.s-row.past { opacity: .32; } .s-row.future { opacity: .62; }
+.s-row.active.nt { background: color-mix(in srgb, var(--nt) 9%, transparent); }
+.s-row.future.nt { background: color-mix(in srgb, var(--nt) 4%, transparent); }
+.s-tar { font-size: var(--fs-micro); font-weight: 700; letter-spacing: .3px; padding: 1px 4px;
+  border-radius: var(--r-sm); text-align: center; }
+.s-tar.nt { background: color-mix(in srgb, var(--nt) 16%, transparent); color: var(--nt); }
+.s-tar.vt { background: color-mix(in srgb, var(--vt) 14%, transparent); color: var(--vt); }
+.s-time { font-size: var(--fs-meta); font-weight: 500; color: var(--mid); font-variant-numeric: tabular-nums; }
+.s-track { height: 3px; background: var(--border); border-radius: var(--r-pill); overflow: hidden; }
+.s-fill { height: 100%; border-radius: var(--r-pill); }
+.s-fill.nt { background: var(--nt); } .s-fill.vt { background: var(--vt); }
+.s-nowchip { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .6px; font-weight: 700;
+  padding: 2px 7px; border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--nt) 16%, transparent); color: var(--nt); }
+.s-dur { font-size: var(--fs-micro); color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
+
+.c-pills { display: flex; gap: 6px; margin-bottom: 12px; }
+.c-pill { font: inherit; font-size: var(--fs-micro); font-weight: 500; padding: 4px 11px;
+  border-radius: var(--r-pill); border: 1px solid var(--border2); background: transparent;
+  color: var(--accent); cursor: pointer; }
+.c-pill.active { background: var(--accent-bg); border-color: transparent; }
+.c-stack { display: flex; height: 8px; border-radius: var(--r-pill); overflow: hidden; margin-bottom: 8px; }
+.c-seg.nt { background: var(--nt); } .c-seg.vt { background: var(--vt); }
+.c-legend { display: flex; justify-content: space-between; gap: 10px; font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums; }
+.c-leg.nt { color: var(--nt); } .c-leg.vt { color: var(--vt); }
+.c-total { font-size: var(--fs-hero); font-weight: 600; letter-spacing: -.6px; margin: 12px 0 2px;
+  font-variant-numeric: tabular-nums; }
+.c-est { font-size: var(--fs-meta); color: var(--dim); margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--border); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   KONCEPT 1 — ROZVADĚČ (DIN lišta)
+   ═══════════════════════════════════════════════════════════════════════════ */
+.rail-wrap { background: var(--surface); border-radius: var(--r-md); padding: 14px; box-shadow: var(--shadow); }
+.rail-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.rail-top .lbl { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .9px; font-weight: 600; color: var(--dim); }
+.rail-top .val { font-size: var(--fs-hero); font-weight: 600; letter-spacing: -.6px; }
+.rail-top .sub { font-size: var(--fs-meta); color: var(--dim); text-align: right; }
+
+/* přípojnice — proud teče shora do lišty */
+.busbar { height: 7px; border-radius: var(--r-pill); margin-bottom: 3px; position: relative; overflow: hidden;
+  background: color-mix(in srgb, var(--nt) 18%, var(--surface2)); }
+.busbar::after {
+  content: ''; position: absolute; inset: 0;
+  background: repeating-linear-gradient(90deg,
+    transparent 0 14px, color-mix(in srgb, var(--nt) 55%, transparent) 20px 30px, transparent 36px 50px);
+  animation: bus 2.1s linear infinite;
+}
+@keyframes bus { to { transform: translateX(50px); } }
+.bus-note { font-size: var(--fs-micro); color: var(--dim); margin-bottom: 10px; text-align: right; }
+
+.rail { position: relative; padding: 13px 8px 9px; margin-bottom: 9px; border-radius: 5px;
+  background: linear-gradient(180deg, var(--metal-edge) 0 3px, var(--metal-a) 3px 9px,
+              var(--metal-b) 9px calc(100% - 9px), var(--metal-a) calc(100% - 9px) calc(100% - 3px),
+              var(--metal-edge) calc(100% - 3px) 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.3);
+}
+.rail-mods { display: flex; gap: 3px; }
+
+/* modul jističe — v tmavém tématu antracitový (takové jističe reálně existují),
+   ve světlém klasicky bílý; tvar, páčka a číslování nesou identitu v obou */
+.ep { --mod-a: #2b303b; --mod-b: #20242d; --mod-chrome: #14171d;
+      --mod-text: #e6eaf2; --mod-dim: #98a3b5; }
+body.light .ep { --mod-a: #fdfdfe; --mod-b: #dee3eb; --mod-chrome: #b9c0cc;
+      --mod-text: #1c2230; --mod-dim: #55606f; }
+
+.mod { flex: 1 1 0; min-width: 38px; cursor: pointer; border-radius: 3px; overflow: hidden;
+  background: linear-gradient(180deg, var(--mod-a), var(--mod-b)); position: relative;
+  box-shadow: 0 1px 3px rgba(0,0,0,.45); transition: transform .12s, box-shadow .12s; }
+.mod.w3 { flex: 3 3 0; }
+.mod:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,.5); }
+.mod.sel  { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mod-lever { height: 24px; display: flex; align-items: center; justify-content: center; gap: 4px;
+  background: var(--mod-chrome); border-bottom: 1px solid rgba(0,0,0,.3); }
+.lv { width: 12px; height: 16px; border-radius: 2px; position: relative; transition: all .18s; }
+.mod.on  .lv { background: #d4423c; box-shadow: inset 0 6px 0 rgba(0,0,0,.2); }
+.mod.off .lv { background: #5b6473; box-shadow: inset 0 -6px 0 rgba(0,0,0,.28); }
+.mod-face { position: relative; height: 68px; padding: 6px 4px 4px; overflow: hidden; }
+/* hladina zatížení — barevná náplň s výraznou hladinou nahoře */
+.mod-fill { position: absolute; left: 0; right: 0; bottom: 0; transition: height .4s;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fillc) 22%, transparent),
+                                      color-mix(in srgb, var(--fillc) 60%, transparent));
+  border-top: 1.5px solid var(--fillc); }
+.mod.off .mod-fill { display: none; }
+.mod-w { position: relative; font-size: 10px; font-weight: 700; color: var(--mod-text); text-align: center;
+         font-variant-numeric: tabular-nums; letter-spacing: -.2px; }
+.mod-nm { position: relative; font-size: 8.5px; line-height: 1.25; color: var(--mod-dim);
+          overflow: hidden; text-align: center; margin-top: 3px; max-height: 22px; word-break: break-word;
+          display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.mod.off .mod-w, .mod.off .mod-nm { opacity: .45; }
+.mod-lock { color: var(--warn); display: flex; }
+.mod-foot { display: flex; align-items: center; justify-content: space-between; gap: 3px;
+  padding: 3px 5px 4px; background: var(--mod-chrome); }
+.mod-num { font-size: 9px; font-weight: 700; color: var(--mod-dim); font-variant-numeric: tabular-nums; }
+.mod-ph  { font-size: 8px; font-weight: 700; letter-spacing: .3px; }
+.mod-ph.l1 { color: var(--l1); } .mod-ph.l2 { color: var(--l2); } .mod-ph.l3 { color: var(--l3); }
+.mod-ph.l3f{ color: var(--mid); }
+.mod-strip { height: 3px; }
+.mod-strip.l1 { background: var(--l1); } .mod-strip.l2 { background: var(--l2); }
+.mod-strip.l3 { background: var(--l3); }
+.mod-strip.l3f{ background: linear-gradient(90deg, var(--l1) 33%, var(--l2) 33% 66%, var(--l3) 66%); }
+.mod.off .mod-strip { opacity: .3; }
+
+.rail-detail { margin-top: 10px; border-radius: var(--r-md); border: 1px solid var(--border);
+  background: var(--surface2); padding: 12px 14px; }
+.rd-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.rd-num { font-size: var(--fs-micro); font-weight: 700; padding: 2px 6px; border-radius: var(--r-sm);
+          background: var(--accent-bg); color: var(--accent); }
+.rd-name { font-size: var(--fs-body); font-weight: 500; flex: 1; }
+.rd-val { font-size: var(--fs-hero); font-weight: 600; letter-spacing: -.6px; }
+.rd-meta { font-size: var(--fs-meta); color: var(--dim); margin-bottom: 8px; }
+.rd-hint { font-size: var(--fs-micro); color: var(--dim); text-align: center; padding: 6px 0; line-height: 1.6; }
+
+/* mikro-graf přímo v modulu — pozadí za hladinou zatížení */
+.mod-spark { position: absolute; left: 0; right: 0; bottom: 0; height: 22px; opacity: .4; pointer-events: none; }
+.mod.off .mod-spark { opacity: .18; }
+.mod.pick { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mod-pin { position: absolute; top: 2px; left: 3px; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 2px var(--mod-chrome); }
+
+/* pruh nástrojů nad grafem */
+.g-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.g-bar .grp { display: flex; gap: 3px; padding: 3px; border-radius: var(--r-md); background: var(--bg); }
+.g-btn { font: inherit; font-size: var(--fs-micro); font-weight: 500; padding: 4px 10px; border: none;
+  border-radius: var(--r-sm); background: transparent; color: var(--dim); cursor: pointer; }
+.g-btn.on { background: var(--accent-bg); color: var(--accent); }
+.g-bar .spacer { flex: 1; }
+.g-chk { display: flex; align-items: center; gap: 6px; font-size: var(--fs-micro); color: var(--dim);
+  cursor: pointer; user-select: none; }
+.g-chk .box { width: 26px; height: 15px; border-radius: var(--r-pill); background: var(--border2);
+  position: relative; transition: background .18s; }
+.g-chk .box::after { content:''; position: absolute; top: 2.5px; left: 2.5px; width: 10px; height: 10px;
+  border-radius: 50%; background: #fff; transition: left .18s; }
+.g-chk.on .box { background: var(--accent); } .g-chk.on .box::after { left: 13.5px; }
+
+/* porovnávací mřížka grafů */
+.cmp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.cmp-cell { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 9px 10px; }
+.cmp-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+.cmp-num { font-size: 9px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.cmp-name { font-size: var(--fs-meta); color: var(--mid); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmp-val { font-size: var(--fs-meta); font-weight: 600; font-variant-numeric: tabular-nums; }
+.cmp-scale { font-size: 9px; color: var(--dim); font-variant-numeric: tabular-nums; margin-top: 1px; }
+
+.yamlbox { margin-top: 14px; border-radius: var(--r-md); border: 1px solid rgba(127,127,127,.2);
+  background: rgba(127,127,127,.06); overflow: hidden; }
+.yamlbox summary { cursor: pointer; font-size: 12px; font-weight: 600; padding: 10px 13px; list-style: none; }
+.yamlbox summary::marker { content: ''; }
+.yamlbox summary::before { content: '▸ '; opacity: .5; }
+.yamlbox[open] summary::before { content: '▾ '; }
+.yamlbox pre { margin: 0; padding: 0 13px 13px; font-size: 11.5px; line-height: 1.6; overflow-x: auto;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.yamlbox .new { color: #7dd3a0; font-weight: 600; }
+.yamlbox .cm  { opacity: .5; }
+
+
+/* ── mini timeline pod pruhem tarifu ────────────────────────────────────── */
+.hdo-strip.with-mini { margin-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.hdo-mini { background: var(--surface); border: 1px solid var(--border); border-top: none;
+  border-radius: 0 0 var(--r-md) var(--r-md); padding: 10px 12px 8px; margin-bottom: 12px;
+  box-shadow: var(--shadow); }
+.hdo-mini-lbl { font-size: var(--fs-micro); color: var(--dim); margin-top: 6px; text-align: right; }
+
+/* ── 3f detail ──────────────────────────────────────────────────────────── */
+.ph3-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 4px; }
+@media (max-width: 620px) { .ph3-grid { grid-template-columns: 1fr; } }
+.ph3-cell { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 9px 10px; position: relative; overflow: hidden; }
+.ph3-cell::before { content:''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+.ph3-cell.l1::before { background: var(--l1); }
+.ph3-cell.l2::before { background: var(--l2); }
+.ph3-cell.l3::before { background: var(--l3); }
+.ph3-head { display: flex; align-items: baseline; justify-content: space-between; }
+.ph3-lbl { font-size: var(--fs-micro); font-weight: 700; letter-spacing: .9px; }
+.ph3-cell.l1 .ph3-lbl { color: var(--l1); }
+.ph3-cell.l2 .ph3-lbl { color: var(--l2); }
+.ph3-cell.l3 .ph3-lbl { color: var(--l3); }
+.ph3-pct { font-size: var(--fs-micro); color: var(--dim); }
+.ph3-val { font-size: var(--fs-sub); font-weight: 600; letter-spacing: -.3px; margin-top: 1px; }
+.ph3-sub { font-size: var(--fs-micro); color: var(--dim); margin-top: 1px; }
+.ph3-track { height: 3px; background: var(--border); border-radius: var(--r-pill); overflow: hidden; margin: 7px 0 3px; }
+.ph3-track i { display: block; height: 100%; border-radius: var(--r-pill); }
+.ph3-note { font-size: var(--fs-micro); color: var(--dim); margin-top: 6px; text-align: center; }
+
+/* ── fázová bilance ─────────────────────────────────────────────────────── */
+.bal { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.bal-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.bal-lbl { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .9px; font-weight: 600; color: var(--dim); }
+.bal-bars { display: flex; flex-direction: column; gap: 5px; }
+.bal-row { display: grid; grid-template-columns: 26px 1fr auto auto; align-items: center; gap: 9px; }
+.bal-p { font-size: var(--fs-micro); font-weight: 700; letter-spacing: .6px; }
+.bal-p.l1 { color: var(--l1); } .bal-p.l2 { color: var(--l2); } .bal-p.l3 { color: var(--l3); }
+.bal-track { position: relative; height: 6px; background: var(--border); border-radius: var(--r-pill); }
+.bal-track i.avg { position: absolute; left: 0; top: 0; bottom: 0; border-radius: var(--r-pill); opacity: .75; }
+.bal-track i.mx  { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px;
+  background: var(--text); box-shadow: 0 0 0 1.5px var(--surface2); }
+.bal-n { font-size: var(--fs-micro); color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bal-n.strong { color: var(--mid); font-weight: 600; }
+.bal-msg { display: flex; align-items: center; gap: 6px; font-size: var(--fs-meta); margin-top: 10px; }
+.bal-msg.ok   { color: var(--dim); }
+.bal-msg.warn { color: var(--warn); }
+.bal-msg.bad  { color: var(--vt); }
+.bal-tops { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 10px; }
+@media (max-width: 620px) { .bal-tops { grid-template-columns: 1fr; } }
+.bal-topcol { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 8px 10px; }
+.bal-topl { font-size: var(--fs-micro); font-weight: 700; letter-spacing: .5px; margin-bottom: 4px; }
+.bal-topl.l1 { color: var(--l1); } .bal-topl.l2 { color: var(--l2); } .bal-topl.l3 { color: var(--l3); }
+.bal-topi { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-meta);
+  color: var(--mid); padding: 2px 0; }
+.bal-topi .num { color: var(--dim); }
+.bal-caveat { font-size: var(--fs-micro); color: var(--dim); line-height: 1.6; margin-top: 10px;
+  padding: 8px 10px; border-radius: var(--r-sm); background: var(--bg); border: 1px dashed var(--border2); }
+
+/* ── zařízení za jističem ───────────────────────────────────────────────── */
+.dev-wrap { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.dev-title { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .9px;
+  font-weight: 600; color: var(--dim); margin-bottom: 6px; }
+.dev-empty { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+  font-size: var(--fs-micro); color: var(--dim); text-align: center; }
+.d-group { margin-bottom: 8px; }
+.d-glbl { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .8px; color: var(--dim);
+  padding: 4px 0 3px; }
+.d-gsum { color: var(--accent); font-weight: 600; text-transform: none; letter-spacing: 0; }
+.d-row { display: flex; align-items: center; gap: 8px; padding: 4px 0;
+  border-bottom: 1px solid var(--border); }
+.d-row:last-child { border-bottom: none; }
+.d-row.ch { padding-left: 10px; }
+.d-row.note { opacity: .7; }
+.d-row.note .d-name { font-style: italic; }
+.d-noteico { color: var(--dim); display: flex; flex-shrink: 0; }
+.d-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.d-dot.on   { background: var(--accent); box-shadow: 0 0 0 2.5px var(--accent-bg); }
+.d-dot.off  { background: var(--border2); }
+.d-dot.none { background: transparent; border: 1px solid var(--border2); }
+.d-name { flex: 1; font-size: var(--fs-body); color: var(--mid); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.d-w { font-size: var(--fs-meta); color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.toggle.sm { width: 28px; height: 16px; }
+.toggle.sm::after { width: 11px; height: 11px; top: 2.5px; }
+.toggle.sm.on::after { left: 14px; } .toggle.sm.off::after { left: 3px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   KONCEPT 2 — SBĚRNICE (živé schéma)
+   ═══════════════════════════════════════════════════════════════════════════ */
+.bus-wrap { background: var(--surface); border-radius: var(--r-md); padding: 14px 14px 8px; box-shadow: var(--shadow); }
+.bus-src { display: flex; align-items: center; gap: 10px; margin-bottom: 2px; }
+.bus-src .ico { width: 34px; height: 34px; border-radius: var(--r-md); background: var(--accent-bg);
+  color: var(--accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.bus-src .lbl { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .9px; font-weight: 600; color: var(--dim); }
+.bus-src .val { font-size: var(--fs-hero); font-weight: 600; letter-spacing: -.6px; margin-left: auto; }
+
+.bus-body { position: relative; padding-left: 34px; }
+/* přípojnice se směrem dolů zužuje — nahoře nese součet, dole už jen zbytek */
+.spine { position: absolute; left: 4px; top: 0; bottom: 8px; width: 20px; }
+.spine-seg { position: absolute; border-radius: var(--r-pill); overflow: hidden;
+  background: color-mix(in srgb, var(--nt) 20%, var(--surface2)); }
+.spine-seg::after { content: ''; position: absolute; inset: 0;
+  background: repeating-linear-gradient(180deg, transparent 0 5px,
+    color-mix(in srgb, var(--nt) 95%, transparent) 5px 13px, transparent 13px 19px);
+  animation: spineflow linear infinite; }
+@keyframes spineflow { to { transform: translateY(19px); } }
+
+.brow { position: relative; display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; margin-bottom: 6px; border-radius: var(--r-md);
+  background: var(--surface2); border: 1px solid var(--border); }
+.brow.crit { border-left: 3px solid var(--warn); }
+.tap { position: absolute; left: -22px; top: 50%; width: 23px; height: 3px; transform: translateY(-1.5px);
+  border-radius: var(--r-pill); overflow: hidden; background: var(--border2); }
+.tap.live { background: color-mix(in srgb, var(--nt) 22%, var(--surface2)); }
+.tap.live::after { content:''; position: absolute; inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 3px,
+    var(--nt) 3px 7px, transparent 7px 14px);
+  animation: tapflow linear infinite; }
+@keyframes tapflow { to { transform: translateX(14px); } }
+.bus-off { display: flex; align-items: center; gap: 8px; padding: 9px 12px; margin-top: 2px;
+  border-radius: var(--r-md); background: var(--surface2); border: 1px dashed var(--border2); }
+.bus-off .lbl { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .8px;
+  font-weight: 600; color: var(--dim); flex-shrink: 0; }
+.bus-off .names { font-size: var(--fs-meta); color: var(--dim); flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brow-num { font-size: var(--fs-micro); font-weight: 700; padding: 2px 6px; border-radius: var(--r-sm);
+  background: var(--accent-bg); color: var(--accent); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.brow-body { flex: 1; min-width: 0; }
+.brow-name { font-size: var(--fs-body); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brow-meta { font-size: var(--fs-meta); color: var(--dim); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.brow-val { font-size: var(--fs-sub); font-weight: 600; letter-spacing: -.3px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.brow-val.zero { color: var(--dim); font-weight: 500; }
+.phchip { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: var(--r-sm); flex-shrink: 0; }
+.phchip.l1 { background: color-mix(in srgb, var(--l1) 18%, transparent); color: var(--l1); }
+.phchip.l2 { background: color-mix(in srgb, var(--l2) 18%, transparent); color: var(--l2); }
+.phchip.l3 { background: color-mix(in srgb, var(--l3) 18%, transparent); color: var(--l3); }
+.phchip.l3f{ background: var(--accent-bg); color: var(--accent); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   KONCEPT 3 — TOK (Sankey)
+   ═══════════════════════════════════════════════════════════════════════════ */
+.flow-wrap { background: var(--surface); border-radius: var(--r-md); padding: 14px; box-shadow: var(--shadow); }
+.flow-svg { width: 100%; display: block; overflow: visible; }
+.rib { opacity: .55; }
+.rib-dash { fill: none; stroke-linecap: round; opacity: .9; animation: ribflow linear infinite; }
+@keyframes ribflow { to { stroke-dashoffset: -24; } }
+.flow-lbl { font-size: 11px; fill: var(--text); font-family: inherit; font-variant-numeric: tabular-nums; }
+.flow-lbl.dim { fill: var(--dim); font-size: 10px; }
+.flow-lbl.big { font-size: 15px; font-weight: 600; }
+.flow-node { rx: 2; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   KONCEPT 4 — FÁZE JAKO OSA
+   ═══════════════════════════════════════════════════════════════════════════ */
+.ph-balance { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 10px;
+  border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); }
+.ph-bal-bar { flex: 1; display: flex; height: 10px; border-radius: var(--r-pill); overflow: hidden; gap: 1px; }
+.ph-bal-bar i { display: block; }
+.ph-bal-txt { font-size: var(--fs-meta); color: var(--warn); white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+.ph-bal-lbl { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .8px; font-weight: 600; color: var(--dim); white-space: nowrap; }
+
+.ph-cols { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+@media (max-width: 620px) { .ph-cols { grid-template-columns: 1fr; } }
+.ph-col { background: var(--surface); border-radius: var(--r-md); border: 1px solid var(--border); overflow: hidden; }
+.ph-col-head { padding: 11px 12px 10px; border-bottom: 1px solid var(--border); position: relative; }
+.ph-col-head::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+.ph-col.l1 .ph-col-head::before { background: var(--l1); }
+.ph-col.l2 .ph-col-head::before { background: var(--l2); }
+.ph-col.l3 .ph-col-head::before { background: var(--l3); }
+.ph-name { font-size: var(--fs-micro); font-weight: 700; letter-spacing: .9px; }
+.ph-col.l1 .ph-name { color: var(--l1); } .ph-col.l2 .ph-name { color: var(--l2); } .ph-col.l3 .ph-name { color: var(--l3); }
+.ph-val { font-size: var(--fs-hero); font-weight: 600; letter-spacing: -.6px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.ph-sub { font-size: var(--fs-meta); color: var(--dim); font-variant-numeric: tabular-nums; }
+.ph-load { height: 4px; border-radius: var(--r-pill); background: var(--border); overflow: hidden; margin-top: 9px; }
+.ph-load i { display: block; height: 100%; border-radius: var(--r-pill); }
+.ph-list { padding: 5px 0 6px; }
+.ph-item { display: flex; align-items: center; gap: 7px; padding: 5px 12px; }
+.ph-item + .ph-item { border-top: 1px solid var(--border); }
+.ph-item .n  { font-size: var(--fs-micro); color: var(--dim); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.ph-item .nm { flex: 1; font-size: var(--fs-meta); color: var(--mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ph-item .w  { font-size: var(--fs-meta); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ph-item.zero .w { color: var(--dim); font-weight: 500; }
+.ph-item.zero .nm { opacity: .55; }
+.ph-item .bar { position: absolute; }
+.ph-3f { margin-top: 8px; display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--border); }
+.ph-3f .sp3 { display: flex; gap: 3px; flex: 1; }
+.ph-3f .sp3 span { flex: 1; height: 4px; border-radius: var(--r-pill); }
+
+/* společné drobnosti */
+.toggle { width: 34px; height: 20px; border-radius: var(--r-pill); border: none; cursor: pointer;
+  position: relative; flex-shrink: 0; transition: background .2s; }
+.toggle::after { content:''; position: absolute; top: 3px; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.4); transition: left .2s; }
+.toggle.on { background: var(--accent); } .toggle.on::after { left: 17px; }
+.toggle.off{ background: var(--border2); } .toggle.off::after { left: 3px; }
+.lockico { color: var(--warn); flex-shrink: 0; }
+.svg-ico { display: block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="page-head">
+  <h1>Electricity Panel Card — čtyři koncepty vzhledu</h1>
+  <p>Každý koncept je zamýšlený jako volitelný režim <code>view:</code> v konfiguraci; <code>view: classic</code>
+     zůstane výchozí a beze změny. Všechny čtyři sdílí tokeny z balíčků A + B a stejná data:
+     je nízký tarif, takže běží myčka a bojler — proto je L1 a L2 zatížená a L3 skoro nečinná.</p>
+</div>
+
+<div class="controls">
+  <span class="ctl-label">Koncept</span>
+  <div class="ctl-group" id="cCtl">
+    <button data-c="panel" class="on">1 · Rozvaděč</button>
+    <button data-c="bus">2 · Sběrnice</button>
+    <button data-c="flow">3 · Tok</button>
+    <button data-c="phase">4 · Fáze</button>
+  </div>
+  <span class="ctl-label" style="margin-left:6px">Téma</span>
+  <div class="ctl-group" id="tCtl">
+    <button data-t="dark" class="on">Tmavé</button>
+    <button data-t="light">Světlé</button>
+  </div>
+</div>
+
+<!-- ══ 1 · ROZVADĚČ ══ -->
+<div class="pane on" id="p-panel">
+  <div class="concept-head">
+    <h2>Koncept 1 — Rozvaděč</h2>
+    <div class="yaml">view: panel</div>
+    <p>Karta se tváří jako to, co doopravdy je: řada jističů na DIN liště. Páčka nahoře/dole, zatížení
+       jako hladina stoupající v těle modulu, fázový proužek dole, číslo pozice. Celý rozvaděč na jeden
+       pohled; kliknutím na modul se pod lištou rozbalí detail.</p>
+  </div>
+  <div class="ep" id="ep-panel"></div>
+  <div class="why">
+    <div><b>Proč to funguje</b>Mapuje se 1:1 na fyzický rozvaděč, který máš za dveřmi. Číslo 08/15 na kartě
+      a číslo 08/15 na jističi jsou tentýž objekt — karta přestane být abstrakcí.</div>
+    <div><b>Řeší i hustotu</b>22 pozic ve výšce ~190 px. Dnešní mřížka karet by na totéž potřebovala přes 1 200 px.</div>
+    <div><b>Fázový proužek</b>Fáze je dnes zahrabaná v detailu. Tady je vidět u každého okruhu, takže nevyváženost
+      vyskočí sama od sebe.</div>
+  </div>
+  <div class="why warn" style="margin-top:9px">
+    <div><b>Kompromis</b>Do modulu se vejde jen výkon, zkrácený název a mikro-graf. Přesná čísla
+      (A, V, kWh, Kč) se přesouvají do detailu pod lištou — jedno kliknutí navíc.</div>
+    <div><b>Poznámka k barvě páčky</b>Červená páčka = zapnuto je konvence evropských jističů (červené pole
+      znamená „pod napětím"). Je to jediná výjimka z pravidla „červená = vysoký tarif" a stojí za zvážení,
+      jestli ji nepřebarvit.</div>
+  </div>
+
+  <details class="yamlbox" open>
+    <summary>Jak to vypadá v YAML — co karta potřebuje navíc</summary>
+<pre><span class="cm"># Vzhled sám (lišta, moduly, páčky, hladina) je CSS + DOM uvnitř karty.
+# Z YAML se jen zapne režim a doplní dvě nové položky u okruhu.</span>
+
+type: custom:electricity-panel-card
+<span class="new">view: panel</span>              <span class="cm"># NOVÉ · classic zůstává výchozí</span>
+title: Rozvaděč
+
+hdo:
+  switch: switch.hdo
+  nt_price: 4.61453
+  vt_price: 6.28186
+
+main_meter:
+  power_l1: sensor.hlavni_l1_vykon
+  power_l2: sensor.hlavni_l2_vykon
+  power_l3: sensor.hlavni_l3_vykon
+  energy_today: sensor.hlavni_energie_dnes
+
+<span class="new">panel:</span>                    <span class="cm"># NOVÉ · vlastnosti rozvaděče</span>
+  <span class="new">rail_size: 11</span>           <span class="cm"># modulových šířek na jednu lištu</span>
+  <span class="new">main_breaker: 25</span>        <span class="cm"># jmenovitý proud hlavního jističe (A)</span>
+  <span class="new">module_spark: true</span>      <span class="cm"># mikro-graf uvnitř modulu</span>
+
+circuits:
+  - id: kuchyn_linka
+    name: Kuchyň linka levá
+    <span class="new">position: "08"</span>          <span class="cm"># NOVÉ · číslo pozice v rozvaděči</span>
+    <span class="new">phase: L1</span>               <span class="cm"># NOVÉ · u 1f okruhů se dnes neuvádí</span>
+    max_current: 16          <span class="cm"># už existuje — řídí výšku hladiny</span>
+    power:   sensor.shelly_kuchyn_vykon
+    current: sensor.shelly_kuchyn_proud
+    energy:  sensor.shelly_kuchyn_energie
+    switch:  switch.shelly_kuchyn
+
+  - id: lednicka
+    name: Lednička
+    <span class="new">position: "01"</span>
+    <span class="new">phase: L2</span>
+    critical: true           <span class="cm"># místo páčky visací zámek</span>
+    max_current: 16
+    power: sensor.lednicka_vykon
+
+  - id: varna_deska
+    name: Varná deska
+    <span class="new">position: "V1"</span>
+    phases: 3                <span class="cm"># 3f jistič = modul široký 3 pozice</span>
+    max_current: 25
+    power_l1: sensor.deska_l1_vykon
+    power_l2: sensor.deska_l2_vykon
+    power_l3: sensor.deska_l3_vykon</pre>
+  </details>
+</div>
+
+<!-- ══ 2 · SBĚRNICE ══ -->
+<div class="pane" id="p-bus">
+  <div class="concept-head">
+    <h2>Koncept 2 — Sběrnice</h2>
+    <div class="yaml">view: bus</div>
+    <p>Kartou vede svislá přípojnice a okruhy se z ní odbočují. Po sběrnici i po odbočkách teče animovaný
+       proud — rychlost odpovídá okamžitému výkonu, klidný okruh je tmavý a stojí. Sběrnice je nahoře
+       jasnější než dole, protože nahoře skutečně nese víc proudu.</p>
+  </div>
+  <div class="ep" id="ep-bus"></div>
+  <div class="why">
+    <div><b>Proč to funguje</b>Elektřina je tok — a tohle je jediný z konceptů, kde to karta doslova ukazuje.
+      Periferním viděním poznáš, že něco velkého jede, aniž bys četl čísla.</div>
+    <div><b>Nic se neztratí</b>Řádek okruhu unese všechna dnešní čísla. Je to nejmenší zásah do struktury
+      ze všech čtyř konceptů.</div>
+    <div><b>Kumulativní jas</b>Segment sběrnice nad odbočkou svítí podle součtu výkonu pod ní. Fyzikálně
+      to sedí a je z toho hned vidět, kde se proud „ztrácí".</div>
+  </div>
+  <div class="why warn" style="margin-top:9px">
+    <div><b>Kompromis</b>Trvalá animace na kartě, kterou máš pořád na očích. Musí být opravdu decentní,
+      jinak z toho bude vánoční stromeček — a měla by jít vypnout (<code>flow_animation: false</code>).</div>
+  </div>
+</div>
+
+<!-- ══ 3 · TOK ══ -->
+<div class="pane" id="p-flow">
+  <div class="concept-head">
+    <h2>Koncept 3 — Tok</h2>
+    <div class="yaml">view: flow</div>
+    <p>Sankey diagram: přívod → tři fáze → okruhy. Šířka pruhu je okamžitý výkon, takže poměry vidíš
+       bez čtení. Okruhy pod prahem se slévají do „ostatní", aby diagram nezhoustl.</p>
+  </div>
+  <div class="ep" id="ep-flow"></div>
+  <div class="why">
+    <div><b>Proč to funguje</b>Kanonická vizualizace energie. Na jeden pohled je vidět, že bojler a myčka
+      jsou celá spotřeba a že L3 je prakticky prázdná.</div>
+    <div><b>Nejsilnější v NT</b>Přesně v okamžiku, kdy je karta nejužitečnější (běží velké spotřebiče),
+      má diagram nejvíc co říct.</div>
+  </div>
+  <div class="why warn" style="margin-top:9px">
+    <div><b>Kompromis</b>Nejhůř se v něm čtou přesná čísla a potřebuje šířku — na úzkém sloupci dashboardu
+      se rozpadne. Prakticky vyžaduje fallback na jiný režim pod ~500 px.</div>
+    <div><b>Překryv s HA</b>Energy dashboard už podobný pohled má. Tady je ale na úrovni jističů, ne
+      zdrojů energie — to HA neumí.</div>
+  </div>
+</div>
+
+<!-- ══ 4 · FÁZE ══ -->
+<div class="pane" id="p-phase">
+  <div class="concept-head">
+    <h2>Koncept 4 — Fáze jako osa</h2>
+    <div class="yaml">view: phase</div>
+    <p>Celá karta se přeorganizuje kolem L1 / L2 / L3 a okruhy se zařadí pod svou fázi. Nevyváženost
+       fází se stane hlavním sdělením karty — což je přesně to, na co se dívá elektrikář.</p>
+  </div>
+  <div class="ep" id="ep-phase"></div>
+  <div class="why">
+    <div><b>Proč to funguje</b>Mění to, co karta <i>říká</i>, ne jen jak vypadá. Dnes se fázová nesymetrie
+      musí dopočítat okem ze tří buněk; tady je to nadpis.</div>
+    <div><b>Praktický přínos</b>Když víš, že L3 je prázdná, přehodíš na ni jistič a snížíš proud na hlavním
+      jističi — tedy potenciálně i jistič, za který platíš.</div>
+  </div>
+  <div class="why warn" style="margin-top:9px">
+    <div><b>Kompromis</b>Vyžaduje, aby každý okruh měl v konfiguraci vyplněnou fázi. Dnes je
+      <code>phases: 3</code> volitelné a u jednofázových se fáze neuvádí vůbec — musela by přibýt
+      položka <code>phase: L1|L2|L3</code> a bez ní by režim nedával smysl.</div>
+    <div><b>Vizuálně nejméně „revoluční"</b>Pořád je to mřížka boxů, jen jinak seřazená.</div>
+  </div>
+</div>
+
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   DATA — jeden panel, čtyři pohledy.
+   Scénář: je NT (levný proud), takže naběhla myčka a bojler.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const V = 234;                       // jmenovité napětí
+const MAINS = { kw: 4.37, kwh: 7.0, kc: 35.97, maxA: 25 };
+const PHASE = {
+  L1: { w: 1945, a: 8.3, v: 234 },
+  L2: { w: 2352, a: 10.1, v: 233 },
+  L3: { w:   41, a: 0.2, v: 234 },
+};
+/* p = fáze, w = výkon, on = sepnuto, crit = nespínatelný, max = jmenovitý proud jističe */
+const C = [
+  { n:'01', name:'Lednička',            p:'L1', w:  86, on:1, crit:1, max:16, kwh:1.94, kc:8.41 },
+  { n:'02', name:'Světla chodba',       p:'L3', w:   0, on:1, max:10, kwh:0.08, kc:0.35 },
+  { n:'03', name:'Zásuvky ložnice',     p:'L1', w:  12, on:1, max:16, kwh:0.21, kc:0.91 },
+  { n:'04', name:'Myčka',               p:'L1', w:1850, on:1, max:16, kwh:1.42, kc:6.15 },
+  { n:'05', name:'Pračka',              p:'L2', w:   0, on:0, max:16, kwh:0.00, kc:0.00 },
+  { n:'06', name:'Sušička',             p:'L3', w:   0, on:0, max:16, kwh:0.00, kc:0.00 },
+  { n:'07', name:'Světla obývák',       p:'L1', w:  34, on:1, max:10, kwh:0.19, kc:0.82 },
+  { n:'08', name:'Kuchyň linka levá',   p:'L1', w:  49, on:1, max:16, kwh:0.09, kc:0.37 },
+  { n:'09', name:'TV / ložnice 2',      p:'L2', w: 166, on:1, max:16, kwh:0.54, kc:1.69 },
+  { n:'10', name:'Koupelna',            p:'L3', w:   0, on:0, max:16, kwh:0.00, kc:0.00 },
+  { n:'11', name:'Obývák',              p:'L3', w:  41, on:1, max:16, kwh:1.53, kc:6.63 },
+  { n:'12', name:'Zásuvky dílna',       p:'L1', w:   0, on:0, max:16, kwh:0.00, kc:0.00 },
+  { n:'13', name:'Bojler',              p:'L2', w:2100, on:1, max:16, kwh:2.10, kc:9.09 },
+];
+const C3 = [
+  { n:'V1', name:'Varná deska',  w:   0, on:1, max:25, kwh:0.00, kc:0.00, ph:[0,0,0] },
+  { n:'K1', name:'Kotel',        w:  30, on:1, max:25, kwh:0.10, kc:0.36, ph:[10,10,10] },
+];
+const PH_COLOR = { L1:'var(--l1)', L2:'var(--l2)', L3:'var(--l3)' };
+
+/* ── helpery ─────────────────────────────────────────────────────────────── */
+const fw  = w => w >= 1000 ? (w/1000).toFixed(2) + ' kW' : w + ' W';
+const fwS = w => w >= 1000 ? (w/1000).toFixed(1) + 'k' : String(w);
+const amps = (w, v = V) => w / v;
+const loadPct = c => Math.min(100, amps(c.w) / c.max * 100);
+function loadColor(pct) {
+  if (pct > 80) return 'var(--vt)';
+  if (pct > 55) return 'var(--warn)';
+  if (pct > 15) return 'var(--accent)';
+  return 'var(--neutral)';
+}
+const ICO = {
+  tower:`<svg class="svg-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21 8.5 5m10 16L15 5M8.5 5h7M8.5 5 6 3m9.5 2L18 3M6.8 10h10.4M6 14h12M3 7h3M18 7h3"/></svg>`,
+  lock: `<svg class="svg-ico" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>`,
+  warn: `<svg class="svg-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 22 20H2Z"/><path d="M12 9v5m0 3v.01"/></svg>`,
+  chevUp: `<svg class="svg-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>`,
+  chevDn: `<svg class="svg-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`,
+  note: `<svg class="svg-ico" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8v.01"/></svg>`,
+};
+/* ── blok tarifu: pruh HDO + ROZVRH / NÁKLADY ────────────────────────────
+   Tenhle blok je nad view-specifickou částí, takže je ve všech režimech
+   stejný a beze změny — jen přestylovaný tokeny z balíčků A + B.        */
+const SLOTS = [
+  { t:'nt', from:'00:00', to:'01:00', mins: 60, dur:'1h',  st:'past' },
+  { t:'vt', from:'01:00', to:'01:40', mins: 40, dur:'40m', st:'past' },
+  { t:'nt', from:'01:40', to:'04:40', mins:180, dur:'3h',  st:'past' },
+  { t:'vt', from:'04:40', to:'05:20', mins: 40, dur:'40m', st:'past' },
+  { t:'nt', from:'05:20', to:'09:20', mins:240, dur:'4h',  st:'active', pct: 67.5 },
+  { t:'vt', from:'09:20', to:'10:00', mins: 40, dur:'40m', st:'future' },
+  { t:'nt', from:'10:00', to:'13:00', mins:180, dur:'3h',  st:'future' },
+  { t:'vt', from:'13:00', to:'13:40', mins: 40, dur:'40m', st:'future' },
+  { t:'nt', from:'13:40', to:'17:40', mins:240, dur:'4h',  st:'future' },
+  { t:'vt', from:'17:40', to:'18:20', mins: 40, dur:'40m', st:'future' },
+  { t:'nt', from:'18:20', to:'21:20', mins:180, dur:'3h',  st:'future' },
+  { t:'vt', from:'21:20', to:'22:00', mins: 40, dur:'40m', st:'future' },
+  { t:'nt', from:'22:00', to:'00:00', mins:120, dur:'2h',  st:'future' },
+];
+const COSTS = {
+  today: { nt:[4.8, 22.15], vt:[2.2, 13.82], est:'' },
+  '7d':  { nt:[33.1,152.75], vt:[14.8,92.97], est:'Průměr na den: 35.10 Kč' },
+  month: { nt:[142.6,658.03], vt:[61.4,385.71], est:'Odhad za měsíc: ~1 630 Kč' },
+};
+const SCHED = { tab:'schedule', exp:true, tomorrow:false, period:'today' };
+
+function hdoBlock() {
+  const nowPct = 33.5;                       // ~08:02
+  const seg = SLOTS.map(s =>
+    `<div class="s-seg ${s.t} ${s.st === 'past' ? 'past' : ''}" style="flex:${s.mins}"></div>`).join('');
+  const rows = SLOTS.map(s => {
+    const fill = s.st === 'past' ? 100 : s.st === 'active' ? s.pct : 0;
+    return `<div class="s-row ${s.st} ${s.t}">
+      <span class="s-tar ${s.t}">${s.t.toUpperCase()}</span>
+      <span class="s-time">${s.from}–${s.to}</span>
+      <div class="s-track"><div class="s-fill ${s.t}" style="width:${fill}%"></div></div>
+      ${s.st === 'active' ? `<span class="s-nowchip">Teď</span>` : `<span class="s-dur">${s.dur}</span>`}
+    </div>`;
+  }).join('');
+
+  const b = COSTS[SCHED.period];
+  const totalKwh = b.nt[0] + b.vt[0], totalKc = b.nt[1] + b.vt[1];
+  const ntPct = b.nt[0] / totalKwh * 100;
+
+  const body = SCHED.tab === 'costs' ? `
+    <div class="c-pills">
+      ${[['today','Dnes'],['7d','7 dní'],['month','Měsíc']].map(([k,l]) =>
+        `<button class="c-pill ${SCHED.period===k?'active':''}" data-per="${k}">${l}</button>`).join('')}
+    </div>
+    <div class="c-stack">
+      <div class="c-seg nt" style="flex:${ntPct}"></div>
+      <div class="c-seg vt" style="flex:${100-ntPct}"></div>
+    </div>
+    <div class="c-legend">
+      <span class="c-leg nt">NT ${b.nt[0].toFixed(1)} kWh · ${b.nt[1].toFixed(2)} Kč</span>
+      <span class="c-leg vt">VT ${b.vt[0].toFixed(1)} kWh · ${b.vt[1].toFixed(2)} Kč</span>
+    </div>
+    <div class="c-total">${totalKc.toFixed(2)} Kč</div>
+    ${b.est ? `<div class="c-est">${b.est}</div>` : ''}
+  ` : `
+    <div class="s-title" id="schedTitle">
+      <span class="s-when">${SCHED.tomorrow ? 'Zítra' : 'Dnes'}</span>
+      <span class="s-day">Všední den</span>
+      ${!SCHED.exp ? `<span class="s-tar nt" style="margin-left:4px">NT</span>
+        <span class="s-left">05:20–09:20</span>` : ''}
+      <div class="s-nav">
+        ${SCHED.exp ? `<span class="s-left">zbývá 13h 18m NT · 20h 0m celkem</span>
+          <button class="s-btn" id="schedDay">${SCHED.tomorrow ? 'Dnes' : 'Zítra'}</button>` : ''}
+        <span class="s-chev">${SCHED.exp ? ICO.chevUp : ICO.chevDn}</span>
+      </div>
+    </div>
+    ${SCHED.exp ? `<div class="s-rows">${rows}</div>`
+      : `<div class="s-timeline">${seg}<div class="s-now" style="left:${nowPct}%"></div></div>`}
+  `;
+
+  SCHED._seg = seg; SCHED._nowPct = nowPct;
+  return hdoStrip() + schedBlock(body);
+}
+
+/* pruh tarifu; mini = jednořádková timeline dne rovnou pod ním */
+function hdoStrip(mini) {
+  const seg = SLOTS.map(x =>
+    `<div class="s-seg ${x.t} ${x.st === 'past' ? 'past' : ''}" style="flex:${x.mins}"></div>`).join('');
+  return `
+  <div class="hdo-strip ${mini ? 'with-mini' : ''}">
+    <div>
+      <div class="t">NT — nízký tarif</div>
+      <div class="p num">4.61 Kč/kWh</div>
+    </div>
+    <div class="sp"></div>
+    <div style="text-align:right">
+      <div class="cdl">Končí za</div>
+      <div class="cd num">1 h 18 min</div>
+    </div>
+  </div>
+  ${mini ? `<div class="hdo-mini">
+      <div class="s-timeline" style="margin:0">${seg}<div class="s-now" style="left:33.5%"></div></div>
+      <div class="hdo-mini-lbl">dnešní den · zbývá 13h 18m NT · rozpis dole</div>
+    </div>` : ''}`;
+}
+function schedBlock(body) {
+  return `
+  <div class="sblock">
+    <div class="sblock-tabs">
+      <div class="sblock-tab ${SCHED.tab==='schedule'?'active':''}" data-tab="schedule">Rozvrh</div>
+      <div class="sblock-tab ${SCHED.tab==='costs'?'active':''}" data-tab="costs">Náklady</div>
+    </div>
+    ${body}
+  </div>`;
+}
+/* jen tělo bloku (bez pruhu tarifu) — pro pořadí, kde je rozvrh až dole */
+function schedOnly() {
+  const full = hdoBlock();
+  return full.slice(full.indexOf('<div class="sblock">'));
+}
+
+/* obsluha bloku — po překreslení konceptu se znovu naváže */
+function wireHdo(rootId, rerender) {
+  const root = document.getElementById(rootId);
+  root.querySelectorAll('.sblock-tab').forEach(el =>
+    el.addEventListener('click', () => { SCHED.tab = el.dataset.tab; rerender(); }));
+  root.querySelectorAll('.c-pill').forEach(el =>
+    el.addEventListener('click', () => { SCHED.period = el.dataset.per; rerender(); }));
+  const t = root.querySelector('#schedTitle');
+  if (t) t.addEventListener('click', e => {
+    if (e.target.closest('#schedDay')) return;
+    SCHED.exp = !SCHED.exp; rerender();
+  });
+  const d = root.querySelector('#schedDay');
+  if (d) d.addEventListener('click', e => { e.stopPropagation(); SCHED.tomorrow = !SCHED.tomorrow; rerender(); });
+}
+
+/* ── zařízení za jističem — dokumentace rozvodů (chytrá i „hloupá") ────── */
+const DEV = {
+  '11': [
+    { group:'Power strip PC table', sum:'3 W · 0.0 A', ch:[
+      { n:'01', name:'PC',           w:'3 W', on:1 },
+      { n:'02', name:'LG Oled',      on:1 },
+      { n:'03', name:'LG Wide',      on:0 },
+      { n:'04', name:'Dehumidifier', on:0 },
+    ]},
+    { group:'Powerstrip Lednička', sum:'0 W · 0.0 A', ch:[
+      { n:'01', name:'Lednička', on:0 },
+      { n:'02', name:'Tiskárna', on:0 },
+      { n:'03', name:'Křeslo',   on:0 },
+    ]},
+    { dev:{ name:'Shelly Cinema', w:'158 W', dot:'none' } },
+    { note:'Stojací lampa u křesla — bez měření' },
+  ],
+  '08': [
+    { dev:{ name:'Shelly linka — pult', w:'12 W', on:1 } },
+    { dev:{ name:'Rychlovarná konvice', w:'0 W', on:0 } },
+    { note:'4× dvojzásuvka nad linkou' },
+    { note:'Digestoř — pevný přívod' },
+  ],
+  '04': [ { note:'Myčka Bosch SMV — pevný přívod, bez měření' } ],
+  '13': [ { dev:{ name:'Bojler Dražice OKCE 160', w:'2.10 kW', on:1 } },
+          { note:'Mechanický termostat, 60 °C' } ],
+  '01': [ { dev:{ name:'Lednička Liebherr', w:'86 W', dot:'none' } } ],
+  '09': [ { dev:{ name:'TV Samsung', w:'112 W', on:1 } },
+          { dev:{ name:'Soundbar',   w:'54 W',  on:1 } },
+          { note:'Zásuvka za postelí — ložnice 2' } ],
+};
+
+/* ── fázová bilance hlavního jističe (z konceptu 4) ───────────────────── */
+const BAL = {
+  '24h':  { L1:[9.2,2.1],  L2:[11.4,3.4], L3:[1.1,0.3] },
+  '7d':   { L1:[11.8,2.4], L2:[14.2,3.6], L3:[2.4,0.4] },
+  '30d':  { L1:[13.1,2.2], L2:[16.9,3.5], L3:[3.0,0.5] },
+};
+const BAL_TOP = {
+  L1: [['Myčka','1.85 kW'], ['Kuchyň linka levá','49 W'], ['Světla obývák','34 W']],
+  L2: [['Bojler','2.10 kW'], ['TV / ložnice 2','166 W'], ['Lednička','86 W']],
+  L3: [['Obývák','41 W'], ['Světla chodba','0 W']],
+};
+let BALWIN = '7d';
+
+/* ═══════════════════════ KONCEPT 1 — ROZVADĚČ ═══════════════════════════ */
+function renderPanel() {
+  // moduly: hlavní jistič (3 šířky) + 3f okruhy (3 šířky) + jednofázové
+  const mods = [
+    { kind:'main', n:'HL', name:'Hlavní jistič 3×25 A', w: MAINS.kw*1000, on:1, crit:1, ph:'l3f', width:3, pct: 10.1/25*100 },
+    ...C.map(c => ({ kind:'1f', n:c.n, name:c.name, w:c.w, on:c.on, crit:c.crit, ph:c.p.toLowerCase(), width:1, pct: loadPct(c), src:c })),
+    ...C3.map(c => ({ kind:'3f', n:c.n, name:c.name, w:c.w, on:c.on, ph:'l3f', width:3, pct: Math.min(100, amps(c.w/3)/c.max*100), src:c })),
+  ];
+  // rozdělení do lišt po ~11 modulových šířkách (jako reálný vícepatrový rozvaděč)
+  const rails = []; let cur = [], units = 0;
+  for (const m of mods) {
+    if (units + m.width > 11) { rails.push(cur); cur = []; units = 0; }
+    cur.push(m); units += m.width;
+  }
+  if (cur.length) rails.push(cur);
+
+  const modHTML = m => `
+    <div class="mod ${m.on ? 'on' : 'off'} ${m.width === 3 ? 'w3' : ''}" data-mod="${m.n}"
+         style="--fillc:${loadColor(m.pct)}">
+      <div class="mod-lever">${'<span class="lv"></span>'.repeat(m.width === 3 ? 3 : 1)}</div>
+      <div class="mod-face">
+        <div class="mod-spark">${sparkSVG(series(m), { h: 26, color: 'var(--mod-dim)', thin: true })}</div>
+        <div class="mod-fill" style="height:${m.pct.toFixed(0)}%"></div>
+        <div class="mod-w">${m.w > 0 ? fw(m.w) : '—'}</div>
+        <div class="mod-nm">${m.name}</div>
+      </div>
+      <div class="mod-foot">
+        <span class="mod-num">${m.n}</span>
+        ${m.crit ? `<span class="mod-lock">${ICO.lock}</span>` : ''}
+        <span class="mod-ph ${m.ph}">${m.ph === 'l3f' ? '3φ' : m.ph.toUpperCase()}</span>
+      </div>
+      <div class="mod-strip ${m.ph}"></div>
+    </div>`;
+
+  hdoBlock();   // naplní SCHED._seg pro mini timeline
+  document.getElementById('ep-panel').innerHTML = hdoStrip(true) + `
+    <div class="rail-wrap">
+      <div class="rail-top">
+        <div>
+          <div class="lbl">Rozvaděč — 22 pozic</div>
+          <div class="val num">${MAINS.kw.toFixed(2)} kW</div>
+        </div>
+        <div class="sub num">${MAINS.kwh.toFixed(1)} kWh dnes · ${MAINS.kc.toFixed(2)} Kč<br>
+          hlavní jistič 10.1 / 25 A</div>
+      </div>
+      <div class="busbar"></div>
+      <div class="bus-note">přípojnice — rychlost toku odpovídá odběru</div>
+      ${rails.map(r => `<div class="rail"><div class="rail-mods">${r.map(modHTML).join('')}</div></div>`).join('')}
+      <div class="rail-detail" id="railDetail"></div>
+    </div>` + schedOnly();
+
+  /* ── grafy: výběr modulů → detail nebo porovnání ─────────────────────── */
+  const detail = document.getElementById('railDetail');
+  const paint = () => {
+    document.querySelectorAll('#ep-panel .mod').forEach(el => {
+      const on = PICK.includes(el.dataset.mod);
+      el.classList.toggle('pick', on);
+      const face = el.querySelector('.mod-face');
+      let pin = face.querySelector('.mod-pin');
+      if (on && !pin) { pin = document.createElement('span'); pin.className = 'mod-pin'; face.appendChild(pin); }
+      if (!on && pin) pin.remove();
+    });
+
+    const tools = `
+      <div class="g-bar">
+        <div class="grp">${[1,3,6,24].map(h =>
+          `<button class="g-btn ${HOURS===h?'on':''}" data-h="${h}">${h}h</button>`).join('')}</div>
+        ${PICK.length > 1 ? `<label class="g-chk ${SHARED?'on':''}" id="sharedY">
+            <span class="box"></span>společná osa Y</label>` : ''}
+        <span class="spacer"></span>
+        ${PICK.length ? `<button class="g-btn" id="clearPick">zrušit výběr (${PICK.length})</button>` : ''}
+      </div>`;
+
+    if (PICK.length === 0) {
+      detail.innerHTML = tools + `<div class="rd-hint">
+        Klikni na modul → rozbalí se detail se všemi čísly a průběhem.<br>
+        Klikni na další → grafy se poskládají vedle sebe na společné časové ose.</div>`;
+    } else if (PICK.length === 1) {
+      const m = mods.find(x => x.n === PICK[0]), s = m.src ?? {};
+      const three = m.width === 3;
+      detail.innerHTML = tools + `
+        <div class="rd-head">
+          <span class="rd-num">${m.n}</span>
+          <span class="rd-name">${m.name}</span>
+          ${three ? `<span class="phchip l3f">3φ</span>` : ''}
+          ${m.crit ? `<span class="lockico">${ICO.lock}</span>` : `<button class="toggle ${m.on?'on':'off'}"></button>`}
+        </div>
+        <div class="rd-val num">${fw(m.w)}</div>
+        <div class="rd-meta num">${three
+          ? `max fáze ${m.n === 'HL' ? '10.1' : (amps(m.w/3)).toFixed(1)} / ${s.max ?? 25} A`
+          : `${amps(m.w).toFixed(1)} A · ${V} V`} ·
+          ${(s.kwh ?? MAINS.kwh).toFixed(2)} kWh · ${(s.kc ?? MAINS.kc).toFixed(2)} Kč ·
+          zatížení ${m.pct.toFixed(0)} %</div>
+        ${three ? phaseCols(m) : sparkSVG(series(m), { h: 74 })}
+        ${m.n === 'HL' ? balancePanel() : ''}
+        ${devicePanel(m.n)}`;
+      detail.querySelectorAll('.b-pill').forEach(b =>
+        b.addEventListener('click', () => { BALWIN = b.dataset.win; paint(); }));
+    } else {
+      const picked = PICK.map(n => mods.find(x => x.n === n));
+      const sets = picked.map(m => ({ m, v: series(m) }));
+      const gmax = Math.max(...sets.map(s => Math.max(...s.v)));
+      detail.innerHTML = tools + `<div class="cmp-grid">${sets.map(({m, v}) => {
+        const mx = SHARED ? gmax : Math.max(...v);
+        return `<div class="cmp-cell">
+          <div class="cmp-head">
+            <span class="cmp-num">${m.n}</span>
+            <span class="cmp-name">${m.name}</span>
+            <span class="cmp-val">${fw(m.w)}</span>
+          </div>
+          <div class="cmp-scale">max ${fw(Math.round(mx))}${SHARED ? ' · společné měřítko' : ''}</div>
+          ${sparkSVG(v, { h: 48, yMax: SHARED ? gmax : null })}
+        </div>`;
+      }).join('')}</div>`;
+    }
+
+    detail.querySelectorAll('.g-btn[data-h]').forEach(b =>
+      b.addEventListener('click', () => { HOURS = +b.dataset.h; paint(); }));
+    const cl = detail.querySelector('#clearPick');
+    if (cl) cl.addEventListener('click', () => { PICK = []; paint(); });
+    const sy = detail.querySelector('#sharedY');
+    if (sy) sy.addEventListener('click', () => { SHARED = !SHARED; paint(); });
+  };
+
+  document.querySelectorAll('#ep-panel .mod').forEach(el =>
+    el.addEventListener('click', () => {
+      const n = el.dataset.mod;
+      PICK = PICK.includes(n) ? PICK.filter(x => x !== n) : [...PICK, n];
+      paint();
+    }));
+  paint();
+  wireHdo('ep-panel', renderPanel);
+}
+
+/* stav grafové části konceptu 1 */
+let PICK = [], HOURS = 3, SHARED = true;
+const series = m => makeSeries(m.n, m.w, KIND[m.n] ?? 'flat', HOURS);
+
+/* ── historie: charakteristické průběhy podle typu spotřebiče ────────────── */
+const KIND = { '01':'cycle', '03':'steady', '04':'burst', '07':'step', '08':'steady',
+               '09':'steady', '11':'steady', '13':'block', 'K1':'cycle', 'HL':'sum' };
+function makeSeries(seedStr, peak, kind, hours, n = 110) {
+  let s = [...seedStr].reduce((a,c) => a + c.charCodeAt(0), 11) * 9779;
+  const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const f = hours / 3;                       // delší okno = víc cyklů v grafu
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / n; let v;
+    switch (kind) {
+      case 'cycle':  v = Math.sin(t * Math.PI * 2 * 6 * f) > .45 ? peak * (.9 + rnd()*.18) : peak * .03 * rnd(); break;
+      case 'burst':  v = (t > .26 && t < .93)
+                       ? (Math.sin(t * Math.PI * 2 * 4 * f) > .05 ? peak * (.86 + rnd()*.22) : peak * .09)
+                       : peak * .02 * rnd(); break;
+      case 'block':  v = t > .33 ? peak * (.95 + rnd()*.07) : peak * .02 * rnd(); break;
+      case 'steady': v = t > .12 ? peak * (.78 + rnd()*.28) : peak * .22 * rnd(); break;
+      case 'step':   v = t < .52 ? peak * .05 * rnd() : peak * (.92 + rnd()*.1); break;
+      case 'sum':    v = peak * (.25 + .55 * Math.max(0, Math.min(1, (t - .2) * 3)) + rnd()*.08); break;
+      default:       v = peak * .02 * rnd();
+    }
+    out.push(Math.max(0, v));
+  }
+  return out;
+}
+/* sparkline; yMax != null ⇒ společná osa Y pro porovnání */
+let sparkSeq = 0;
+function sparkSVG(vals, opt = {}) {
+  const { h = 34, yMax = null, color = 'var(--neutral)', thin = false } = opt;
+  const W = 100, H = 34, pad = 2, n = vals.length;
+  const mx = yMax != null ? Math.max(yMax, 1) : Math.max(...vals, 1);
+  const pts = vals.map((v,i) => ({ x: i/(n-1)*W, y: (H-pad) - Math.min(1, v/mx)*(H-pad*2) }));
+  let d = `M ${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+  for (let i = 1; i < n; i++) { const cx = ((pts[i-1].x + pts[i].x)/2).toFixed(1);
+    d += ` C ${cx},${pts[i-1].y.toFixed(1)} ${cx},${pts[i].y.toFixed(1)} ${pts[i].x.toFixed(1)},${pts[i].y.toFixed(1)}`; }
+  const id = 'sp' + (++sparkSeq);
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+      style="width:100%;height:${h}px;display:block;overflow:visible">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${color}" stop-opacity=".3"/>
+      <stop offset="100%" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+    <path d="${d} L ${W},${H} L 0,${H} Z" fill="url(#${id})"/>
+    <path d="${d}" fill="none" stroke="${color}" stroke-width="${thin ? 1 : 1.3}" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+
+/* ── 3f detail: L1/L2/L3 vedle sebe, každá se svým grafem ──────────────── */
+function phaseCols(m) {
+  const isMain = m.n === 'HL';
+  const per = isMain
+    ? [['L1', PHASE.L1.w, PHASE.L1.a, PHASE.L1.v], ['L2', PHASE.L2.w, PHASE.L2.a, PHASE.L2.v],
+       ['L3', PHASE.L3.w, PHASE.L3.a, PHASE.L3.v]]
+    : (m.src?.ph ?? [m.w/3, m.w/3, m.w/3]).map((w,i) =>
+        [`L${i+1}`, w, amps(w), 234]);
+  const maxA = isMain ? MAINS.maxA : (m.src?.max ?? 25);
+  const sets = per.map(([lbl,w]) => makeSeries(m.n + lbl, w, KIND[m.n] ?? 'steady', HOURS));
+  const gmax = Math.max(...sets.map(v => Math.max(...v)), 1);
+  return `<div class="ph3-grid">${per.map(([lbl,w,a,v], i) => {
+    const pct = Math.min(100, a / maxA * 100);
+    return `<div class="ph3-cell ${lbl.toLowerCase()}">
+      <div class="ph3-head">
+        <span class="ph3-lbl">${lbl}</span>
+        <span class="ph3-pct num">${pct.toFixed(0)} %</span>
+      </div>
+      <div class="ph3-val num">${fw(Math.round(w))}</div>
+      <div class="ph3-sub num">${a.toFixed(1)} A · ${v} V · z ${maxA} A</div>
+      <div class="ph3-track"><i style="width:${pct.toFixed(0)}%;background:${loadColor(pct)}"></i></div>
+      ${sparkSVG(sets[i], { h: 44, yMax: gmax, color: `var(--${lbl.toLowerCase()})` })}
+    </div>`;
+  }).join('')}</div>
+  <div class="ph3-note">Všechny tři grafy mají společné měřítko, takže jsou přímo porovnatelné.</div>`;
+}
+
+/* ── fázová bilance + návrh přerovnání (jen u hlavního jističe) ─────────── */
+function balancePanel() {
+  const b = BAL[BALWIN];
+  const tot = b.L1[1] + b.L2[1] + b.L3[1];
+  const worst = Object.entries(b).sort((x,y) => y[1][0] - x[1][0])[0];
+  const worstPctOfBreaker = worst[1][0] / MAINS.maxA * 100;
+  const level = worstPctOfBreaker > 80 ? 'bad' : worstPctOfBreaker > 60 ? 'warn' : 'ok';
+  const msg = level === 'bad'
+    ? `${worst[0]} se dostala na ${worst[1][0].toFixed(1)} A z ${MAINS.maxA} A — blízko vybavení`
+    : level === 'warn'
+      ? `${worst[0]} špičkově ${worst[1][0].toFixed(1)} A z ${MAINS.maxA} A · rezerva ${(MAINS.maxA - worst[1][0]).toFixed(1)} A`
+      : `špičky v pořádku — nejvíc ${worst[0]} ${worst[1][0].toFixed(1)} A z ${MAINS.maxA} A`;
+  return `
+  <div class="bal">
+    <div class="bal-top">
+      <span class="bal-lbl">Rozložení fází</span>
+      <div class="grp" style="display:flex;gap:3px;padding:3px;border-radius:var(--r-md);background:var(--bg)">
+        ${[['24h','24 h'],['7d','7 dní'],['30d','30 dní']].map(([k,l]) =>
+          `<button class="g-btn b-pill ${BALWIN===k?'on':''}" data-win="${k}">${l}</button>`).join('')}
+      </div>
+    </div>
+    <div class="bal-bars">
+      ${['L1','L2','L3'].map(p => {
+        const [mx, avg] = b[p];
+        return `<div class="bal-row">
+          <span class="bal-p ${p.toLowerCase()}">${p}</span>
+          <div class="bal-track">
+            <i class="avg" style="width:${(avg / MAINS.maxA * 100).toFixed(1)}%;background:var(--${p.toLowerCase()})"></i>
+            <i class="mx" style="left:${(mx / MAINS.maxA * 100).toFixed(1)}%"></i>
+          </div>
+          <span class="bal-n num">⌀ ${avg.toFixed(1)} A</span>
+          <span class="bal-n num strong">max ${mx.toFixed(1)} A</span>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="bal-msg ${level}">${level === 'ok' ? '' : ICO.warn}${msg}</div>
+    <div class="bal-tops">
+      ${['L1','L2','L3'].map(p => `<div class="bal-topcol">
+        <div class="bal-topl ${p.toLowerCase()}">${p} — největší odběry</div>
+        ${BAL_TOP[p].map(([n,w]) => `<div class="bal-topi"><span>${n}</span><span class="num">${w}</span></div>`).join('')}
+      </div>`).join('')}
+    </div>
+    <div class="bal-caveat">Karta záměrně neříká „přehoď jistič X na L3" — jen ukazuje čísla za zvolené
+      okno. Topná sezóna a léto mají úplně jiný profil, takže jednorázový návrh by v půlce roku lhal.
+      Porovnej 30 dní v zimě a v létě a rozhodni sám.</div>
+  </div>`;
+}
+
+/* ── zařízení za jističem — dokumentace rozvodů ─────────────────────────── */
+function devicePanel(n) {
+  const list = DEV[n];
+  if (!list) return `<div class="dev-empty">Za tímto jističem nejsou v konfiguraci uvedená žádná zařízení.</div>`;
+  const dot = st => `<span class="d-dot ${st}"></span>`;
+  return `<div class="dev-wrap">
+    <div class="dev-title">Zařízení za jističem</div>
+    ${list.map(item => {
+      if (item.group) return `<div class="d-group">
+        <div class="d-glbl"><span>${item.group}</span><span class="d-gsum num">${item.sum}</span></div>
+        ${item.ch.map(c => `<div class="d-row ch">
+          ${dot(c.on ? 'on' : 'off')}
+          <span class="d-name">${c.n} — ${c.name}</span>
+          ${c.w ? `<span class="d-w num">${c.w}</span>` : ''}
+          <button class="toggle sm ${c.on ? 'on' : 'off'}"></button>
+        </div>`).join('')}
+      </div>`;
+      if (item.dev) return `<div class="d-row">
+        ${dot(item.dev.dot === 'none' ? 'none' : item.dev.on ? 'on' : 'off')}
+        <span class="d-name">${item.dev.name}</span>
+        <span class="d-w num">${item.dev.w}</span>
+        ${item.dev.dot === 'none' ? '' : `<button class="toggle sm ${item.dev.on ? 'on' : 'off'}"></button>`}
+      </div>`;
+      return `<div class="d-row note">
+        <span class="d-noteico">${ICO.note}</span>
+        <span class="d-name">${item.note}</span>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+/* ═══════════════════════ KONCEPT 2 — SBĚRNICE ══════════════════════════ */
+function renderBus() {
+  // vypnuté okruhy se slijí do jednoho řádku — karta nemá být seznamem nul
+  const live = [
+    ...C3.map(c => ({ ...c, three: true })),
+    ...C.filter(c => c.on).sort((a,b) => b.w - a.w),
+  ];
+  const offList = C.filter(c => !c.on);
+
+  const total = live.reduce((a,r) => a + r.w, 0);
+  let acc = total;
+  const rowsHTML = live.map(r => {
+    const share = acc / total;               // podíl proudu, který tudy ještě teče
+    acc -= r.w;
+    const speed = r.w > 0 ? Math.max(.4, 2.4 - Math.log10(r.w + 1) * .62).toFixed(2) : 0;
+    return `<div class="brow ${r.crit ? 'crit' : ''}" data-share="${share.toFixed(3)}">
+      <div class="tap ${r.w > 0 ? 'live' : ''}" style="animation-duration:${speed}s"></div>
+      <span class="brow-num num">${r.n}</span>
+      <span class="phchip ${r.three ? 'l3f' : r.p.toLowerCase()}">${r.three ? '3φ' : r.p}</span>
+      <div class="brow-body">
+        <div class="brow-name">${r.name}</div>
+        <div class="brow-meta">${r.w > 0 ? amps(r.three ? r.w/3 : r.w).toFixed(1) + ' A · ' : ''}${r.kwh.toFixed(2)} kWh · ${r.kc.toFixed(2)} Kč</div>
+      </div>
+      <span class="brow-val num ${r.w === 0 ? 'zero' : ''}">${r.w > 0 ? fw(r.w) : '0 W'}</span>
+      ${r.crit ? `<span class="lockico">${ICO.lock}</span>` : `<button class="toggle ${r.on?'on':'off'}"></button>`}
+    </div>`;
+  }).join('');
+
+  document.getElementById('ep-bus').innerHTML = hdoBlock() + `
+    <div class="bus-wrap">
+      <div class="bus-src">
+        <div class="ico">${ICO.tower}</div>
+        <div>
+          <div class="lbl">Hlavní přívod · 3×25 A</div>
+          <div class="brow-meta num">${MAINS.kwh.toFixed(1)} kWh dnes · ${MAINS.kc.toFixed(2)} Kč · max fáze 10.1 A</div>
+        </div>
+        <div class="val num">${MAINS.kw.toFixed(2)} kW</div>
+      </div>
+      <div class="bus-body">
+        <div class="spine"></div>
+        <div id="busRows">${rowsHTML}</div>
+        <div class="bus-off">
+          <span class="lbl">Vypnuto (${offList.length})</span>
+          <span class="names">${offList.map(c => `${c.n} ${c.name}`).join(' · ')}</span>
+        </div>
+      </div>
+    </div>`;
+
+  // odbočky: rychlost toku podle výkonu
+  document.querySelectorAll('#ep-bus .tap.live').forEach(el => {
+    el.style.setProperty('animation-duration', el.style.animationDuration);
+  });
+  // sběrnice: každý segment má šířku i jas podle proudu, který jím ještě teče
+  const spine = document.querySelector('#ep-bus .spine');
+  const segs = [...document.querySelectorAll('#ep-bus .brow')].map(el => ({
+    top: el.offsetTop + el.offsetHeight / 2,
+    share: parseFloat(el.dataset.share),
+  }));
+  const WMAX = 11, WMIN = 3, CX = 10;
+  let html = '';
+  for (let i = 0; i < segs.length; i++) {
+    const from = i === 0 ? 0 : segs[i-1].top;
+    const to   = segs[i].top;
+    const sh   = segs[i].share;
+    const w    = WMIN + (WMAX - WMIN) * sh;
+    const dur  = (2.4 - sh * 1.7).toFixed(2);
+    html += `<div class="spine-seg" style="top:${from}px;height:${(to-from)+1}px;
+      width:${w.toFixed(1)}px;left:${(CX - w/2).toFixed(1)}px;
+      opacity:${(0.3 + sh * 0.7).toFixed(2)};animation-duration:${dur}s"></div>`;
+  }
+  spine.innerHTML = html;
+  document.querySelectorAll('#ep-bus .spine-seg').forEach(el => {
+    el.style.setProperty('animation-duration', el.style.animationDuration);
+  });
+  wireHdo('ep-bus', renderBus);
+}
+
+/* ═══════════════════════ KONCEPT 3 — TOK (Sankey) ══════════════════════ */
+function renderFlow() {
+  const W = 900, H = 430, PAD = 22;
+  const xMain = 100, wMain = 16, xPh = 336, wPh = 14, xC = 624, wC = 12;
+  const total = PHASE.L1.w + PHASE.L2.w + PHASE.L3.w;
+  const MINH = 3, GAP = 30, GGAP = 12;             // mezery, aby se popisky nepřekrývaly
+  const order = ['L1','L2','L3'];
+
+  // 1) skupiny okruhů podle fáze; drobné se slévají do "ostatní"
+  const groups = order.map(p => {
+    const list = C.filter(c => c.p === p && c.w > 0).sort((a,b) => b.w - a.w);
+    const big   = list.filter(c => c.w >= total * 0.02);
+    const small = list.filter(c => c.w <  total * 0.02);
+    const arr = big.map(c => ({ name: c.name, w: c.w, p }));
+    const rest = small.reduce((a,c) => a + c.w, 0);
+    if (rest > 0) arr.push({ name: `ostatní (${small.length})`, w: rest, p, dim: 1 });
+    if (!arr.length) arr.push({ name: 'klid', w: PHASE[p].w, p, dim: 1 });
+    return { p, arr };
+  });
+
+  // 2) měřítko tak, aby se pruhy i mezery vešly do výšky
+  const nC = groups.reduce((a,g) => a + g.arr.length, 0);
+  const gapsTotal = (nC - 1) * GAP + (groups.length - 1) * GGAP;
+  const scale = (H - PAD * 2 - gapsTotal) / total;
+
+  // 3) okruhy shora dolů; fázový uzel se pak posadí na svou skupinu
+  let y = PAD, circuits = [], phases = [];
+  for (const g of groups) {
+    const startY = y;
+    const mine = [];
+    for (const it of g.arr) {
+      const h = Math.max(MINH, it.w * scale);
+      const c = { ...it, y, h, cyv: y + h/2 };
+      circuits.push(c); mine.push(c);
+      y += h + GAP;
+    }
+    y = y - GAP + GGAP;
+    const span0 = mine[0].y, span1 = mine[mine.length-1].y + mine[mine.length-1].h;
+    const nodeH = mine.reduce((a,c) => a + c.h, 0);
+    const nodeY = (span0 + span1) / 2 - nodeH / 2;
+    phases.push({ p: g.p, w: PHASE[g.p].w, y: nodeY, h: nodeH, cy: nodeY + nodeH/2, mine });
+    // offsety zdroje stuh uvnitř fázového uzlu
+    let off = nodeY;
+    for (const c of mine) { c.srcY = off; off += c.h; }
+  }
+  const hTotal = phases.reduce((a,f) => a + f.h, 0);
+  const spanAll0 = phases[0].y, spanAll1 = phases[phases.length-1].y + phases[phases.length-1].h;
+  const mainH = hTotal, mainY = (spanAll0 + spanAll1) / 2 - mainH / 2;
+
+  const ribbon = (x0,y0,h0,x1,y1,h1,color,op) => {
+    const cx = (x0 + x1) / 2;
+    return `<path class="rib" fill="${color}" opacity="${op}"
+      d="M ${x0},${y0} C ${cx},${y0} ${cx},${y1} ${x1},${y1}
+         L ${x1},${y1+h1} C ${cx},${y1+h1} ${cx},${y0+h0} ${x0},${y0+h0} Z"/>`;
+  };
+  const dash = (x0,y0,x1,y1,color,w,dur) => {
+    const cx = (x0 + x1) / 2;
+    return `<path class="rib-dash" stroke="${color}" stroke-width="${Math.max(1,Math.min(3,w/6))}"
+      stroke-dasharray="4 20" style="animation-duration:${dur}s"
+      d="M ${x0},${y0} C ${cx},${y0} ${cx},${y1} ${x1},${y1}"/>`;
+  };
+
+  let svg = '';
+  // přívod → fáze
+  let my = mainY;
+  for (const f of phases) {
+    svg += ribbon(xMain + wMain, my, f.h, xPh, f.y, f.h, PH_COLOR[f.p], .38);
+    svg += dash(xMain + wMain, my + f.h/2, xPh, f.cy, PH_COLOR[f.p], f.h, Math.max(.9, 3.2 - f.w/1200));
+    my += f.h;
+  }
+  // fáze → okruhy
+  for (const c of circuits) {
+    svg += ribbon(xPh + wPh, c.srcY, c.h, xC, c.y, c.h, PH_COLOR[c.p], c.dim ? .16 : .4);
+    if (!c.dim) svg += dash(xPh + wPh, c.srcY + c.h/2, xC, c.cyv, PH_COLOR[c.p], c.h, Math.max(.9, 3.2 - c.w/1200));
+  }
+  // uzly
+  svg += `<rect class="flow-node" x="${xMain}" y="${mainY}" width="${wMain}" height="${mainH}" fill="var(--accent)" opacity=".85"/>`;
+  svg += `<text class="flow-lbl big" x="${xMain - 10}" y="${mainY + mainH/2 - 2}" text-anchor="end">${MAINS.kw.toFixed(2)} kW</text>`;
+  svg += `<text class="flow-lbl dim" x="${xMain - 10}" y="${mainY + mainH/2 + 13}" text-anchor="end">hlavní přívod</text>`;
+  for (const f of phases) {
+    svg += `<rect class="flow-node" x="${xPh}" y="${f.y}" width="${wPh}" height="${f.h}" fill="${PH_COLOR[f.p]}"/>`;
+    svg += `<text class="flow-lbl" x="${xPh - 8}" y="${f.cy + 4}" text-anchor="end">${f.p} · ${fw(f.w)}</text>`;
+  }
+  for (const c of circuits) {
+    svg += `<rect class="flow-node" x="${xC}" y="${c.y}" width="${wC}" height="${c.h}" fill="${PH_COLOR[c.p]}" opacity="${c.dim?.35:1}"/>`;
+    svg += `<text class="flow-lbl${c.dim?' dim':''}" x="${xC + wC + 9}" y="${c.cyv + 4}">${c.name}</text>`;
+    svg += `<text class="flow-lbl dim" x="${xC + wC + 9}" y="${c.cyv + 17}">${fw(c.w)}</text>`;
+  }
+
+  document.getElementById('ep-flow').innerHTML = hdoBlock() + `
+    <div class="flow-wrap">
+      <svg class="flow-svg" viewBox="0 0 ${W} ${H}">${svg}</svg>
+      <div style="font-size:var(--fs-micro);color:var(--dim);margin-top:6px;text-align:center">
+        Šířka pruhu = okamžitý výkon · rychlost čárek = proud · okruhy pod 2 % se slévají do „ostatní"
+      </div>
+    </div>`;
+  wireHdo('ep-flow', renderFlow);
+}
+
+/* ═══════════════════════ KONCEPT 4 — FÁZE JAKO OSA ═════════════════════ */
+function renderPhase() {
+  const total = PHASE.L1.w + PHASE.L2.w + PHASE.L3.w;
+  const maxP = Math.max(PHASE.L1.w, PHASE.L2.w, PHASE.L3.w);
+  const worst = Object.entries(PHASE).sort((a,b) => b[1].w - a[1].w)[0];
+  const skew = (worst[1].w / total * 100);
+
+  const col = p => {
+    const d = PHASE[p];
+    const list = C.filter(c => c.p === p).sort((a,b) => b.w - a.w);
+    const pct = d.a / MAINS.maxA * 100;
+    return `<div class="ph-col ${p.toLowerCase()}">
+      <div class="ph-col-head">
+        <div class="ph-name">${p}</div>
+        <div class="ph-val num">${(d.w/1000).toFixed(2)} kW</div>
+        <div class="ph-sub num">${d.a.toFixed(1)} A · ${d.v} V · ${(d.w/total*100).toFixed(0)} % zátěže</div>
+        <div class="ph-load"><i style="width:${pct.toFixed(0)}%;background:${loadColor(pct)}"></i></div>
+      </div>
+      <div class="ph-list">
+        ${list.map(c => `<div class="ph-item ${c.w===0?'zero':''}">
+          <span class="n num">${c.n}</span>
+          <span class="nm">${c.name}</span>
+          ${c.crit ? `<span class="lockico">${ICO.lock}</span>` : ''}
+          <span class="w num">${c.w > 0 ? fw(c.w) : '—'}</span>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  };
+
+  document.getElementById('ep-phase').innerHTML = hdoBlock() + `
+    <div class="ph-balance">
+      <span class="ph-bal-lbl">Rozložení fází</span>
+      <div class="ph-bal-bar">
+        <i style="flex:${PHASE.L1.w};background:var(--l1)"></i>
+        <i style="flex:${PHASE.L2.w};background:var(--l2)"></i>
+        <i style="flex:${Math.max(PHASE.L3.w, total*0.01)};background:var(--l3)"></i>
+      </div>
+      <span class="ph-bal-txt">${ICO.warn} nevyváženo — ${worst[0]} nese ${skew.toFixed(0)} %</span>
+    </div>
+    <div class="ph-cols">${col('L1')}${col('L2')}${col('L3')}</div>
+    ${C3.map(c => `<div class="ph-3f">
+      <span class="brow-num num">${c.n}</span>
+      <span class="phchip l3f">3φ</span>
+      <span class="brow-name" style="flex:0 0 auto">${c.name}</span>
+      <div class="sp3">
+        ${c.ph.map((w,i) => `<span style="background:${[ 'var(--l1)','var(--l2)','var(--l3)' ][i]};opacity:${w>0?.9:.2}"></span>`).join('')}
+      </div>
+      <span class="brow-val num ${c.w===0?'zero':''}">${c.w>0?fw(c.w):'0 W'}</span>
+      <button class="toggle ${c.on?'on':'off'}"></button>
+    </div>`).join('')}
+    <div style="font-size:var(--fs-micro);color:var(--dim);margin-top:10px;text-align:center">
+      Fáze je dnes v konfiguraci jen u 3φ okruhů — tento režim by vyžadoval nové pole
+      <code style="background:rgba(127,127,127,.15);padding:1px 4px;border-radius:3px">phase:</code> u každého jednofázového jističe.
+    </div>`;
+  wireHdo('ep-phase', renderPhase);
+}
+
+/* ── render + přepínače ──────────────────────────────────────────────────── */
+renderPanel(); renderBus(); renderFlow(); renderPhase();
+
+document.getElementById('cCtl').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#cCtl button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.pane').forEach(p => p.classList.remove('on'));
+  document.getElementById('p-' + b.dataset.c).classList.add('on');
+  if (b.dataset.c === 'bus') renderBus();     // přepočet pozic segmentů sběrnice
+});
+document.getElementById('tCtl').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#tCtl button').forEach(x => x.classList.toggle('on', x === b));
+  document.body.classList.toggle('light', b.dataset.t === 'light');
+});
+</script>
+</body>
+</html>

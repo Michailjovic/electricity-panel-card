@@ -3,6 +3,12 @@ import { customElement, state } from 'lit/decorators.js';
 import './electricity-panel-editor.js';
 import { PRE_TARIFFS } from './tariff-presets.js';
 import { EP_VERSION } from './types.js';
+
+/** Balíček A: výchozí barva sparklinu. Byla `#ef4444`, tedy stejná červená jako
+ *  vysoký tarif a chybové stavy — průběh spotřeby přitom není signál, ale
+ *  kontext. Musí zůstat konkrétní hex: hodnota jde do SVG prezentačních
+ *  atributů (`stroke`, `stop-color`), kde se `var()` nevyhodnotí. */
+const EP_SPARK_DEFAULT = '#7c8ba1';
 import { localize } from './localize.js';
 import type {
   HomeAssistant,
@@ -278,9 +284,13 @@ export class ElectricityPanelCard extends LitElement {
   }
 
   private _loadColor(pct: number): string {
+    // Balíček A: zelená pod 55 % dělala z každého klidného okruhu stejný
+    // signál jako "nízký tarif". Zátěž pod polovinou jističe není dobrá
+    // zpráva, je to nulová informace — patří jí neutrál.
     if (pct > 80) return 'var(--error-color, #ef4444)';
     if (pct > 55) return 'var(--warning-color, #f59e0b)';
-    return 'var(--success-color, #22c55e)';
+    if (pct > 15) return 'var(--ep-accent)';
+    return 'var(--ep-neutral)';
   }
 
   private _watts(entityId?: string): number {
@@ -417,7 +427,10 @@ export class ElectricityPanelCard extends LitElement {
       ? (this._config.age_stale_color ?? '#ef4444')
       : diffMs >= warnMs
         ? (this._config.age_warn_color ?? '#f59e0b')
-        : (this._config.age_ok_color ?? '#374151');
+        // follow_theme fix: #374151 is near-invisible in the dark palette (by
+        // design) but turns into a dark, prominent grey on a light theme —
+        // exactly backwards. --ep-text-faint keeps "quiet" quiet in both.
+        : (this._config.age_ok_color ?? 'var(--ep-text-faint)');
     return html`<span class="metric-sep">·</span><span class="age-badge" style="color:${color}">↻ ${label}</span>`;
   }
 
@@ -594,7 +607,7 @@ export class ElectricityPanelCard extends LitElement {
    *  per circuit. Rendered once from `_renderMainMeter`. */
   private _renderSparkWindowSwitch(): TemplateResult {
     const active = this._effectiveGraphHours();
-    const color = this._config.sparkline_color ?? '#ef4444';
+    const color = this._config.sparkline_color ?? EP_SPARK_DEFAULT;
     return html`
       <div class="spark-win-switch">
         ${ElectricityPanelCard.SPARK_WINDOWS.map(h => html`
@@ -1189,7 +1202,7 @@ export class ElectricityPanelCard extends LitElement {
     const data = this._historyCache.get(entityId);
     if (!data || data.length < 2) return nothing;
     const W = 100, H = 38, pad = 3;
-    const color = this._config.sparkline_color ?? '#ef4444';
+    const color = this._config.sparkline_color ?? EP_SPARK_DEFAULT;
     const labelPos = this._config.sparkline_labels ?? 'left';
     const showRef = this._config.sparkline_ref_line ?? false;
 
@@ -1240,7 +1253,10 @@ export class ElectricityPanelCard extends LitElement {
     const yMax = pad.toFixed(1);
     const yMin = (H - pad).toFixed(1);
     const hideLabels = noLabels || labelPos === 'none';
-    const refColor = this._config.sparkline_ref_color ?? 'rgba(255,255,255,0.35)';
+    // follow_theme fix: the old default was rgba(255,255,255,0.35), which is
+    // invisible on a light theme. A CSS custom property resolves fine inside an
+    // inline style in the shadow root, so the default now follows the palette.
+    const refColor = this._config.sparkline_ref_color ?? 'var(--ep-text-faint)';
     // Labels are flex siblings of the SVG — placed before (left) or after (right)
     // in DOM order so the SVG takes flex:1 and labels get exactly 40 px regardless
     // of card width.
@@ -1871,19 +1887,47 @@ export class ElectricityPanelCard extends LitElement {
   static styles = css`
     :host { display: block; container-type: inline-size; }
     ha-card {
-      /* Built-in dark palette — overridden by .theme-auto below */
-      --ep-bg: #111318;
-      --ep-surface: #181c24;
-      --ep-border: #252a35;
-      --ep-border2: #1f2937;
-      --ep-text: #e2e8f0;
-      --ep-text-mid: #94a3b8;
-      --ep-text-dim: #5d6a80;
+      /* Built-in dark palette — overridden by .theme-auto below.
+
+         Balíček B: tři úrovně povrchu místo jedné. Vnořená buňka je
+         SVĚTLEJŠÍ než rodič (--ep-surface-2 uvnitř --ep-surface); dřív
+         používala --ep-bg, tedy tmavší než rodič, což se četlo jako díra
+         ve kartě, ne jako vystupující prvek. */
+      --ep-bg: #0f1116;
+      --ep-surface: #171a21;
+      --ep-surface-2: #1f232c;
+      --ep-border: #262b36;
+      --ep-border2: #333a48;
+      --ep-text: #e6eaf2;
+      --ep-text-mid: #9aa5b8;
+      --ep-text-dim: #6b7688;
       --ep-text-faint: #374151;
-      --ep-accent: #6b7db3;
-      --ep-accent-bg: #1e2435;
-      --ep-badge-bg: #1e2a4a;
-      --ep-badge-fg: #6b9bdb;
+      --ep-accent: #7aa2e3;
+      --ep-accent-bg: rgba(122,162,227,.14);
+      /* Balíček A: neutrál pro věci, které jsou kontext, ne signál — průběhy
+         a nízké zatížení. Dřív na tato místa padala zelená, která tím ztrácela
+         význam "nízký tarif". */
+      --ep-neutral: #7c8ba1;
+      --ep-badge-bg: rgba(122,162,227,.14);
+      --ep-badge-fg: #7aa2e3;
+      /* Elevace odlišuje úrovně periferním viděním: hlavní měřič má stín a
+         žádný okraj, okruhy povrch + okraj, jističe jen okraj. */
+      --ep-shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
+
+      /* Balíček B: typografická škála. Bylo devět velikostí v pásmu 8-14 px —
+         rozdíl 10 vs. 11 px se nečte jako hierarchie, jen jako nekonzistence.
+         Pět kroků, každý s jasnou rolí. */
+      --ep-fs-micro: 10px;   /* uppercase labely, badge, jednotky */
+      --ep-fs-meta:  11px;   /* sekundární metriky */
+      --ep-fs-body:  13px;   /* názvy okruhů a zařízení */
+      --ep-fs-sub:   16px;   /* fázové hodnoty, mezisoučty */
+      --ep-fs-hero:  24px;   /* primární hodnota, countdown */
+
+      /* Tvarosloví: tři poloměry místo sedmi, dvě výšky pruhů místo pěti. */
+      --ep-r-sm: 4px;
+      --ep-r-md: 8px;
+      --ep-r-pill: 999px;
+
       background: var(--ep-bg);
       overflow: hidden;
     }
@@ -1891,6 +1935,9 @@ export class ElectricityPanelCard extends LitElement {
     ha-card.theme-auto {
       --ep-bg: var(--ha-card-background, var(--card-background-color, #fff));
       --ep-surface: var(--secondary-background-color, #f5f5f5);
+      /* Na světlém tématu je "vystupující" bílá, tedy zpět barva karty —
+         opačný směr než v tmavém, stejný význam. */
+      --ep-surface-2: var(--ha-card-background, var(--card-background-color, #fff));
       --ep-border: var(--divider-color, rgba(0,0,0,.12));
       --ep-border2: var(--divider-color, rgba(0,0,0,.12));
       --ep-text: var(--primary-text-color, #212121);
@@ -1899,8 +1946,10 @@ export class ElectricityPanelCard extends LitElement {
       --ep-text-faint: var(--disabled-text-color, #bdbdbd);
       --ep-accent: var(--primary-color, #03a9f4);
       --ep-accent-bg: rgba(33, 150, 243, 0.12);
+      --ep-neutral: var(--secondary-text-color, #727272);
       --ep-badge-bg: rgba(33, 150, 243, 0.12);
       --ep-badge-fg: var(--primary-color, #03a9f4);
+      --ep-shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.07);
     }
     ha-card.theme-auto .hdo-bar.nt { background: rgba(34,197,94,.08); border-color: rgba(34,197,94,.3); }
     ha-card.theme-auto .hdo-bar.vt { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.3); }
@@ -1908,12 +1957,12 @@ export class ElectricityPanelCard extends LitElement {
     ha-card.theme-auto .hdo-bar.vt .hdo-sub { color: var(--ep-text-mid); }
     ha-card.theme-auto .hdo-bar.nt .hdo-prog,
     ha-card.theme-auto .hdo-bar.vt .hdo-prog { background: rgba(127,127,127,.18); }
-    .card-header { padding: 16px 16px 0; font-size: 16px; font-weight: 500; letter-spacing: -0.2px; color: var(--ep-text); }
+    .card-header { padding: 16px 16px 0; font-size: var(--ep-fs-sub); font-weight: 600; letter-spacing: -0.2px; color: var(--ep-text); }
     .card-content { padding: 12px 12px 16px; }
 
-    .hdo-bar { border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; }
-    .hdo-bar.nt { background: #0f2318; border: 0.5px solid #1e4d30; }
-    .hdo-bar.vt { background: #200f0f; border: 0.5px solid #4d1e1e; }
+    .hdo-bar { border-radius: var(--ep-r-md); padding: 14px 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 12px; box-shadow: var(--ep-shadow); }
+    .hdo-bar.nt { background: #0f2318; border: 1px solid #1e4d30; }
+    .hdo-bar.vt { background: #200f0f; border: 1px solid #4d1e1e; }
     .hdo-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .hdo-dot.nt { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,.2); animation: hdo-pulse 2.5s ease-in-out infinite; }
     .hdo-dot.vt { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.18); }
@@ -1922,115 +1971,125 @@ export class ElectricityPanelCard extends LitElement {
       50%      { box-shadow: 0 0 0 5px rgba(34,197,94,.07); }
     }
     .hdo-info { flex: 1; min-width: 0; }
-    .hdo-label { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px; }
+    .hdo-label { font-size: var(--ep-fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .8px; }
     .hdo-bar.nt .hdo-label { color: #22c55e; }
     .hdo-bar.vt .hdo-label { color: #ef4444; }
-    .hdo-sub { font-size: 11px; margin-top: 1px; }
+    .hdo-sub { font-size: var(--ep-fs-meta); margin-top: 3px; font-variant-numeric: tabular-nums; }
     .hdo-bar.nt .hdo-sub { color: #4b7a5e; }
     .hdo-bar.vt .hdo-sub { color: #7a4b4b; }
-    .hdo-prog { height: 2px; border-radius: 1px; overflow: hidden; margin-top: 8px; }
+    .hdo-prog { height: 6px; border-radius: var(--ep-r-pill); overflow: hidden; margin-top: 10px; }
     .hdo-bar.nt .hdo-prog { background: #1a2e20; }
     .hdo-bar.vt .hdo-prog { background: #2e1a1a; }
-    .hdo-prog-fill { height: 100%; border-radius: 1px; }
+    .hdo-prog-fill { height: 100%; border-radius: var(--ep-r-pill); }
     .hdo-bar.nt .hdo-prog-fill { background: #22c55e; }
     .hdo-bar.vt .hdo-prog-fill { background: #ef4444; }
-    .hdo-bar.unk { background: var(--ep-surface); border: 0.5px solid var(--ep-border); }
+    .hdo-bar.unk { background: var(--ep-surface); border: 1px solid var(--ep-border); }
     .hdo-dot.unk { background: var(--ep-text-dim); }
     .hdo-bar.unk .hdo-label { color: var(--ep-text-mid); }
     .hdo-src-badge {
-      font-size: 9px; font-weight: 600; text-transform: none; letter-spacing: 0;
+      font-size: var(--ep-fs-micro); font-weight: 600; text-transform: none; letter-spacing: 0;
       color: var(--ep-text-dim); background: rgba(127,127,127,.15);
-      border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: middle;
+      border-radius: var(--ep-r-sm); padding: 1px 5px; margin-left: 6px; vertical-align: middle;
     }
     .hdo-mismatch {
-      font-size: 11px; margin-top: 4px; color: var(--warning-color, #f59e0b);
+      font-size: var(--ep-fs-meta); margin-top: 6px; color: var(--warning-color, #f59e0b);
       display: flex; align-items: center; gap: 4px;
     }
     .hdo-cd { text-align: right; flex-shrink: 0; }
-    .hdo-cd-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--ep-text-dim); }
-    .hdo-cd-val { font-size: 24px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
+    .hdo-cd-lbl { font-size: var(--ep-fs-micro); text-transform: uppercase; letter-spacing: .6px; color: var(--ep-text-dim); margin-bottom: 4px; }
+    .hdo-cd-val { font-size: var(--ep-fs-hero); font-weight: 600; line-height: 1; letter-spacing: -0.4px; font-variant-numeric: tabular-nums; }
     .hdo-bar.nt .hdo-cd-val { color: #22c55e; }
     .hdo-bar.vt .hdo-cd-val { color: #ef4444; }
 
-    .schedule-block { background: var(--ep-surface); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; border: 0.5px solid var(--ep-border); }
-    .schedule-title { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; cursor: pointer; user-select: none; flex-wrap: wrap; }
+    .schedule-block { background: var(--ep-surface); border-radius: var(--ep-r-md); padding: 12px; margin-bottom: 12px; border: 1px solid var(--ep-border); }
+    .schedule-title { display: flex; align-items: center; gap: 7px; margin-bottom: 12px; cursor: pointer; user-select: none; flex-wrap: wrap; }
     .schedule-title:hover { opacity: .85; }
-    .schedule-when { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .7px; color: var(--ep-text-mid); }
-    .schedule-day { font-size: 10px; padding: 1px 6px; border-radius: 12px; background: var(--ep-badge-bg); color: var(--ep-badge-fg); text-transform: capitalize; }
+    .schedule-when { font-size: var(--ep-fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--ep-text-mid); }
+    .schedule-day { font-size: var(--ep-fs-micro); font-weight: 500; padding: 2px 8px; border-radius: var(--ep-r-pill); background: var(--ep-badge-bg); color: var(--ep-badge-fg); text-transform: capitalize; }
     .schedule-nav { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
-    .nt-remaining { font-size: 10px; color: var(--ep-text-dim); white-space: nowrap; }
-    .nt-remaining-inline { font-size: 10px; color: var(--ep-text-dim); margin-left: 4px; white-space: nowrap; }
-    .sday-btn { font-size: 10px; padding: 2px 8px; border-radius: 12px; border: 0.5px solid var(--ep-border); background: var(--ep-bg); color: var(--ep-accent); cursor: pointer; white-space: nowrap; font-weight: 500; }
-    .sday-btn:hover { background: var(--ep-border); }
+    .nt-remaining { font-size: var(--ep-fs-meta); color: var(--ep-text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .nt-remaining-inline { font-size: var(--ep-fs-meta); color: var(--ep-text-dim); margin-left: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .sday-btn { font-size: var(--ep-fs-micro); padding: 3px 10px; border-radius: var(--ep-r-pill); border: 1px solid var(--ep-border2); background: transparent; color: var(--ep-accent); cursor: pointer; white-space: nowrap; font-weight: 500; }
+    .sday-btn:hover { background: var(--ep-accent-bg); }
     .schedule-chevron { --mdc-icon-size: 15px; color: var(--ep-text-dim); flex-shrink: 0; }
-    .schedule-rows { display: flex; flex-direction: column; gap: 1px; margin-top: 6px; }
-    .srow { display: grid; grid-template-columns: 22px minmax(0,100px) 1fr auto; align-items: center; gap: 7px; padding: 4px 5px; border-radius: 5px; transition: opacity .2s; }
-    .srow.past { opacity: .3; }
-    .srow.future { opacity: .6; }
-    .srow.active.nt { background: rgba(34,197,94,.07); }
-    .srow.active.vt { background: rgba(239,68,68,.07); }
-    .srow.future.nt { background: rgba(34,197,94,.03); }
-    .stariff { font-size: 8px; font-weight: 800; letter-spacing: .4px; padding: 2px 4px; border-radius: 3px; text-align: center; }
-    .stariff.nt { background: rgba(34,197,94,.15); color: #22c55e; }
-    .stariff.vt { background: rgba(239,68,68,.12); color: #ef4444; }
-    .srow-time { font-size: 11px; font-weight: 500; color: var(--ep-text-mid); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
-    .srow-track { height: 3px; background: var(--ep-border); border-radius: 2px; overflow: hidden; }
-    .srow-fill { height: 100%; border-radius: 2px; transition: width 1s ease; }
+    .schedule-rows { display: flex; flex-direction: column; gap: 1px; margin-top: 8px; }
+    .srow { display: grid; grid-template-columns: 26px minmax(0,100px) 1fr auto; align-items: center; gap: 8px; padding: 5px 6px; border-radius: var(--ep-r-sm); transition: opacity .2s; }
+    .srow.past { opacity: .32; }
+    .srow.future { opacity: .62; }
+    .srow.active.nt { background: rgba(34,197,94,.09); }
+    .srow.active.vt { background: rgba(239,68,68,.09); }
+    .srow.future.nt { background: rgba(34,197,94,.04); }
+    .stariff { font-size: var(--ep-fs-micro); font-weight: 700; letter-spacing: .3px; padding: 1px 4px; border-radius: var(--ep-r-sm); text-align: center; }
+    .stariff.nt { background: rgba(34,197,94,.16); color: #22c55e; }
+    .stariff.vt { background: rgba(239,68,68,.14); color: #ef4444; }
+    .srow-time { font-size: var(--ep-fs-meta); font-weight: 500; color: var(--ep-text-mid); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+    .srow-track { height: 3px; background: var(--ep-border); border-radius: var(--ep-r-pill); overflow: hidden; }
+    .srow-fill { height: 100%; border-radius: var(--ep-r-pill); transition: width 1s ease; }
     .srow-fill.nt { background: #22c55e; }
     .srow-fill.vt { background: #ef4444; }
-    .snow { font-size: 8px; text-transform: uppercase; letter-spacing: .8px; font-weight: 800; padding: 2px 5px; border-radius: 8px; white-space: nowrap; }
-    .snow.nt { background: rgba(34,197,94,.15); color: #22c55e; }
-    .snow.vt { background: rgba(239,68,68,.12); color: #ef4444; }
-    .sdur { font-size: 10px; color: var(--ep-text-dim); white-space: nowrap; text-align: right; }
+    .snow { font-size: var(--ep-fs-micro); text-transform: uppercase; letter-spacing: .6px; font-weight: 700; padding: 2px 7px; border-radius: var(--ep-r-pill); white-space: nowrap; }
+    .snow.nt { background: rgba(34,197,94,.16); color: #22c55e; }
+    .snow.vt { background: rgba(239,68,68,.14); color: #ef4444; }
+    .sdur { font-size: var(--ep-fs-micro); color: var(--ep-text-dim); white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
 
-    .sblock-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+    .sblock-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
     /* Design pass (2026-08-12): the inactive tab used to be bare text with no
        border — nothing distinguished it from a plain label, so it didn't read
        as clickable until hovered. A resting border (removed only once active,
        where the filled background already signals state) fixes that without
        adding a second accent colour. */
-    .sblock-tab { flex: 1; text-align: center; font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px; padding: 5px 0; border-radius: 6px; border: 0.5px solid var(--ep-border); color: var(--ep-text-dim); cursor: pointer; user-select: none; }
+    .sblock-tab { flex: 1; text-align: center; font-size: var(--ep-fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .8px; padding: 6px 0; border-radius: var(--ep-r-sm); border: 1px solid var(--ep-border); color: var(--ep-text-dim); cursor: pointer; user-select: none; }
     .sblock-tab:hover { color: var(--ep-text-mid); border-color: var(--ep-border2); }
-    .sblock-tab.active { background: var(--ep-accent-bg); border-color: transparent; color: var(--ep-text); }
+    .sblock-tab.active { background: var(--ep-accent-bg); border-color: transparent; color: var(--ep-accent); }
 
-    .cost-pills { display: flex; gap: 6px; margin-bottom: 10px; }
-    .cost-pill { font-size: 10px; padding: 3px 9px; border-radius: 12px; border: 0.5px solid var(--ep-border); background: var(--ep-bg); color: var(--ep-accent); cursor: pointer; white-space: nowrap; font-weight: 500; }
-    .cost-pill:hover { background: var(--ep-border); }
-    .cost-pill.active { background: var(--ep-accent-bg); border-color: var(--ep-accent); color: var(--ep-text); }
-    .cost-stack { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+    .cost-pills { display: flex; gap: 6px; margin-bottom: 12px; }
+    .cost-pill { font-size: var(--ep-fs-micro); padding: 4px 11px; border-radius: var(--ep-r-pill); border: 1px solid var(--ep-border2); background: transparent; color: var(--ep-accent); cursor: pointer; white-space: nowrap; font-weight: 500; }
+    .cost-pill:hover { background: var(--ep-accent-bg); }
+    .cost-pill.active { background: var(--ep-accent-bg); border-color: transparent; }
+    .cost-stack { display: flex; height: 6px; border-radius: var(--ep-r-pill); overflow: hidden; margin-bottom: 8px; }
     .cost-seg.nt { background: #22c55e; }
     .cost-seg.vt { background: #ef4444; }
-    .cost-legend { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 10px; font-size: 11px; color: var(--ep-text-mid); }
+    .cost-legend { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 10px; font-size: var(--ep-fs-meta); color: var(--ep-text-mid); font-variant-numeric: tabular-nums; }
     .cost-leg.nt { color: #22c55e; }
     .cost-leg.vt { color: #ef4444; }
-    .cost-total { font-size: 20px; font-weight: 500; color: var(--ep-text); margin: 10px 0 2px; letter-spacing: -0.3px; }
-    .cost-est { font-size: 11px; color: var(--ep-text-dim); margin-top: 6px; padding-top: 6px; border-top: 0.5px solid var(--ep-border); }
-    .cost-empty { font-size: 11px; color: var(--ep-text-dim); text-align: center; padding: 10px 0; }
+    .cost-total { font-size: var(--ep-fs-hero); font-weight: 600; color: var(--ep-text); margin: 12px 0 2px; letter-spacing: -0.6px; font-variant-numeric: tabular-nums; }
+    .cost-est { font-size: var(--ep-fs-meta); color: var(--ep-text-dim); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--ep-border); }
+    .cost-empty { font-size: var(--ep-fs-meta); color: var(--ep-text-dim); text-align: center; padding: 12px 0; }
 
-    .timeline-bar { display: flex; height: 4px; border-radius: 2px; overflow: hidden; margin-bottom: 8px; gap: 1px; position: relative; }
+    .timeline-bar { display: flex; height: 6px; border-radius: var(--ep-r-pill); overflow: hidden; margin-bottom: 12px; gap: 1px; position: relative; }
     .tl-seg { border-radius: 1px; transition: opacity .3s; }
     .tl-seg.nt { background: #22c55e; }
     .tl-seg.vt { background: rgba(239,68,68,.35); }
-    .tl-seg.past { opacity: .3; }
+    .tl-seg.past { opacity: .32; }
     .tl-seg.active.nt { box-shadow: 0 0 4px rgba(34,197,94,.5); }
     .tl-seg.active.vt { background: #ef4444; }
-    .timeline-now { position: absolute; top: -2px; bottom: -2px; width: 4px; background: #fff; border-radius: 2px; pointer-events: none; box-shadow: -1px 0 0 #000, 1px 0 0 #000; }
+    /* follow_theme fix: was #fff with black side-borders, i.e. inverted and
+       near-invisible on a light HA theme. The marker now takes the theme's
+       text colour and separates itself from the coloured track with a ring in
+       the card background instead of hardcoded black. */
+    .timeline-now { position: absolute; top: -2px; bottom: -2px; width: 3px; background: var(--ep-text); border-radius: var(--ep-r-pill); pointer-events: none; box-shadow: 0 0 0 1.5px var(--ep-bg); }
 
-    .section-label { font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: var(--ep-text-dim); margin: 12px 0 6px; padding-left: 7px; border-left: 2px solid var(--ep-border); }
+    .section-label { font-size: var(--ep-fs-micro); text-transform: uppercase; letter-spacing: .9px; font-weight: 600; color: var(--ep-text-dim); margin: 20px 0 8px; padding-left: 8px; border-left: 2px solid var(--ep-border2); }
 
-    .ep-meter { background: var(--ep-surface); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; border: 0.5px solid var(--ep-border); }
-    .meter-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-    .meter-icon { width: 28px; height: 28px; border-radius: 6px; background: var(--ep-accent-bg); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .meter-icon ha-icon { --mdc-icon-size: 16px; color: var(--ep-accent); }
+    /* Nejvyšší elevace v kartě: stín místo okraje. Dřív měl hlavní měřič
+       identický kontejner jako okruh i jistič (stejný povrch, okraj, radius
+       i padding), takže hierarchii nesl jen textový .section-label. */
+    .ep-meter { background: var(--ep-surface); border-radius: var(--ep-r-md); padding: 16px; margin-bottom: 12px; border: none; box-shadow: var(--ep-shadow); }
+    .meter-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .meter-icon { width: 32px; height: 32px; border-radius: var(--ep-r-md); background: var(--ep-accent-bg); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .meter-icon ha-icon { --mdc-icon-size: 18px; color: var(--ep-accent); }
     .meter-title-wrap { display: flex; align-items: center; gap: 6px; flex: 1; }
-    .meter-title { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px; color: var(--ep-accent); }
+    .meter-title { font-size: var(--ep-fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .9px; color: var(--ep-text-mid); }
     .meter-total { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
-    .phases-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; }
-    .phase-cell { background: var(--ep-bg); border-radius: 6px; padding: 8px 10px; border: 0.5px solid var(--ep-border); }
-    .circuit-spark-wrap { background: var(--ep-bg); border-radius: 6px; padding: 6px 10px; border: 0.5px solid var(--ep-border); margin-top: 6px; }
-    .phase-label { font-size: 10px; color: var(--ep-text-dim); font-weight: 500; margin-bottom: 3px; }
-    .phase-power { font-size: 14px; font-weight: 500; color: #a0aec0; }
-    .phase-detail { font-size: 11px; color: var(--ep-text-dim); margin-top: 1px; }
+    .phases-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+    .phase-cell { background: var(--ep-surface-2); border-radius: var(--ep-r-md); padding: 10px 12px; border: 1px solid var(--ep-border); }
+    .circuit-spark-wrap { background: var(--ep-surface-2); border-radius: var(--ep-r-md); padding: 8px 10px; border: 1px solid var(--ep-border); margin-top: 8px; }
+    .phase-label { font-size: var(--ep-fs-micro); color: var(--ep-text-dim); font-weight: 600; letter-spacing: .6px; margin-bottom: 4px; }
+    /* follow_theme fix: bylo #a0aec0, na bílé kartě kontrast ~1.9:1.
+       Balíček B: povýšeno na --ep-fs-sub a --ep-text — je to primární hodnota
+       fáze, ne popisek, a dřív byla tlumenější než metriky pod ní. */
+    .phase-power { font-size: var(--ep-fs-sub); font-weight: 600; color: var(--ep-text); letter-spacing: -0.2px; font-variant-numeric: tabular-nums; }
+    .phase-detail { font-size: var(--ep-fs-meta); color: var(--ep-text-dim); margin-top: 2px; font-variant-numeric: tabular-nums; }
 
     .circuit-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; }
     @container (max-width: 480px) { .circuit-grid { grid-template-columns: 1fr; } }
@@ -2038,24 +2097,26 @@ export class ElectricityPanelCard extends LitElement {
     @container (max-width: 360px) { .phases-grid { grid-template-columns: 1fr; } }
     .three-phase-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
 
-    .circuit-card { background: var(--ep-surface); border-radius: 8px; padding: 12px 14px; border: 0.5px solid var(--ep-border); }
+    .circuit-card { background: var(--ep-surface); border-radius: var(--ep-r-md); padding: 12px 14px; border: 1px solid var(--ep-border); }
+    /* Balíček A: .is-on mělo zelený levý okraj, ale stav už nesou stavová
+       tečka i přepínač — tři signály pro jeden bit, a u kritického zapnutého
+       okruhu se stejně jeden z nich ztrácel pod amber okrajem. Okraj teď
+       znamená výhradně critical, takže je jednoznačný. Třída .is-on
+       v DOM zůstává kvůli card-mod, jen už nic nekreslí. */
     .circuit-card.critical  { border-left: 2px solid #f59e0b; }
-    .circuit-card.is-on     { border-left: 2px solid #22c55e; }
-    .circuit-card.critical.is-on { border-left: 2px solid #f59e0b; }
-    .circuit-header { display: flex; align-items: center; gap: 6px; margin-bottom: 1px; }
-    .circuit-name { font-size: 12px; font-weight: 500; color: var(--ep-text-mid); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .circuit-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .circuit-name { font-size: var(--ep-fs-body); font-weight: 500; color: var(--ep-text); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .lock-icon { --mdc-icon-size: 14px; color: #f59e0b; flex-shrink: 0; }
 
-    .three-phase-card { background: var(--ep-surface); border-radius: 8px; padding: 12px 14px; border: 0.5px solid var(--ep-border); }
+    .three-phase-card { background: var(--ep-surface); border-radius: var(--ep-r-md); padding: 14px 16px; border: 1px solid var(--ep-border); }
     .three-phase-card.critical { border-left: 2px solid #f59e0b; }
-    .three-phase-card.is-on    { border-left: 2px solid #22c55e; }
-    .tp-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+    .tp-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
     .tp-title-row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
     .tp-total { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex-shrink: 0; }
-    .tp-footer { display: flex; justify-content: flex-end; margin-top: 8px; }
+    .tp-footer { display: flex; justify-content: flex-end; margin-top: 12px; }
 
-    .load-track { height: 3px; background: var(--ep-border2); border-radius: 2px; overflow: hidden; margin: 7px 0; }
-    .load-fill { height: 100%; border-radius: 2px; transition: width 1s ease; }
+    .load-track { height: 3px; background: var(--ep-border); border-radius: var(--ep-r-pill); overflow: hidden; margin: 10px 0; }
+    .load-fill { height: 100%; border-radius: var(--ep-r-pill); transition: width 1s ease; }
     .load-fill.overload { animation: ep-overload 1s ease-in-out infinite; }
     @keyframes ep-overload {
       0%, 100% { opacity: 1; }
@@ -2064,87 +2125,94 @@ export class ElectricityPanelCard extends LitElement {
 
     .circuit-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; }
     .metrics { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-    .metric-primary { font-size: 22px; font-weight: 500; color: var(--ep-text); line-height: 1; letter-spacing: -0.4px; }
+    .metric-primary { font-size: var(--ep-fs-hero); font-weight: 600; color: var(--ep-text); line-height: 1; letter-spacing: -0.6px; font-variant-numeric: tabular-nums; }
     .metric-primary.inactive { color: var(--ep-text-faint); }
-    .metric-small { font-size: 11px; color: var(--ep-text-dim); display: flex; flex-wrap: wrap; align-items: center; gap: 1px 2px; }
+    .metric-small { font-size: var(--ep-fs-meta); color: var(--ep-text-dim); display: flex; flex-wrap: wrap; align-items: center; gap: 1px 2px; margin-top: 3px; font-variant-numeric: tabular-nums; }
     .metric-sep { opacity: .4; margin: 0 1px; }
     /* Design pass (2026-08-12): was #f59e0b, same amber as the age-badge's
        "stale data" warning colour (_ageBadge, age_warn_color) — the two had
        no relation to each other but looked like the same signal next to each
-       other on a circuit card. Reusing --ep-accent instead keeps cost visually
-       distinct from staleness warnings, and matches the card's existing
-       "highlighted small label" colour (.meter-title, .ch-sum) rather than
-       inventing a third accent hue. */
-    .cost-rate { color: var(--ep-accent); font-weight: 500; }
+       other on a circuit card. Reusing --ep-accent keeps cost visually
+       distinct from staleness warnings without inventing a third hue. */
+    .cost-rate { color: var(--ep-accent); font-weight: 600; }
 
-    .badge { font-size: 9px; padding: 2px 5px; border-radius: 4px; font-weight: 500; flex-shrink: 0; letter-spacing: .3px; }
+    .badge { font-size: var(--ep-fs-micro); padding: 2px 6px; border-radius: var(--ep-r-sm); font-weight: 600; flex-shrink: 0; letter-spacing: .3px; }
     .badge-info  { background: var(--ep-badge-bg); color: var(--ep-badge-fg); }
     .badge-phase { background: var(--ep-badge-bg); color: var(--ep-badge-fg); }
 
-    .toggle { width: 32px; height: 18px; border-radius: 9px; border: none; cursor: pointer; position: relative; flex-shrink: 0; transition: background .2s; }
-    .toggle::after { content: ''; position: absolute; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.4); transition: left .2s; }
-    .toggle.on  { background: #16a34a; }
+    .toggle { width: 34px; height: 20px; border-radius: var(--ep-r-pill); border: none; cursor: pointer; position: relative; flex-shrink: 0; transition: background .2s; }
+    .toggle::after { content: ''; position: absolute; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.4); transition: left .2s; }
+    /* Balíček A: stav spínače byl zelený jako nízký tarif, takže "zapnuto" a
+       "teď je levný proud" na kartě splývaly. Zapnuto je interakce, ne tarif. */
+    .toggle.on  { background: var(--ep-accent); }
     .toggle.on::after  { left: 17px; }
-    .toggle.off { background: #374151; }
+    .toggle.off { background: var(--ep-text-faint); }
     .toggle.off::after { left: 3px; }
-    .toggle.sm  { width: 28px; height: 16px; border-radius: 8px; }
-    .toggle.sm::after { width: 10px; height: 10px; top: 3px; }
-    .toggle.sm.on::after  { left: 15px; }
+    .toggle.sm  { width: 28px; height: 16px; }
+    .toggle.sm::after { width: 11px; height: 11px; top: 2.5px; }
+    .toggle.sm.on::after  { left: 14px; }
     .toggle.sm.off::after { left: 3px; }
 
     .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; transition: box-shadow .3s; }
-    .status-dot.on  { background: #22c55e; box-shadow: 0 0 0 2px rgba(34,197,94,.2); }
-    .status-dot.off { background: #374151; }
-    .status-dot.none { background: transparent; border: 1px solid #374151; }
+    .status-dot.on  { background: var(--ep-accent); box-shadow: 0 0 0 2.5px var(--ep-accent-bg); }
+    .status-dot.off { background: var(--ep-text-faint); }
+    .status-dot.none { background: transparent; border: 1px solid var(--ep-text-faint); }
     .status-dot.sm  { width: 6px; height: 6px; }
 
-    .expand-btn { display: flex; align-items: center; gap: 4px; background: var(--ep-bg); border: 0.5px solid var(--ep-border); border-radius: 5px; cursor: pointer; color: var(--ep-text-dim); padding: 2px 6px; flex-shrink: 0; }
+    .expand-btn { display: flex; align-items: center; gap: 4px; background: transparent; border: 1px solid var(--ep-border2); border-radius: var(--ep-r-sm); cursor: pointer; color: var(--ep-text-mid); padding: 3px 8px; flex-shrink: 0; }
+    .expand-btn:hover { background: var(--ep-accent-bg); }
     .expand-btn ha-icon { --mdc-icon-size: 14px; }
-    .expand-btn span { font-size: 10px; }
+    .expand-btn span { font-size: var(--ep-fs-micro); }
 
-    .tp-devices-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--ep-border); }
-    .devices-list { display: flex; flex-direction: column; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--ep-border); }
+    .tp-devices-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ep-border); }
+    .devices-list { display: flex; flex-direction: column; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ep-border); }
     .tp-device-col { min-width: 0; }
     .tp-device-col .device-group-label { padding-left: 0; }
     .tp-device-col .device-row { padding-left: 0; }
-    .device-group { margin-bottom: 6px; }
-    .device-group-label { display: flex; justify-content: space-between; align-items: center; font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: var(--ep-text-dim); margin-bottom: 4px; padding-left: 14px; }
-    .ch-sum { font-size: 10px; font-weight: 500; color: var(--ep-accent); letter-spacing: 0; text-transform: none; }
-    .device-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 0.5px solid var(--ep-border2); }
+    .device-group { margin-bottom: 8px; }
+    .device-group-label { display: flex; justify-content: space-between; align-items: center; font-size: var(--ep-fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--ep-text-dim); margin-bottom: 4px; padding-left: 14px; }
+    .ch-sum { font-size: var(--ep-fs-micro); font-weight: 600; color: var(--ep-accent); letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
+    .device-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--ep-border); }
     .device-row:last-child { border-bottom: none; }
     .device-row.channel { padding-left: 8px; }
-    .device-name { flex: 1; font-size: 12px; color: var(--ep-text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .device-metrics { font-size: 11px; color: var(--ep-text-dim); white-space: nowrap; flex-shrink: 0; }
+    .device-name { flex: 1; font-size: var(--ep-fs-body); color: var(--ep-text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .device-metrics { font-size: var(--ep-fs-meta); color: var(--ep-text-dim); white-space: nowrap; flex-shrink: 0; font-variant-numeric: tabular-nums; }
     .note-row { opacity: .6; }
     .note-icon { --mdc-icon-size: 12px; color: var(--ep-text-dim); flex-shrink: 0; }
     .note-row .device-name { font-style: italic; }
 
-    .sparkline-wrap { position: relative; display: flex; align-items: stretch; width: 100%; height: 38px; margin-top: 6px; }
+    .sparkline-wrap { position: relative; display: flex; align-items: stretch; width: 100%; height: 38px; margin-top: 8px; }
     .sparkline { flex: 1; min-width: 0; display: block; overflow: visible; cursor: crosshair; }
-    .spark-lbls { width: 40px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 2px 2px; pointer-events: none; }
+    .spark-lbls { width: 44px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 1px 2px; pointer-events: none; }
     .spark-lbls-left { align-items: flex-start; }
     .spark-lbls-right { align-items: flex-end; }
-    .spark-lbl-max { font-size: 8px; color: rgba(255,255,255,.75); text-shadow: 0 0 3px var(--ep-bg), 0 0 3px var(--ep-bg); white-space: nowrap; font-family: inherit; }
-    .spark-lbl-min { font-size: 8px; color: rgba(255,255,255,.45); text-shadow: 0 0 3px var(--ep-bg), 0 0 3px var(--ep-bg); white-space: nowrap; font-family: inherit; }
+    /* follow_theme fix: these were rgba(255,255,255,…) — invisible on a light
+       theme. The --ep-bg halo stays; it is what keeps them legible on top of
+       the graph in either theme. */
+    .spark-lbl-max { font-size: var(--ep-fs-micro); color: var(--ep-text-mid); text-shadow: 0 0 3px var(--ep-bg), 0 0 3px var(--ep-bg); white-space: nowrap; font-family: inherit; font-variant-numeric: tabular-nums; }
+    .spark-lbl-min { font-size: var(--ep-fs-micro); color: var(--ep-text-dim); text-shadow: 0 0 3px var(--ep-bg), 0 0 3px var(--ep-bg); white-space: nowrap; font-family: inherit; font-variant-numeric: tabular-nums; }
     .spark-ref { stroke-width: 1px; stroke-dasharray: 3 3; }
     .spark-hidden { display: none; }
-    .spark-hover-line { stroke: rgba(255,255,255,.35); stroke-width: .5; pointer-events: none; }
+    .spark-hover-line { stroke: var(--ep-text-dim); stroke-width: .5; pointer-events: none; }
     .spark-hover-dot { pointer-events: none; }
     .spark-tooltip {
       position: absolute; top: -2px; transform: translate(-50%, -100%);
-      background: var(--ep-surface); border: 0.5px solid var(--ep-border);
-      border-radius: 6px; padding: 2px 6px; font-size: 10px; color: var(--ep-text-mid);
+      background: var(--ep-surface); border: 1px solid var(--ep-border);
+      border-radius: var(--ep-r-sm); padding: 3px 7px; font-size: var(--ep-fs-micro); color: var(--ep-text-mid);
       white-space: nowrap; pointer-events: none; visibility: hidden; z-index: 1;
+      font-variant-numeric: tabular-nums; box-shadow: var(--ep-shadow);
     }
-    .spark-win-switch { display: flex; gap: 4px; margin: 6px 0 2px; }
+    .spark-win-switch { display: flex; gap: 4px; margin: 10px 0 4px; }
     .spark-win-btn {
-      flex: 1; font-size: 10px; padding: 3px 0; border-radius: 6px; cursor: pointer;
-      background: var(--ep-surface); border: 0.5px solid var(--ep-border); color: var(--ep-text-dim);
+      flex: 1; font-size: var(--ep-fs-micro); font-weight: 500; padding: 4px 0; border-radius: var(--ep-r-sm); cursor: pointer;
+      background: transparent; border: 1px solid var(--ep-border); color: var(--ep-text-dim);
     }
-    .spark-win-btn.active { background: var(--ep-accent-bg); }
-    .age-badge { font-size: 10px; font-variant-numeric: tabular-nums; }
+    .spark-win-btn.active { background: var(--ep-accent-bg); border-color: transparent; color: var(--ep-accent); }
+    .age-badge { font-size: var(--ep-fs-micro); font-variant-numeric: tabular-nums; }
 
-    .nt-hint { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #f59e0b; opacity: .85; margin-top: 6px; }
+    /* Balíček A: amber je vyhrazený varováním (zastaralá data, přetížení,
+       critical). Tip "za chvíli bude NT" je informace, ne varování. */
+    .nt-hint { display: flex; align-items: center; gap: 4px; font-size: var(--ep-fs-micro); color: var(--ep-accent); opacity: .9; margin-top: 8px; }
     .nt-hint ha-icon { --mdc-icon-size: 12px; }
 
     .clickable { cursor: pointer; }

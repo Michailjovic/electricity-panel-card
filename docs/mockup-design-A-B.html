@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Electricity Panel Card — mockup PŘED / PO (balíčky A + B)</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════════
+   STRÁNKA MOCKUPU (není součástí karty)
+   ══════════════════════════════════════════════════════════════════════════ */
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 20px 16px 60px;
+  font-family: Roboto, -apple-system, "Segoe UI", system-ui, sans-serif;
+  background: #0a0c10; color: #cbd5e1;
+  transition: background .25s, color .25s;
+}
+body.page-light { background: #eceef2; color: #37414f; }
+
+.page-head { max-width: 1500px; margin: 0 auto 18px; }
+.page-head h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; letter-spacing: -.3px; }
+.page-head p { font-size: 12.5px; margin: 0; opacity: .65; line-height: 1.5; }
+
+.controls {
+  max-width: 1500px; margin: 0 auto 22px;
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  padding: 10px 12px; border-radius: 10px;
+  background: rgba(127,127,127,.09); border: 1px solid rgba(127,127,127,.16);
+}
+.ctl-group { display: flex; gap: 3px; padding: 3px; border-radius: 8px; background: rgba(127,127,127,.12); }
+.ctl-group button {
+  font: inherit; font-size: 11.5px; font-weight: 500; padding: 5px 12px;
+  border: none; border-radius: 6px; cursor: pointer;
+  background: transparent; color: inherit; opacity: .6; transition: all .15s;
+}
+.ctl-group button:hover { opacity: .9; }
+.ctl-group button.on { background: rgba(127,127,127,.28); opacity: 1; }
+.ctl-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; opacity: .5; margin-right: 2px; }
+
+.stage { max-width: 1500px; margin: 0 auto; display: grid; gap: 22px; align-items: start; }
+.stage.both { grid-template-columns: 1fr 1fr; }
+.stage.one  { grid-template-columns: minmax(0, 900px); justify-content: center; }
+@media (max-width: 1100px) { .stage.both { grid-template-columns: 1fr; } }
+
+.col-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 9px; padding-left: 2px; }
+.col-head .tag {
+  font-size: 10px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px;
+}
+.tag.before { background: rgba(239,68,68,.16); color: #f87171; }
+.tag.after  { background: rgba(34,197,94,.16); color: #4ade80; }
+.col-head .sub { font-size: 11.5px; opacity: .55; }
+.col.hidden { display: none; }
+
+.notes { max-width: 1500px; margin: 30px auto 0; }
+.notes h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; opacity: .5; margin: 0 0 10px; font-weight: 600; }
+.notes-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); gap: 10px; }
+.note {
+  padding: 11px 13px; border-radius: 9px; font-size: 12px; line-height: 1.55;
+  background: rgba(127,127,127,.08); border: 1px solid rgba(127,127,127,.15);
+}
+.note b { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; opacity: .8; margin-bottom: 3px; }
+.note .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   KARTA — SPOLEČNÁ STRUKTURA
+   Rozdíly PŘED/PO jsou VÝHRADNĚ v CSS níže. DOM je v obou sloupcích identický
+   (to je zároveň důkaz, že balíčky A+B nesahají do render logiky).
+   ══════════════════════════════════════════════════════════════════════════ */
+.ep-card { border-radius: 12px; overflow: hidden; }
+.card-content { padding: 12px 12px 16px; }
+
+.hdo-bar { display: flex; align-items: center; gap: 12px; }
+.hdo-dot { border-radius: 50%; flex-shrink: 0; }
+.hdo-info { flex: 1; min-width: 0; }
+.hdo-prog { overflow: hidden; }
+.hdo-prog-fill { height: 100%; border-radius: inherit; }
+.hdo-cd { text-align: right; flex-shrink: 0; }
+.hdo-cd-val { font-variant-numeric: tabular-nums; line-height: 1; }
+@keyframes hdo-pulse { 0%,100% { box-shadow: 0 0 0 3px rgba(34,197,94,.2); } 50% { box-shadow: 0 0 0 5px rgba(34,197,94,.07); } }
+
+.schedule-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; cursor: pointer; }
+.schedule-nav { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.timeline-bar { display: flex; overflow: hidden; position: relative; gap: 1px; }
+.tl-seg { border-radius: 1px; }
+.schedule-rows { display: flex; flex-direction: column; gap: 1px; }
+.srow { display: grid; grid-template-columns: 26px minmax(0,100px) 1fr auto; align-items: center; gap: 8px; }
+.srow-track { overflow: hidden; }
+.srow-fill { height: 100%; border-radius: inherit; }
+.stariff { text-align: center; }
+
+.meter-header { display: flex; align-items: center; gap: 8px; }
+.meter-icon { display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.meter-title-wrap { display: flex; align-items: center; gap: 6px; flex: 1; }
+.meter-total { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.phases-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; }
+@media (max-width: 560px) { .phases-grid { grid-template-columns: 1fr; } }
+
+.three-phase-list { display: flex; flex-direction: column; }
+.tp-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.tp-title-row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.tp-total { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex-shrink: 0; }
+.tp-footer { display: flex; justify-content: flex-end; }
+
+.circuit-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; }
+@media (max-width: 640px) { .circuit-grid { grid-template-columns: 1fr; } }
+.circuit-header { display: flex; align-items: center; gap: 6px; }
+.circuit-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.circuit-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; }
+.metrics { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.metric-primary { line-height: 1; }
+.metric-small { display: flex; flex-wrap: wrap; align-items: center; gap: 1px 2px; }
+.metric-sep { opacity: .4; margin: 0 1px; }
+.load-track { overflow: hidden; }
+.load-fill { height: 100%; border-radius: inherit; }
+
+.toggle { border: none; cursor: pointer; position: relative; flex-shrink: 0; transition: background .2s; }
+.toggle::after { content:''; position: absolute; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.4); transition: left .2s; }
+.status-dot { border-radius: 50%; flex-shrink: 0; }
+.expand-btn { display: flex; align-items: center; gap: 4px; cursor: pointer; flex-shrink: 0; }
+.badge { flex-shrink: 0; }
+
+.sparkline-wrap { position: relative; display: flex; align-items: stretch; width: 100%; height: 38px; }
+.sparkline { flex: 1; min-width: 0; display: block; overflow: visible; }
+.spark-lbls { width: 42px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 1px 2px; align-items: flex-start; }
+.spark-ref { stroke-width: 1px; stroke-dasharray: 3 3; }
+.spark-win-switch { display: flex; gap: 4px; }
+.spark-win-btn { flex: 1; cursor: pointer; }
+.svg-ico { display: block; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   « PŘED » — 1:1 přepis static styles z v5.2.1
+   ══════════════════════════════════════════════════════════════════════════ */
+.before .ep-card {
+  --ep-bg: #111318; --ep-surface: #181c24; --ep-border: #252a35; --ep-border2: #1f2937;
+  --ep-text: #e2e8f0; --ep-text-mid: #94a3b8; --ep-text-dim: #5d6a80; --ep-text-faint: #374151;
+  --ep-accent: #6b7db3; --ep-accent-bg: #1e2435; --ep-badge-bg: #1e2a4a; --ep-badge-fg: #6b9bdb;
+  background: var(--ep-bg);
+}
+/* follow_theme: true → mapování na světlé HA téma (přesně jak je v kódu) */
+.page-light .before .ep-card {
+  --ep-bg: #fff; --ep-surface: #f5f5f5; --ep-border: rgba(0,0,0,.12); --ep-border2: rgba(0,0,0,.12);
+  --ep-text: #212121; --ep-text-mid: #727272; --ep-text-dim: #727272; --ep-text-faint: #bdbdbd;
+  --ep-accent: #03a9f4; --ep-accent-bg: rgba(33,150,243,.12);
+  --ep-badge-bg: rgba(33,150,243,.12); --ep-badge-fg: #03a9f4;
+}
+.page-light .before .hdo-bar.nt { background: rgba(34,197,94,.08); border-color: rgba(34,197,94,.3); }
+.page-light .before .hdo-bar.nt .hdo-sub { color: var(--ep-text-mid); }
+.page-light .before .hdo-bar.nt .hdo-prog { background: rgba(127,127,127,.18); }
+
+.before .hdo-bar { border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+.before .hdo-bar.nt { background: #0f2318; border: .5px solid #1e4d30; }
+.before .hdo-dot { width: 8px; height: 8px; }
+.before .hdo-dot.nt { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,.2); animation: hdo-pulse 2.5s ease-in-out infinite; }
+.before .hdo-label { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px; color: #22c55e; }
+.before .hdo-sub { font-size: 11px; margin-top: 1px; color: #4b7a5e; }
+.before .hdo-prog { height: 2px; border-radius: 1px; margin-top: 8px; background: #1a2e20; }
+.before .hdo-prog-fill { background: #22c55e; }
+.before .hdo-cd-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--ep-text-dim); }
+.before .hdo-cd-val { font-size: 24px; font-weight: 500; color: #22c55e; }
+
+.before .schedule-block { background: var(--ep-surface); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; border: .5px solid var(--ep-border); }
+.before .schedule-title { margin-bottom: 8px; }
+.before .schedule-when { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .7px; color: var(--ep-text-mid); }
+.before .schedule-day { font-size: 10px; padding: 1px 6px; border-radius: 12px; background: var(--ep-badge-bg); color: var(--ep-badge-fg); }
+.before .nt-remaining { font-size: 10px; color: var(--ep-text-dim); white-space: nowrap; }
+.before .sday-btn { font-size: 10px; padding: 2px 8px; border-radius: 12px; border: .5px solid var(--ep-border); background: var(--ep-bg); color: var(--ep-accent); cursor: pointer; font-weight: 500; }
+.before .schedule-chevron { color: var(--ep-text-dim); }
+.before .timeline-bar { height: 4px; border-radius: 2px; margin-bottom: 8px; }
+.before .tl-seg.nt { background: #22c55e; }
+.before .tl-seg.vt { background: rgba(239,68,68,.35); }
+.before .tl-seg.past { opacity: .3; }
+.before .tl-seg.active.nt { box-shadow: 0 0 4px rgba(34,197,94,.5); }
+.before .timeline-now { position: absolute; top: -2px; bottom: -2px; width: 4px; background: #fff; border-radius: 2px; box-shadow: -1px 0 0 #000, 1px 0 0 #000; }
+.before .schedule-rows { margin-top: 6px; }
+.before .srow { padding: 4px 5px; border-radius: 5px; }
+.before .srow.past { opacity: .3; }
+.before .srow.future { opacity: .6; }
+.before .srow.active.nt { background: rgba(34,197,94,.07); }
+.before .srow.future.nt { background: rgba(34,197,94,.03); }
+.before .stariff { font-size: 8px; font-weight: 800; letter-spacing: .4px; padding: 2px 4px; border-radius: 3px; }
+.before .stariff.nt { background: rgba(34,197,94,.15); color: #22c55e; }
+.before .stariff.vt { background: rgba(239,68,68,.12); color: #ef4444; }
+.before .srow-time { font-size: 11px; font-weight: 500; color: var(--ep-text-mid); font-variant-numeric: tabular-nums; }
+.before .srow-track { height: 3px; background: var(--ep-border); border-radius: 2px; }
+.before .srow-fill.nt { background: #22c55e; }
+.before .srow-fill.vt { background: #ef4444; }
+.before .snow { font-size: 8px; text-transform: uppercase; letter-spacing: .8px; font-weight: 800; padding: 2px 5px; border-radius: 8px; background: rgba(34,197,94,.15); color: #22c55e; }
+.before .sdur { font-size: 10px; color: var(--ep-text-dim); text-align: right; }
+
+.before .section-label { font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: var(--ep-text-dim); margin: 12px 0 6px; padding-left: 7px; border-left: 2px solid var(--ep-border); }
+
+.before .ep-meter { background: var(--ep-surface); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; border: .5px solid var(--ep-border); }
+.before .meter-header { margin-bottom: 10px; }
+.before .meter-icon { width: 28px; height: 28px; border-radius: 6px; background: var(--ep-accent-bg); color: var(--ep-accent); }
+.before .meter-title { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px; color: var(--ep-accent); }
+.before .phase-cell { background: var(--ep-bg); border-radius: 6px; padding: 8px 10px; border: .5px solid var(--ep-border); }
+.before .phase-label { font-size: 10px; color: var(--ep-text-dim); font-weight: 500; margin-bottom: 3px; }
+.before .phase-power { font-size: 14px; font-weight: 500; color: #a0aec0; }
+.before .phase-detail { font-size: 11px; color: var(--ep-text-dim); margin-top: 1px; }
+
+.before .three-phase-list { gap: 8px; margin-bottom: 4px; }
+.before .three-phase-card, .before .circuit-card { background: var(--ep-surface); border-radius: 8px; padding: 12px 14px; border: .5px solid var(--ep-border); }
+.before .three-phase-card.is-on, .before .circuit-card.is-on { border-left: 2px solid #22c55e; }
+.before .three-phase-card.critical, .before .circuit-card.critical,
+.before .circuit-card.critical.is-on { border-left: 2px solid #f59e0b; }
+.before .tp-header { margin-bottom: 4px; }
+.before .tp-footer { margin-top: 8px; }
+.before .circuit-header { margin-bottom: 1px; }
+.before .circuit-name { font-size: 12px; font-weight: 500; color: var(--ep-text-mid); }
+.before .lock-icon { color: #f59e0b; }
+.before .load-track { height: 3px; background: var(--ep-border2); border-radius: 2px; margin: 7px 0; }
+.before .metric-primary { font-size: 22px; font-weight: 500; color: var(--ep-text); letter-spacing: -.4px; }
+.before .metric-small { font-size: 11px; color: var(--ep-text-dim); }
+.before .cost-rate { color: var(--ep-accent); font-weight: 500; }
+.before .age-badge { font-variant-numeric: tabular-nums; }
+.before .age-badge.ok    { color: #374151; }   /* age_ok_color — napevno, nemapuje se na téma */
+.before .age-badge.warn  { color: #f59e0b; }
+.before .age-badge.stale { color: #ef4444; }
+.before .badge { font-size: 9px; padding: 2px 5px; border-radius: 4px; font-weight: 500; letter-spacing: .3px; background: var(--ep-badge-bg); color: var(--ep-badge-fg); }
+.before .toggle { width: 32px; height: 18px; border-radius: 9px; }
+.before .toggle::after { top: 3px; width: 12px; height: 12px; }
+.before .toggle.on { background: #16a34a; } .before .toggle.on::after { left: 17px; }
+.before .toggle.off { background: #374151; } .before .toggle.off::after { left: 3px; }
+.before .status-dot { width: 7px; height: 7px; }
+.before .status-dot.on { background: #22c55e; box-shadow: 0 0 0 2px rgba(34,197,94,.2); }
+.before .status-dot.off { background: #374151; }
+.before .expand-btn { background: var(--ep-bg); border: .5px solid var(--ep-border); border-radius: 5px; color: var(--ep-text-dim); padding: 2px 6px; font-size: 10px; }
+.before .circuit-spark-wrap { background: var(--ep-bg); border-radius: 6px; padding: 6px 10px; border: .5px solid var(--ep-border); margin-top: 6px; }
+.before .sparkline-wrap { margin-top: 6px; }
+.before .spark-lbl-max { font-size: 8px; color: rgba(255,255,255,.75); text-shadow: 0 0 3px var(--ep-bg), 0 0 3px var(--ep-bg); white-space: nowrap; }
+.before .spark-lbl-min { font-size: 8px; color: rgba(255,255,255,.45); text-shadow: 0 0 3px var(--ep-bg), 0 0 3px var(--ep-bg); white-space: nowrap; }
+.before .spark-win-switch { margin: 6px 0 2px; }
+.before .spark-win-btn { font-size: 10px; padding: 3px 0; border-radius: 6px; background: var(--ep-surface); border: .5px solid var(--ep-border); color: var(--ep-text-dim); }
+.before .spark-win-btn.active { background: var(--ep-accent-bg); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   « PO » — balíček A (barevná disciplína) + balíček B (hierarchie a rytmus)
+   ══════════════════════════════════════════════════════════════════════════ */
+.after .ep-card {
+  /* ─ tři úrovně povrchu; vnořené je SVĚTLEJŠÍ, ne tmavší ─ */
+  --ep-bg:        #0f1116;
+  --ep-surface:   #171a21;
+  --ep-surface-2: #1f232c;
+  --ep-border:    #262b36;
+  --ep-border-strong: #333a48;
+
+  --ep-text:      #e6eaf2;
+  --ep-text-mid:  #9aa5b8;
+  --ep-text-dim:  #6b7688;
+
+  /* ─ balíček A: jedna barva = jeden význam ─ */
+  --ep-accent:    #7aa2e3;   /* interakce, stav zapnuto, zvýrazněný text */
+  --ep-accent-bg: rgba(122,162,227,.14);
+  --ep-tariff-nt: #22c55e;   /* VÝHRADNĚ nízký tarif */
+  --ep-tariff-vt: #ef4444;   /* VÝHRADNĚ vysoký tarif */
+  --ep-warn:      #f59e0b;   /* VÝHRADNĚ varování */
+  --ep-neutral:   #7c8ba1;   /* průběhy, zátěž v klidu */
+  --ep-shadow:    0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.28);
+
+  /* ─ balíček B: typografická škála — 5 kroků místo devíti ─ */
+  --fs-micro: 10px; --fs-meta: 11px; --fs-body: 13px; --fs-sub: 16px; --fs-hero: 24px;
+  /* ─ radius: 3 hodnoty ─ */
+  --r-sm: 4px; --r-md: 8px; --r-pill: 999px;
+
+  background: var(--ep-bg);
+}
+.page-light .after .ep-card {
+  --ep-bg:        #f4f5f7;
+  --ep-surface:   #ffffff;
+  --ep-surface-2: #f7f8fa;
+  --ep-border:    rgba(16,24,40,.10);
+  --ep-border-strong: rgba(16,24,40,.18);
+  --ep-text:      #101828;
+  --ep-text-mid:  #475467;
+  --ep-text-dim:  #737d8c;
+  --ep-accent:    #2f6fd0;
+  --ep-accent-bg: rgba(47,111,208,.10);
+  --ep-tariff-nt: #15803d;
+  --ep-tariff-vt: #c02626;
+  --ep-warn:      #b45309;
+  --ep-neutral:   #7c8ba1;
+  --ep-shadow:    0 1px 2px rgba(16,24,40,.06), 0 4px 12px rgba(16,24,40,.07);
+}
+
+.after .card-content { padding: 12px 12px 16px; }
+
+/* ── HDO bar: hero prvek, jediné místo, kde zelená znamená „levný proud" ── */
+.after .hdo-bar { border-radius: var(--r-md); padding: 14px 16px; margin-bottom: 12px; }
+.after .hdo-bar.nt {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ep-tariff-nt) 12%, var(--ep-surface)), var(--ep-surface));
+  border: 1px solid color-mix(in srgb, var(--ep-tariff-nt) 28%, transparent);
+  box-shadow: var(--ep-shadow);
+}
+.after .hdo-dot { width: 8px; height: 8px; }
+.after .hdo-dot.nt { background: var(--ep-tariff-nt); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ep-tariff-nt) 22%, transparent); animation: hdo-pulse 2.5s ease-in-out infinite; }
+.after .hdo-label { font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--ep-tariff-nt); }
+.after .hdo-sub { font-size: var(--fs-meta); margin-top: 3px; color: var(--ep-text-mid); font-variant-numeric: tabular-nums; }
+.after .hdo-prog { height: 6px; border-radius: var(--r-pill); margin-top: 10px; background: color-mix(in srgb, var(--ep-tariff-nt) 14%, transparent); }
+.after .hdo-prog-fill { background: var(--ep-tariff-nt); }
+.after .hdo-cd-lbl { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .6px; color: var(--ep-text-dim); margin-bottom: 4px; }
+.after .hdo-cd-val { font-size: var(--fs-hero); font-weight: 600; color: var(--ep-tariff-nt); letter-spacing: -.4px; }
+
+/* ── Rozvrh ── */
+.after .schedule-block { background: var(--ep-surface); border-radius: var(--r-md); padding: 12px; margin-bottom: 12px; border: 1px solid var(--ep-border); }
+.after .schedule-title { margin-bottom: 12px; }
+.after .schedule-when { font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--ep-text-mid); }
+.after .schedule-day { font-size: var(--fs-micro); font-weight: 500; padding: 2px 8px; border-radius: var(--r-pill); background: var(--ep-accent-bg); color: var(--ep-accent); }
+.after .nt-remaining { font-size: var(--fs-meta); color: var(--ep-text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.after .sday-btn { font-size: var(--fs-micro); font-weight: 500; padding: 3px 10px; border-radius: var(--r-pill); border: 1px solid var(--ep-border-strong); background: transparent; color: var(--ep-accent); cursor: pointer; }
+.after .schedule-chevron { color: var(--ep-text-dim); }
+.after .timeline-bar { height: 6px; border-radius: var(--r-pill); margin-bottom: 12px; }
+.after .tl-seg.nt { background: var(--ep-tariff-nt); }
+.after .tl-seg.vt { background: color-mix(in srgb, var(--ep-tariff-vt) 40%, transparent); }
+.after .tl-seg.past { opacity: .32; }
+.after .timeline-now { position: absolute; top: -2px; bottom: -2px; width: 3px; border-radius: var(--r-pill); background: var(--ep-text); box-shadow: 0 0 0 1.5px var(--ep-bg); }
+.after .srow { padding: 5px 6px; border-radius: var(--r-sm); }
+.after .srow.past { opacity: .32; }
+.after .srow.future { opacity: .62; }
+.after .srow.active.nt { background: color-mix(in srgb, var(--ep-tariff-nt) 9%, transparent); }
+.after .srow.future.nt { background: color-mix(in srgb, var(--ep-tariff-nt) 4%, transparent); }
+.after .stariff { font-size: var(--fs-micro); font-weight: 700; letter-spacing: .3px; padding: 1px 4px; border-radius: var(--r-sm); }
+.after .stariff.nt { background: color-mix(in srgb, var(--ep-tariff-nt) 16%, transparent); color: var(--ep-tariff-nt); }
+.after .stariff.vt { background: color-mix(in srgb, var(--ep-tariff-vt) 14%, transparent); color: var(--ep-tariff-vt); }
+.after .srow-time { font-size: var(--fs-meta); font-weight: 500; color: var(--ep-text-mid); font-variant-numeric: tabular-nums; }
+.after .srow-track { height: 3px; background: var(--ep-border); border-radius: var(--r-pill); }
+.after .srow-fill.nt { background: var(--ep-tariff-nt); }
+.after .srow-fill.vt { background: var(--ep-tariff-vt); }
+.after .snow { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .6px; font-weight: 700; padding: 2px 7px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--ep-tariff-nt) 16%, transparent); color: var(--ep-tariff-nt); }
+.after .sdur { font-size: var(--fs-micro); color: var(--ep-text-dim); text-align: right; font-variant-numeric: tabular-nums; }
+
+.after .section-label { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .9px; font-weight: 600; color: var(--ep-text-dim); margin: 20px 0 8px; padding-left: 8px; border-left: 2px solid var(--ep-border-strong); }
+
+/* ── Hlavní měřič: nejvyšší elevace, BEZ borderu → čitelné periferním viděním ── */
+.after .ep-meter {
+  background: var(--ep-surface); border-radius: var(--r-md);
+  padding: 16px; margin-bottom: 12px; border: none; box-shadow: var(--ep-shadow);
+}
+.after .meter-header { margin-bottom: 12px; }
+.after .meter-icon { width: 32px; height: 32px; border-radius: var(--r-md); background: var(--ep-accent-bg); color: var(--ep-accent); }
+.after .meter-title { font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .9px; color: var(--ep-text-mid); }
+/* vnořená buňka je SVĚTLEJŠÍ než rodič — vystupuje, nedělá díru */
+.after .phase-cell { background: var(--ep-surface-2); border-radius: var(--r-md); padding: 10px 12px; border: 1px solid var(--ep-border); }
+.after .phase-label { font-size: var(--fs-micro); color: var(--ep-text-dim); font-weight: 600; letter-spacing: .6px; margin-bottom: 4px; }
+.after .phase-power { font-size: var(--fs-sub); font-weight: 600; color: var(--ep-text); font-variant-numeric: tabular-nums; letter-spacing: -.2px; }
+.after .phase-detail { font-size: var(--fs-meta); color: var(--ep-text-dim); margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+/* ── Okruhy: střední úroveň (povrch + border, bez stínu) ── */
+.after .three-phase-list { gap: 8px; margin-bottom: 4px; }
+.after .three-phase-card { background: var(--ep-surface); border-radius: var(--r-md); padding: 14px 16px; border: 1px solid var(--ep-border); }
+/* ── Jističe: nejnižší úroveň (jen border) ── */
+.after .circuit-card { background: var(--ep-surface); border-radius: var(--r-md); padding: 12px 14px; border: 1px solid var(--ep-border); }
+/* balíček A: zelený is-on border ZRUŠEN — stav už nesou dot + toggle.
+   border-left zůstává výhradně pro critical (jediný stav, který jinak nikde není vidět) */
+.after .three-phase-card.critical, .after .circuit-card.critical { border-left: 3px solid var(--ep-warn); }
+.after .tp-header { margin-bottom: 8px; }
+.after .tp-footer { margin-top: 12px; }
+.after .circuit-header { margin-bottom: 4px; }
+.after .circuit-name { font-size: var(--fs-body); font-weight: 500; color: var(--ep-text); }
+.after .lock-icon { color: var(--ep-warn); }
+.after .load-track { height: 3px; background: var(--ep-border); border-radius: var(--r-pill); margin: 10px 0; }
+.after .metric-primary { font-size: var(--fs-hero); font-weight: 600; color: var(--ep-text); letter-spacing: -.6px; font-variant-numeric: tabular-nums; }
+.after .metric-small { font-size: var(--fs-meta); color: var(--ep-text-dim); font-variant-numeric: tabular-nums; margin-top: 3px; }
+.after .cost-rate { color: var(--ep-accent); font-weight: 600; }
+.after .age-badge { font-variant-numeric: tabular-nums; }
+.after .age-badge.ok    { color: var(--ep-text-dim); opacity: .65; }
+.after .age-badge.warn  { color: var(--ep-warn); }
+.after .age-badge.stale { color: var(--ep-tariff-vt); }
+.after .badge { font-size: var(--fs-micro); padding: 2px 6px; border-radius: var(--r-sm); font-weight: 600; letter-spacing: .3px; background: var(--ep-accent-bg); color: var(--ep-accent); }
+/* balíček A: stav zapnuto = akcentní, NE zelený */
+.after .toggle { width: 34px; height: 20px; border-radius: var(--r-pill); }
+.after .toggle::after { top: 3px; width: 14px; height: 14px; }
+.after .toggle.on { background: var(--ep-accent); } .after .toggle.on::after { left: 17px; }
+.after .toggle.off { background: var(--ep-border-strong); } .after .toggle.off::after { left: 3px; }
+.after .status-dot { width: 7px; height: 7px; }
+.after .status-dot.on { background: var(--ep-accent); box-shadow: 0 0 0 2.5px var(--ep-accent-bg); }
+.after .status-dot.off { background: var(--ep-border-strong); }
+.after .expand-btn { background: transparent; border: 1px solid var(--ep-border-strong); border-radius: var(--r-sm); color: var(--ep-text-mid); padding: 3px 8px; font-size: var(--fs-micro); }
+.after .circuit-spark-wrap { background: var(--ep-surface-2); border-radius: var(--r-md); padding: 8px 10px; border: 1px solid var(--ep-border); margin-top: 8px; }
+.after .sparkline-wrap { margin-top: 8px; }
+/* balíček A: popisky přes theme proměnnou, ne rgba(255,255,255) */
+.after .spark-lbl-max { font-size: var(--fs-micro); color: var(--ep-text-mid); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.after .spark-lbl-min { font-size: var(--fs-micro); color: var(--ep-text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.after .spark-win-switch { margin: 10px 0 4px; }
+.after .spark-win-btn { font-size: var(--fs-micro); font-weight: 500; padding: 4px 0; border-radius: var(--r-sm); background: transparent; border: 1px solid var(--ep-border); color: var(--ep-text-dim); }
+.after .spark-win-btn.active { background: var(--ep-accent-bg); border-color: transparent; color: var(--ep-accent); }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>Electricity Panel Card — mockup PŘED / PO</h1>
+  <p>Stav „po" = balíček A (barevná disciplína) + balíček B (hierarchie povrchů, typografická škála, tvarosloví).
+     DOM je v obou sloupcích <b>identický</b> — liší se výhradně CSS. Data odpovídají screenshotům z <code>docs/</code>.</p>
+</div>
+
+<div class="controls">
+  <span class="ctl-label">Téma</span>
+  <div class="ctl-group" id="themeCtl">
+    <button data-theme="dark" class="on">Tmavé</button>
+    <button data-theme="light">Světlé</button>
+  </div>
+  <span class="ctl-label" style="margin-left:8px">Zobrazit</span>
+  <div class="ctl-group" id="viewCtl">
+    <button data-view="both" class="on">Vedle sebe</button>
+    <button data-view="before">Jen PŘED</button>
+    <button data-view="after">Jen PO</button>
+  </div>
+</div>
+
+<div class="stage both" id="stage">
+  <div class="col before" id="colBefore">
+    <div class="col-head"><span class="tag before">Před</span><span class="sub">v5.2.1 — dnešní stav</span></div>
+    <div class="ep-card" id="cardBefore"></div>
+  </div>
+  <div class="col after" id="colAfter">
+    <div class="col-head"><span class="tag after">Po</span><span class="sub">balíčky A + B — jen CSS</span></div>
+    <div class="ep-card" id="cardAfter"></div>
+  </div>
+</div>
+
+<div class="notes">
+  <h2>Co se v pravém sloupci změnilo</h2>
+  <div class="notes-grid">
+    <div class="note"><b><span class="sw" style="background:#22c55e"></span>Zelená = jen tarif</b>
+      Přepínače, status tečky a zelený levý okraj u zapnutých okruhů jsou nově neutrální/akcentní. Zelená zůstala jen v HDO baru, rozvrhu a timeline — tedy tam, kde znamená „teď je levný proud".</div>
+    <div class="note"><b><span class="sw" style="background:#f59e0b"></span>Amber = jen varování</b>
+      Levý okraj karty už neznamená „zapnuto", ale výhradně <i>critical</i> (nespínatelný okruh). Oranžová referenční linka ve sparklinu je neutrální.</div>
+    <div class="note"><b><span class="sw" style="background:#7c8ba1"></span>Sparkliny do pozadí</b>
+      Výchozí barva je neutrální modrošedá. Křivky jsou kontext, ne signál — přestaly soupeřit s HDO barem o pozornost.</div>
+    <div class="note"><b>Tři úrovně povrchu</b>
+      Hlavní měřič má stín a žádný okraj, okruhy povrch + okraj, jističe jen okraj. Vnořené buňky (L1/L2/L3) jsou nově <i>světlejší</i> než rodič — vystupují, místo aby dělaly díru.</div>
+    <div class="note"><b>Typografie 9 → 5 velikostí</b>
+      10 / 11 / 13 / 16 / 24 px. Zmizely rozdíly 10 vs. 11 vs. 12, které se nečetly jako hierarchie. Všechna měnící se čísla mají <code>tabular-nums</code>, takže neposkakují.</div>
+    <div class="note"><b>Světlé téma opravené</b>
+      Přepni nahoře na „Světlé". Vlevo: fázové hodnoty <code>#a0aec0</code> na bílé, neviditelné popisky sparklinů, bílá ryska „teď". Vpravo vše přes theme proměnné.</div>
+    <div class="note" style="border-color:rgba(245,158,11,.35)"><b>Cena za to: +14 % výšky</b>
+      Karta „po" je 1582 px proti 1385 px. Vzdušnější padding a větší primární hodnoty stojí místo.
+      Pokud je to na dashboardu problém, řeší to <i>compact</i> režim z kap. 3 rozboru — ne návrat k dnešní hustotě.</div>
+    <div class="note" style="border-color:rgba(245,158,11,.35)"><b>Implementační poznámka</b>
+      Tinty v „po" používají <code>color-mix()</code>, aby se odvodily z tarifních proměnných samy.
+      Podpora Chrome 111+ / Safari 16.2+. Pokud chceš jistotu i na starších WebView, přepíšeme je
+      na statické <code>rgba()</code> hodnoty per téma — vzhled je stejný, jen víc řádků.</div>
+  </div>
+</div>
+
+<script>
+/* ────────────────────────────────────────────────────────────────────────────
+   Data z docs/screenshot-*.png
+   ──────────────────────────────────────────────────────────────────────── */
+const SLOTS = [
+  { t:'nt', from:'00:00', to:'01:00', mins:60,  state:'past'   },
+  { t:'vt', from:'01:00', to:'01:40', mins:40,  state:'past'   },
+  { t:'nt', from:'01:40', to:'04:40', mins:180, state:'past'   },
+  { t:'vt', from:'04:40', to:'05:20', mins:40,  state:'past'   },
+  { t:'nt', from:'05:20', to:'09:20', mins:240, state:'past'   },
+  { t:'vt', from:'09:20', to:'10:00', mins:40,  state:'past'   },
+  { t:'nt', from:'10:00', to:'13:00', mins:180, state:'past'   },
+  { t:'vt', from:'13:00', to:'13:40', mins:40,  state:'past'   },
+  { t:'nt', from:'13:40', to:'17:40', mins:240, state:'active', pct:62 },
+  { t:'vt', from:'17:40', to:'18:20', mins:40,  state:'future' },
+  { t:'nt', from:'18:20', to:'21:20', mins:180, state:'future' },
+  { t:'vt', from:'21:20', to:'22:00', mins:40,  state:'future' },
+  { t:'nt', from:'22:00', to:'00:00', mins:120, state:'future' },
+];
+const DUR = ['1h','40m','3h','40m','4h','40m','3h','40m','','40m','3h','40m','2h'];
+
+/* pseudo-náhodné, ale deterministické průběhy odpovídající screenshotům */
+function series(seed, base, spikes, noise, n = 70) {
+  let s = seed, out = [];
+  const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  for (let i = 0; i < n; i++) {
+    let v = base + (rnd() - .5) * noise;
+    for (const sp of spikes) if (i >= sp[0] && i < sp[0] + sp[1]) v += sp[2] * (0.85 + rnd() * 0.3);
+    out.push(Math.max(0, v));
+  }
+  return out;
+}
+const SERIES = {
+  mmL1: series(7,   4,  [[14,3,2250]], 6),
+  mmL2: series(23,  9,  [[8,2,900],[57,3,2100],[62,2,2050]], 10),
+  mmL3: series(41, 129, [[6,4,700],[20,5,1050],[34,3,480],[52,4,2000],[64,6,900]], 70),
+  kiL1: series(11,  4,  [[10,2,2100]], 5),
+  kiL2: series(19,  0,  [[6,2,2250]], 3),
+  kiL3: series(29,  0,  [[7,2,1170]], 3),
+  koL1: series(13,  0,  [], 2),
+  koL2: series(17,  4,  [[26,2,40]], 4),
+  koL3: series(31,  0,  [], 2),
+  br08: series(53, 12,  [[46,10,55],[58,12,50]], 8),
+  br09: series(59, 14,  [[24,9,150],[36,4,145],[62,6,155]], 12),
+};
+
+/* ── SVG ikony ─────────────────────────────────────────────────────────── */
+const ICO = {
+  tower: `<svg class="svg-ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21 8.5 5m10 16L15 5M8.5 5h7M8.5 5 6 3m9.5 2L18 3M6.8 10h10.4M6 14h12M3 7h3M18 7h3"/></svg>`,
+  lock:  `<svg class="svg-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>`,
+  chevUp:`<svg class="svg-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>`,
+  chevDn:`<svg class="svg-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`,
+};
+
+/* ── Sparkline (stejný algoritmus jako _renderSparkline) ───────────────── */
+let sparkSeq = 0;
+function fmtW(w) { return w >= 1000 ? (w/1000).toFixed(2) + ' kW' : Math.round(w) + ' W'; }
+function sparkline(vals, variant) {
+  const W = 100, H = 38, pad = 3;
+  const color   = variant === 'after' ? 'var(--ep-neutral)'  : '#22c55e';
+  const refColr = variant === 'after' ? 'var(--ep-border)'   : '#f59e0b';
+  const vMin = Math.min(...vals), vMax = Math.max(...vals);
+  const range = (vMax - vMin) || 0.01;
+  const c = vals.map((v, i) => ({
+    x: i / (vals.length - 1) * W,
+    y: (H - pad) - ((v - vMin) / range) * (H - pad * 2),
+  }));
+  let line = `M ${c[0].x.toFixed(1)},${c[0].y.toFixed(1)}`;
+  for (let i = 1; i < c.length; i++) {
+    const cx = ((c[i-1].x + c[i].x) / 2).toFixed(1);
+    line += ` C ${cx},${c[i-1].y.toFixed(1)} ${cx},${c[i].y.toFixed(1)} ${c[i].x.toFixed(1)},${c[i].y.toFixed(1)}`;
+  }
+  const area = `${line} L ${c[c.length-1].x.toFixed(1)},${H} L ${c[0].x.toFixed(1)},${H} Z`;
+  const gid = 'sg' + (++sparkSeq);
+  return `<div class="sparkline-wrap">
+    <div class="spark-lbls">
+      <span class="spark-lbl-max">${fmtW(vMax)}</span>
+      <span class="spark-lbl-min">${fmtW(vMin)}</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="sparkline">
+      <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
+        <stop offset="85%" stop-color="${color}" stop-opacity="0.05"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+      </linearGradient></defs>
+      <path d="${area}" fill="url(#${gid})"/>
+      <path d="${line}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+      <line x1="0" y1="${pad}" x2="${W}" y2="${pad}" class="spark-ref" style="stroke:${refColr}"/>
+      <line x1="0" y1="${H-pad}" x2="${W}" y2="${H-pad}" class="spark-ref" style="stroke:${refColr}"/>
+    </svg>
+  </div>`;
+}
+
+/* ── Barva zátěže ──────────────────────────────────────────────────────── */
+function loadColor(pct, variant) {
+  if (variant === 'after') {          // balíček A: neutrál → amber → červená
+    if (pct > 80) return 'var(--ep-tariff-vt)';
+    if (pct > 55) return 'var(--ep-warn)';
+    return 'var(--ep-neutral)';
+  }
+  if (pct > 80) return '#ef4444';     // dnešní _loadColor()
+  if (pct > 55) return '#f59e0b';
+  return '#22c55e';
+}
+
+/* ── Stavební bloky ────────────────────────────────────────────────────── */
+const toggle = on => `<button class="toggle ${on ? 'on' : 'off'}" aria-label="přepnout"></button>`;
+const dot    = st => `<div class="status-dot ${st}"></div>`;
+const badge  = t  => `<span class="badge">${t}</span>`;
+
+function phaseCell(label, kw, a, v, key, variant) {
+  return `<div class="phase-cell">
+    <div class="phase-label">${label}</div>
+    <div class="phase-power">${kw} kW</div>
+    <div class="phase-detail">${a} A <span class="metric-sep">·</span>${v} V</div>
+    ${sparkline(SERIES[key], variant)}
+  </div>`;
+}
+
+function cardHTML(variant) {
+  const tlSegs = SLOTS.map(s =>
+    `<div class="tl-seg ${s.t} ${s.state === 'past' ? 'past' : s.state === 'active' ? 'active' : ''}" style="flex:${s.mins}"></div>`
+  ).join('');
+
+  const rows = SLOTS.map((s, i) => {
+    const fill = s.state === 'past' ? 100 : s.state === 'active' ? s.pct : 0;
+    return `<div class="srow ${s.state} ${s.t}">
+      <span class="stariff ${s.t}">${s.t.toUpperCase()}</span>
+      <span class="srow-time">${s.from}–${s.to}</span>
+      <div class="srow-track"><div class="srow-fill ${s.t}" style="width:${fill}%"></div></div>
+      ${s.state === 'active'
+        ? `<span class="snow">Teď</span>`
+        : `<span class="sdur">${DUR[i]}</span>`}
+    </div>`;
+  }).join('');
+
+  const breaker = (name, w, meta, on, opts = {}) => {
+    const pct = opts.load ?? 12;
+    return `<div class="circuit-card ${opts.critical ? 'critical' : ''} ${on && !opts.critical ? 'is-on' : ''}">
+      <div class="circuit-header">
+        ${dot(opts.critical ? 'on' : on ? 'on' : 'off')}
+        <span class="circuit-name" title="${name}">${name}</span>
+        ${opts.critical ? `<span class="lock-icon">${ICO.lock}</span>` : toggle(on)}
+      </div>
+      <div class="load-track"><div class="load-fill" style="width:${pct}%;background:${loadColor(pct, variant)}"></div></div>
+      <div class="circuit-footer">
+        <div class="metrics">
+          <span class="metric-primary">${w}</span>
+          <span class="metric-small">${meta}</span>
+        </div>
+        ${opts.spark ? '' : `<button class="expand-btn">${ICO.chevDn}</button>`}
+      </div>
+      ${opts.spark ? `<div class="circuit-spark-wrap">${sparkline(SERIES[opts.spark], variant)}</div>` : ''}
+    </div>`;
+  };
+
+  const sep = '<span class="metric-sep">·</span>';
+  const cost = v => `<span class="cost-rate">${v}</span>`;
+  /* _ageBadge(): ok = age_ok_color #374151, warn ≥5 min = #f59e0b, stale ≥15 min = #ef4444 */
+  const age  = (v, lvl = 'ok') => `${sep}<span class="age-badge ${lvl}">↻ ${v}</span>`;
+
+  return `
+<div class="card-content">
+
+  <!-- ── HDO bar ── -->
+  <div class="hdo-bar nt">
+    <div class="hdo-dot nt"></div>
+    <div class="hdo-info">
+      <div class="hdo-label">NT — nízký tarif</div>
+      <div class="hdo-sub">4.61453 Kč/kWh</div>
+      <div class="hdo-prog"><div class="hdo-prog-fill" style="width:62%"></div></div>
+    </div>
+    <div class="hdo-cd">
+      <div class="hdo-cd-lbl">Končí za</div>
+      <div class="hdo-cd-val">2 h 29 min</div>
+    </div>
+  </div>
+
+  <!-- ── Rozvrh ── -->
+  <div class="schedule-block">
+    <div class="schedule-title">
+      <span class="schedule-when">Dnes</span>
+      <span class="schedule-day">Všední den</span>
+      <div class="schedule-nav">
+        <span class="nt-remaining">zbývá 7h 26m NT · 20h 0m celkem</span>
+        <button class="sday-btn">Zítra</button>
+        <span class="schedule-chevron">${ICO.chevUp}</span>
+      </div>
+    </div>
+    <div class="timeline-bar">${tlSegs}<div class="timeline-now" style="left:57.3%"></div></div>
+    <div class="schedule-rows">${rows}</div>
+  </div>
+
+  <!-- ── Hlavní měřič ── -->
+  <div class="ep-meter">
+    <div class="meter-header">
+      <div class="meter-icon">${ICO.tower}</div>
+      <div class="meter-title-wrap">
+        <span class="meter-title">Hlavní měřič</span>
+        ${badge('3φ')}
+      </div>
+      <div class="meter-total">
+        <span class="metric-primary">0.87 kW</span>
+        <span class="metric-small">7.0 kWh dnes ${sep}${cost('32.39 Kč')}${age('3m')}</span>
+      </div>
+    </div>
+    <div class="spark-win-switch">
+      <button class="spark-win-btn">1h</button>
+      <button class="spark-win-btn active">3h</button>
+      <button class="spark-win-btn">6h</button>
+      <button class="spark-win-btn">24h</button>
+    </div>
+    <div class="phases-grid">
+      ${phaseCell('L1', '0.00', '0.1', '234', 'mmL1', variant)}
+      ${phaseCell('L2', '0.04', '0.5', '234', 'mmL2', variant)}
+      ${phaseCell('L3', '0.83', '3.7', '233', 'mmL3', variant)}
+    </div>
+  </div>
+
+  <!-- ── Třífázové okruhy ── -->
+  <div class="section-label">Třífázové okruhy</div>
+  <div class="three-phase-list">
+
+    <div class="three-phase-card is-on">
+      <div class="tp-header">
+        <div class="tp-title-row">
+          ${dot('on')}<span class="circuit-name">Smart meter — Kuchyň</span>${badge('3φ')}${toggle(true)}
+        </div>
+        <div class="tp-total">
+          <span class="metric-primary">0.03 kW</span>
+          <span class="metric-small">0.81 kWh ${sep}${cost('4.64 Kč')}${age('3m')}</span>
+        </div>
+      </div>
+      <div class="load-track"><div class="load-fill" style="width:8%;background:${loadColor(8, variant)}"></div></div>
+      <div class="phases-grid">
+        ${phaseCell('L1', '0.03', '0.5', '234', 'kiL1', variant)}
+        ${phaseCell('L2', '0.00', '0.1', '234', 'kiL2', variant)}
+        ${phaseCell('L3', '0.00', '0.4', '233', 'kiL3', variant)}
+      </div>
+      <div class="tp-footer"><button class="expand-btn">${ICO.chevDn}<span>Zařízení</span></button></div>
+    </div>
+
+    <div class="three-phase-card is-on">
+      <div class="tp-header">
+        <div class="tp-title-row">
+          ${dot('on')}<span class="circuit-name">Smart Meter — Kotel</span>${badge('3φ')}${toggle(true)}
+        </div>
+        <div class="tp-total">
+          <span class="metric-primary">0.01 kW</span>
+          <span class="metric-small">0.10 kWh ${sep}${cost('0.36 Kč')}${age('15h','stale')}</span>
+        </div>
+      </div>
+      <div class="load-track"><div class="load-fill" style="width:3%;background:${loadColor(3, variant)}"></div></div>
+      <div class="phases-grid">
+        ${phaseCell('L1', '0.00', '0.0', '234', 'koL1', variant)}
+        ${phaseCell('L2', '0.01', '0.1', '233', 'koL2', variant)}
+        ${phaseCell('L3', '0.00', '0.0', '234', 'koL3', variant)}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Jednofázové jističe ── -->
+  <div class="section-label">Jednofázové jističe</div>
+  <div class="circuit-grid">
+    ${breaker('Jistič 08/15 — Kuchyň linka levá', '49 W',
+      `0.4 A ${sep}234 V ${sep}0.09 kWh ${sep}${cost('0.37 Kč')}${age('3m')}`, true, { load: 13, spark: 'br08' })}
+    ${breaker('Jistič 09/15 — Kuchyň / ložnice 2 — TV', '166 W',
+      `0.7 A ${sep}233 V ${sep}0.54 kWh ${sep}${cost('1.69 Kč')}${age('2s')}`, true, { load: 45, spark: 'br09' })}
+    ${breaker('Jistič 11/15 — Obývák', '41 W',
+      `0.4 A ${sep}233 V ${sep}1.53 kWh ${sep}${cost('6.63 Kč')}${age('15m','stale')}`, true, { load: 11 })}
+    ${breaker('Jistič 01/15 — Lednička', '86 W',
+      `0.4 A ${sep}234 V ${sep}1.94 kWh ${sep}${cost('8.41 Kč')}${age('8s')}`, true, { load: 62, critical: true })}
+  </div>
+
+</div>`;
+}
+
+/* ── Render + ovládání ─────────────────────────────────────────────────── */
+document.getElementById('cardBefore').innerHTML = cardHTML('before');
+document.getElementById('cardAfter').innerHTML  = cardHTML('after');
+
+document.getElementById('themeCtl').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#themeCtl button').forEach(x => x.classList.toggle('on', x === b));
+  document.body.classList.toggle('page-light', b.dataset.theme === 'light');
+});
+document.getElementById('viewCtl').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#viewCtl button').forEach(x => x.classList.toggle('on', x === b));
+  const v = b.dataset.view, stage = document.getElementById('stage');
+  stage.className = 'stage ' + (v === 'both' ? 'both' : 'one');
+  document.getElementById('colBefore').classList.toggle('hidden', v === 'after');
+  document.getElementById('colAfter').classList.toggle('hidden', v === 'before');
+});
+</script>
+</body>
+</html>

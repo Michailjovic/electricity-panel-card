@@ -258,7 +258,7 @@ export class ElectricityPanelEditor extends LitElement {
   // ── Section renderers ──────────────────────────────────────────────────────
 
   private _renderGraphSection(): TemplateResult {
-    const col = this._config.sparkline_color ?? '#ef4444';
+    const col = this._config.sparkline_color ?? '#7c8ba1';
     const lbl = this._config.sparkline_labels ?? 'left';
     const ref = this._config.sparkline_ref_line ?? false;
     const age = this._config.show_age_badge ?? false;
@@ -291,9 +291,9 @@ export class ElectricityPanelEditor extends LitElement {
           ${ref ? html`
             <div class="field">
               <label>Reference line colour</label>
-              <input type="color" .value=${this._config.sparkline_ref_color ?? '#ffffff'}
+              <input type="color" .value=${this._config.sparkline_ref_color ?? '#8f9aab'}
                 @input=${(e: Event) => this._set(['sparkline_ref_color'], (e.target as HTMLInputElement).value)} />
-              <span class="field-hint">Default: semi-transparent white</span>
+              <span class="field-hint">Leave unset to follow the theme</span>
             </div>` : nothing}
 
           <div class="group-label" style="margin-top:10px;">Sparkline visibility</div>
@@ -326,8 +326,9 @@ export class ElectricityPanelEditor extends LitElement {
               (v) => this._set(['age_stale_minutes'], parseFloat(v) || 15), '15')}
             <div class="field">
               <label>Short colour</label>
-              <input type="color" .value=${this._config.age_ok_color ?? '#374151'}
+              <input type="color" .value=${this._config.age_ok_color ?? '#8f9aab'}
                 @input=${(e: Event) => this._set(['age_ok_color'], (e.target as HTMLInputElement).value)} />
+              <span class="field-hint">Leave unset to follow the theme</span>
             </div>
             <div class="field">
               <label>Medium colour</label>
