@@ -42,6 +42,20 @@ const STRINGS: Record<string, string> = {
   cost_estimate_month: 'Estimated month total',
   cost_avg_day: 'Average {price}/day',
   no_cost_data: 'No data yet',
+  // view: panel (ROADMAP 5.4)
+  panel_board: 'Distribution board',
+  panel_positions: '{n} positions',
+  main_breaker: 'Main breaker',
+  busbar_note: 'busbar — flow speed follows consumption',
+  panel_hint_pick: 'Tap a module for its detail and graph.',
+  panel_hint_compare: 'Tap more modules to line their graphs up on one time axis.',
+  shared_axis: 'shared Y axis',
+  clear_selection: 'clear selection ({n})',
+  devices_behind: 'Devices behind this breaker',
+  no_devices: 'No devices listed for this breaker in the config.',
+  of_rating: 'of {max} A',
+  load_pct: '{pct} % load',
+  phases_shared_scale: 'All three graphs share one scale, so they compare directly.',
 };
 
 export function localize(key: string, vars?: Record<string, string>): string {

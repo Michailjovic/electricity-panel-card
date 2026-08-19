@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
+  comparePosition,
+  buildRails,
+  loadPercent,
+  phaseShares,
   slotTimeMs,
   dayEndMs,
   fmtMins,
@@ -707,5 +711,116 @@ describe('accumulateTariffWhFromEnergyBuckets (post-3.3)', () => {
   it('ignores empty/missing series and reports hasData=false when nothing usable', () => {
     const { hasData } = accumulateTariffWhFromEnergyBuckets([undefined, []], () => 1);
     expect(hasData).toBe(false);
+  });
+});
+
+// ── view: panel — rail layout (ROADMAP 5.4) ─────────────────────────────────
+
+describe('comparePosition', () => {
+  it('sorts numbered positions numerically, not as text', () => {
+    const sorted = ['10', '2', '08', '1'].sort(comparePosition);
+    expect(sorted).toEqual(['1', '2', '08', '10']);
+  });
+
+  it('puts numbered positions before lettered ones', () => {
+    const sorted = ['V1', '03', 'K1', '01'].sort(comparePosition);
+    expect(sorted).toEqual(['01', '03', 'K1', 'V1']);
+  });
+
+  it('sorts a numeric prefix first, then its suffix', () => {
+    expect(comparePosition('08a', '08b')).toBeLessThan(0);
+    expect(comparePosition('08b', '08a')).toBeGreaterThan(0);
+    expect(comparePosition('08', '08')).toBe(0);
+  });
+
+  it('sends missing positions to the end', () => {
+    expect(comparePosition(undefined, '01')).toBeGreaterThan(0);
+    expect(comparePosition('01', undefined)).toBeLessThan(0);
+    expect(comparePosition(undefined, undefined)).toBe(0);
+  });
+
+  it('keeps config order among unpositioned circuits (stable sort)', () => {
+    const items = [
+      { id: 'a' }, { id: 'b' }, { id: 'c' },
+    ] as Array<{ id: string; position?: string }>;
+    const sorted = items.slice().sort((x, y) => comparePosition(x.position, y.position));
+    expect(sorted.map(i => i.id)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('buildRails', () => {
+  it('fills a rail up to its size and then wraps', () => {
+    const mods = Array.from({ length: 5 }, (_, i) => ({ id: String(i), width: 1 }));
+    expect(buildRails(mods, 2).map(r => r.map(m => m.id)))
+      .toEqual([['0', '1'], ['2', '3'], ['4']]);
+  });
+
+  it('never straddles a 3-phase module across two rails', () => {
+    // 2 singles + a triple into rails of 4: the triple would overflow at 2+3,
+    // so it moves to the next rail whole, exactly like the physical thing.
+    const mods = [
+      { id: 'a', width: 1 }, { id: 'b', width: 1 }, { id: 'trip', width: 3 },
+    ];
+    expect(buildRails(mods, 4).map(r => r.map(m => m.id)))
+      .toEqual([['a', 'b'], ['trip']]);
+  });
+
+  it('gives a module wider than the rail its own row instead of dropping it', () => {
+    const mods = [{ id: 'wide', width: 3 }, { id: 'x', width: 1 }];
+    expect(buildRails(mods, 2).map(r => r.map(m => m.id)))
+      .toEqual([['wide'], ['x']]);
+  });
+
+  it('returns no rails for no modules', () => {
+    expect(buildRails([], 12)).toEqual([]);
+  });
+
+  it('treats a nonsensical rail size as 1 rather than looping forever', () => {
+    const mods = [{ id: 'a', width: 1 }, { id: 'b', width: 1 }];
+    expect(buildRails(mods, 0).map(r => r.map(m => m.id))).toEqual([['a'], ['b']]);
+    expect(buildRails(mods, -5).map(r => r.map(m => m.id))).toEqual([['a'], ['b']]);
+  });
+});
+
+describe('loadPercent', () => {
+  it('prefers measured current over deriving it from power', () => {
+    // 8 A of 16 A = 50 %, regardless of the (deliberately inconsistent) watts
+    expect(loadPercent(8, 9999, 16, 230)).toBeCloseTo(50, 5);
+  });
+
+  it('derives current from power when no current is measured', () => {
+    expect(loadPercent(0, 2300, 16, 230)).toBeCloseTo(62.5, 5);
+  });
+
+  it('uses the voltage it was given, not an assumed 230 V', () => {
+    expect(loadPercent(0, 2340, 16, 234)).toBeCloseTo(62.5, 5);
+  });
+
+  it('clamps to 0–100 so an overload cannot overflow the bar', () => {
+    expect(loadPercent(40, 0, 16)).toBe(100);
+    expect(loadPercent(-5, 0, 16)).toBe(0);
+  });
+
+  it('returns 0 for a missing or nonsensical breaker rating', () => {
+    expect(loadPercent(8, 0, 0)).toBe(0);
+    expect(loadPercent(8, 0, -16)).toBe(0);
+  });
+});
+
+describe('phaseShares', () => {
+  it('splits a total into percentages that sum to 100', () => {
+    const [a, b, c] = phaseShares(1000, 2000, 1000);
+    expect(a).toBeCloseTo(25, 5);
+    expect(b).toBeCloseTo(50, 5);
+    expect(c).toBeCloseTo(25, 5);
+    expect(a + b + c).toBeCloseTo(100, 5);
+  });
+
+  it('reports all zeros when nothing is drawing, instead of dividing by zero', () => {
+    expect(phaseShares(0, 0, 0)).toEqual([0, 0, 0]);
+  });
+
+  it('handles a single loaded phase', () => {
+    expect(phaseShares(0, 500, 0)).toEqual([0, 100, 0]);
   });
 });

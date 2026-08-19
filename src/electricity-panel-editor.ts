@@ -344,6 +344,48 @@ export class ElectricityPanelEditor extends LitElement {
       </details>`;
   }
 
+  /** view: panel (ROADMAP 5.4). Kept as its own section rather than folded
+   *  into Appearance: switching the view changes what the card *is*, not how
+   *  it is painted, and the panel options below only apply in that mode. */
+  private _renderLayoutSection(): TemplateResult {
+    const isPanel = this._config.view === 'panel';
+    const p = this._config.panel ?? {};
+    const sp = (f: string) => (v: string) => {
+      const n = parseFloat(v);
+      this._set(['panel', f], v === '' ? '' : (isNaN(n) ? v : n));
+    };
+    return html`
+      <details class="section">
+        <summary>Layout</summary>
+        <div class="section-body">
+          <div class="field">
+            <label>View</label>
+            <select @change=${(e: Event) => this._set(['view'], (e.target as HTMLSelectElement).value)}>
+              <option value="classic" ?selected=${!isPanel}>Classic — meter card + circuit grid</option>
+              <option value="panel" ?selected=${isPanel}>Panel — breakers on a DIN rail</option>
+            </select>
+            <span class="field-hint">
+              Panel view needs a Position (and ideally a Phase) on each circuit — see the circuit rows below.
+            </span>
+          </div>
+          ${isPanel ? html`
+            ${this._numField('Positions per rail', p.rail_size as number | undefined, sp('rail_size'), '12')}
+            ${this._numField('Main breaker rating (A)', p.main_breaker as number | undefined, sp('main_breaker'), '25')}
+            <div class="field checkbox">
+              <input type="checkbox" id="pnl-spark" .checked=${p.module_spark !== false}
+                @change=${(e: Event) => this._set(['panel', 'module_spark'], (e.target as HTMLInputElement).checked)} />
+              <label for="pnl-spark">Micro graph inside each module</label>
+            </div>
+            <div class="field checkbox">
+              <input type="checkbox" id="pnl-main" .checked=${p.show_main !== false}
+                @change=${(e: Event) => this._set(['panel', 'show_main'], (e.target as HTMLInputElement).checked)} />
+              <label for="pnl-main">Show the main breaker module</label>
+            </div>
+          ` : nothing}
+        </div>
+      </details>`;
+  }
+
   private _renderAppearanceSection(): TemplateResult {
     return html`
       <details class="section">
@@ -760,6 +802,17 @@ export class ElectricityPanelEditor extends LitElement {
               <label for="conf-${idx}">Ask for confirmation before toggling</label>
             </div>
             ${this._numField('Max current A (breaker rating)', c.max_current, sf('max_current'), c.phases === 3 ? '63' : '16')}
+            ${this._textField('Position in board (panel view)', c.position, sf('position'), 'e.g. 08')}
+            ${c.phases === 3 ? nothing : html`
+              <div class="field">
+                <label>Phase (panel view)</label>
+                <select @change=${(e: Event) => this._setCircuitField(idx, 'phase', (e.target as HTMLSelectElement).value)}>
+                  <option value="" ?selected=${!c.phase}>— not set —</option>
+                  <option value="L1" ?selected=${c.phase === 'L1'}>L1</option>
+                  <option value="L2" ?selected=${c.phase === 'L2'}>L2</option>
+                  <option value="L3" ?selected=${c.phase === 'L3'}>L3</option>
+                </select>
+              </div>`}
             <div class="group-label" style="margin-top:10px;">Breaker entities</div>
             ${this._entityField('Switch', c.switch, sf('switch'))}
             ${this._entityField('Total power (W)', c.power, sf('power'))}
@@ -797,6 +850,7 @@ export class ElectricityPanelEditor extends LitElement {
       <div class="editor">
         ${this._textField('Card title (optional)', this._config.title,
           (v) => this._set(['title'], v), 'Electricity panel')}
+        ${this._renderLayoutSection()}
         ${this._renderAppearanceSection()}
         ${this._renderGraphSection()}
         ${this._renderMeterSection()}

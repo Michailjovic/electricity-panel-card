@@ -5,6 +5,82 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.5.1] — 2026-08-19
+
+### 🐞 Fixed
+
+- **`show_nt_hint` nedělal v `view: panel` nic.** Tip „za chvíli začne NT,
+  ušetříš X %" četly jen classic renderery `_renderCircuit` a
+  `_renderThreePhaseCircuit`, takže se v panel view zapnutá volba tiše
+  ignorovala. Nově se hint zobrazí v detailu modulu — ne na modulu samotném,
+  protože je to věta a modul je 70 px široký.
+
+---
+
+## [5.5.0] — 2026-08-19
+*ROADMAP 5.4 — nový volitelný režim `view: panel`. Rozvaděč na DIN liště.
+`view: classic` zůstává výchozí a je beze změny.*
+
+### ➕ Added
+
+- **`view: panel`** — karta se tváří jako to, co doopravdy je: řada jističů na
+  DIN liště. Modul má páčku, hladinu zatížení stoupající v těle, fázový proužek
+  a číslo pozice; 3f jistič je široký tři pozice, jako ve skutečném rozvaděči.
+  Celý rozvaděč se vejde na jeden pohled — 12 pozic zabere ~130 px, dnešní
+  mřížka karet by na totéž potřebovala přes 1 200 px.
+- **Detail pod lištou.** Kliknutí na modul rozbalí čísla, velký graf a
+  **zařízení za jističem** (skupiny, kanály i „hloupá" zařízení jako poznámky —
+  pro spoustu lidí je to jediná dokumentace rozvodů, kterou mají).
+- **Porovnání víc modulů na společné časové ose**, s přepínačem **společné osy Y**
+  (výchozí zapnuto). Bez něj se křivky porovnat nedají: okruh se 40 W a okruh
+  s 2,4 kW nakreslí na vlastních osách prakticky stejný obrázek.
+- **3f detail ukazuje L1/L2/L3 vedle sebe**, taky na jednom měřítku — takže
+  nevyváženost fází je vidět, ne dopočítaná okem.
+- Nová konfigurace: `view`, blok `panel` (`rail_size`, `main_breaker`,
+  `module_spark`, `show_main`) a u okruhu `position` a `phase`. Vše volitelné —
+  bez `position` si okruhy drží pořadí z konfigurace, bez `phase` nemá modul
+  proužek. Editor má novou sekci **Layout** a obě pole u každého okruhu.
+- Čisté funkce `comparePosition`, `buildRails`, `loadPercent` a `phaseShares`
+  v `utils.ts`, pokryté testy (+18, celkem 101).
+
+### 🎨 Changed
+
+- **V panel view je pořadí jiné:** tarif → timeline dne → rozvaděč → detail →
+  rozvrh a náklady. „Je teď levno" a „co teď jede" jsou otázky na jeden pohled,
+  rozvrhová tabulka je plánování. Timeline se přesunula nahoru k tarifu a
+  v bloku dole se proto nekreslí — je na kartě právě jednou.
+- V panel view se stahuje historie pro **všechny** okruhy, ne jen pro ty se
+  zapnutým sparklinem — režim kreslí mikro-graf v každém modulu.
+
+### 🐞 Fixed / poznámky k implementaci
+
+- Grafy fází se zprvu nekreslily vůbec. Dvě tiché pasti, obě stojí za zapsání:
+  vnořená `html` šablona uvnitř `<svg>` se v lit připraví v HTML namespace,
+  takže z `<path>` vznikne neznámý HTML prvek — je potřeba lit `svg` tag. A
+  `var(--…)` se nevyhodnotí v SVG **prezentačním atributu** (`stroke=`), musí
+  jít přes `style=`. Ani jedno nic nenahlásí, jen se nic nevykreslí.
+- Modul hlavního jističe (a každý 3f okruh bez celkového senzoru) kreslil graf
+  jen z L1, zatímco nadpis ukazoval součet — flat čára vedle 2,49 kW. Nově se
+  kreslí **nejzatíženější fáze**, tedy ta, na které jistič vypadne, a je
+  označená popiskem, aby se nedala splést s celkem.
+- Panel view si zapíná `box-sizing: border-box` jen pro svůj podstrom. Shadow
+  DOM ho nedědí ze stránky a classic layout stojí na content-boxu, takže
+  globálně by se musely přepočítat všechny dosavadní výšky.
+- **Řádek metrik u řídce nakonfigurovaného okruhu začínal oddělovačem** (chyba
+  i v classic view, existovala dřív — jen ji nebylo vidět, dokud měl každý
+  okruh senzor proudu). Každá položka si nesla vlastní čelní `·`, což sedělo
+  jen dokud byla ta první vždy přítomná; okruh jen s energií nebo jen se
+  spínačem pak vykreslil `· 0.35 Kč` nebo `· ↻ 2m`. Oddělovače teď určuje
+  řádek podle toho, které položky skutečně zbyly (`_metricRow`), a `_ageBadge`
+  už svůj oddělovač nenese.
+
+### Nezměněno
+
+`view: classic` je bit po bitu stejný layout jako v 5.4.0 — nová větev
+v `render()` se ho nedotýká.
+
+---
+
 ## [5.4.0] — 2026-08-19
 *Balíček B z `docs/DESIGN-REVIEW.md` — hierarchie a rytmus. Opět beze změny
 chování: stejná data, stejné selektory, jen tokeny a rozestupy.*

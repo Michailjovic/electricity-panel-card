@@ -615,3 +615,90 @@ export function accumulateTariffWhFromEnergyBuckets(
   }
   return { ntWh, vtWh, hasData };
 }
+
+// ── view: panel — DIN rail layout (ROADMAP 5.4) ─────────────────────────────
+
+/** One module on the rail. `width` is in module positions, as in a real board. */
+export interface RailModule {
+  /** Circuit id, or the synthetic id of the main breaker */
+  id: string;
+  width: number;
+}
+
+/**
+ * Natural-order comparison of two position labels ("01" < "08" < "10" < "V1").
+ *
+ * A plain string sort puts "10" before "8", and a plain numeric sort throws
+ * away labels like "V1" that real boards use for grouped or auxiliary
+ * positions. So: leading digits compare numerically, the rest compares as
+ * text, and anything without a position sorts last (keeping config order
+ * among themselves, since Array.prototype.sort is stable).
+ */
+export function comparePosition(a?: string, b?: string): number {
+  if (a === b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  const ma = /^(\d+)(.*)$/.exec(a.trim());
+  const mb = /^(\d+)(.*)$/.exec(b.trim());
+  if (ma && mb) {
+    const d = parseInt(ma[1], 10) - parseInt(mb[1], 10);
+    return d !== 0 ? d : ma[2].localeCompare(mb[2]);
+  }
+  // Numbered positions come before lettered ones (01…15, then V1, K1).
+  if (ma) return -1;
+  if (mb) return 1;
+  return a.localeCompare(b);
+}
+
+/**
+ * Split modules into rail rows of at most `railSize` module widths.
+ *
+ * A module never straddles two rows — a 3-phase breaker that would overflow
+ * moves to the next rail whole, exactly like the physical thing. A module
+ * wider than `railSize` still gets its own row rather than disappearing.
+ */
+export function buildRails<T extends RailModule>(mods: T[], railSize: number): T[][] {
+  const size = Math.max(1, Math.floor(railSize));
+  const rails: T[][] = [];
+  let row: T[] = [];
+  let used = 0;
+  for (const m of mods) {
+    const w = Math.max(1, Math.floor(m.width));
+    if (row.length && used + w > size) {
+      rails.push(row);
+      row = [];
+      used = 0;
+    }
+    row.push(m);
+    used += w;
+  }
+  if (row.length) rails.push(row);
+  return rails;
+}
+
+/**
+ * Load as a percentage of the breaker rating, clamped to 0–100.
+ *
+ * Prefers a measured current; falls back to deriving it from power, which is
+ * why the caller passes the voltage it actually read rather than assuming 230.
+ */
+export function loadPercent(
+  amps: number,
+  watts: number,
+  maxAmps: number,
+  volts = 230,
+): number {
+  if (!(maxAmps > 0)) return 0;
+  const a = amps > 0 ? amps : (volts > 0 ? watts / volts : 0);
+  return Math.min(100, Math.max(0, (a / maxAmps) * 100));
+}
+
+/**
+ * Per-phase share of a total, used by the panel view's phase columns.
+ * Returns percentages that sum to 100 (or all zeros when there is no load).
+ */
+export function phaseShares(l1: number, l2: number, l3: number): [number, number, number] {
+  const total = l1 + l2 + l3;
+  if (!(total > 0)) return [0, 0, 0];
+  return [(l1 / total) * 100, (l2 / total) * 100, (l3 / total) * 100];
+}

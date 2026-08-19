@@ -217,19 +217,25 @@ Pravidlo: **jedna barva = jeden význam.**
 
 Nový **volitelný** režim; `view: classic` zůstává výchozí.
 
-- [ ] Nová config pole: `position` a `phase` u okruhu, blok `panel:`
-      (`rail_size`, `main_breaker`, `module_spark`)
-- [ ] Modul jističe: páčka (červená = zapnuto, konvence evropských jističů),
+- [x] Nová config pole: `position` a `phase` u okruhu, blok `panel:`
+      (`rail_size`, `main_breaker`, `module_spark`, `show_main`) + editor
+- [x] Modul jističe: páčka (červená = zapnuto, konvence evropských jističů),
       hladina zatížení, fázový proužek, číslo pozice; 3f jistič = 3 moduly
-- [ ] Grafy ve třech úrovních: mikro-graf v modulu → detail s velkým grafem →
+- [x] Grafy ve třech úrovních: mikro-graf v modulu → detail s velkým grafem →
       porovnání více modulů na společné časové ose s přepínačem společné osy Y
-- [ ] 3f detail ukazuje L1/L2/L3 vedle sebe na společném měřítku
-- [ ] Zařízení za jističem v detailu (skupiny, kanály, „hloupá" jako poznámky)
-- [ ] Fázová bilance u hlavního jističe: průměr/špička za 24 h / 7 dní / 30 dní
-      + největší odběry na fázi. **Záměrně bez automatického návrhu přerovnání**
-      — topná sezóna a léto mají jiný profil, jednorázová rada by lhala.
-- [ ] Pořadí v tomto režimu: tarif + timeline dne → rozvaděč → detail →
+- [x] 3f detail ukazuje L1/L2/L3 vedle sebe na společném měřítku
+- [x] Zařízení za jističem v detailu (skupiny, kanály, „hloupá" jako poznámky)
+- [x] Pořadí v tomto režimu: tarif + timeline dne → rozvaděč → detail →
       rozvrh a náklady (timeline je jen jednou, nahoře)
+- [x] Čisté funkce + testy: `comparePosition`, `buildRails`, `loadPercent`,
+      `phaseShares` (+18 testů, celkem 101)
+- [ ] **Fázová bilance u hlavního jističe** — průměr/špička za 24 h / 7 dní /
+      30 dní + největší odběry na fázi. Vyžaduje dlouhé okno ze statistik
+      (`_rangeStatsCache` už podobná data tahá pro Náklady), proto vyčleněno
+      do samostatného kroku → v5.6.0. **Záměrně bez automatického návrhu
+      přerovnání** — topná sezóna a léto mají jiný profil, jednorázová rada
+      by lhala; karta ukáže čísla za zvolené okno a rozhodnutí nechá na
+      člověku.
 
 ### 5.5 Hustota → zvážit po 5.3
 

@@ -1,4 +1,4 @@
-export const EP_VERSION = '5.4.0';
+export const EP_VERSION = '5.5.1';
 
 // ── Home Assistant types ────────────────────────────────────────────────────
 
@@ -56,6 +56,20 @@ export interface Circuit {
   confirm_toggle?: boolean;
   /** Breaker rating in Amperes, used for the load bar (default: 16 A single-phase, 63 A three-phase) */
   max_current?: number;
+  /**
+   * Position label in the physical distribution board — e.g. "08" or "V1".
+   * Only used by `view: panel`, where it is printed on the module and drives
+   * the order of modules on the rail (natural sort: 01 < 08 < 10 < V1).
+   * Circuits without a position keep their config order and sort last.
+   */
+  position?: string;
+  /**
+   * Which phase this single-phase circuit sits on. Only used by `view: panel`
+   * for the coloured stripe at the bottom of the module; 3-phase circuits
+   * derive it from `phases: 3` and ignore this. Optional — without it the
+   * module simply has no stripe.
+   */
+  phase?: 'L1' | 'L2' | 'L3';
   // ── Tuya / smart breaker entities ──
   switch?: string;   // entity_id of the breaker switch
   power?: string;    // entity_id — W (total)
@@ -152,11 +166,40 @@ export interface HdoConfig {
   merge_midnight?: boolean;
 }
 
+/**
+ * `view: panel` — the DIN-rail layout. Everything here is optional; the
+ * defaults produce a usable rail from a config that only added `position`
+ * to its circuits.
+ */
+export interface PanelConfig {
+  /**
+   * How many module widths fit on one rail row before it wraps (default: 12).
+   * A single-phase breaker is 1 width, a 3-phase breaker is 3 — same as in a
+   * real board.
+   */
+  rail_size?: number;
+  /** Main breaker rating in Amperes (default: 25). Drives its load level. */
+  main_breaker?: number;
+  /** Draw a micro sparkline inside each module as background (default: true) */
+  module_spark?: boolean;
+  /** Show the synthetic main-breaker module at the head of the rail (default: true) */
+  show_main?: boolean;
+}
+
 /** Top-level card configuration */
 export interface ElectricityPanelConfig {
   type: string;
   /** Optional card title */
   title?: string;
+  /**
+   * Layout mode. `classic` (default) is the original card — main meter card
+   * plus a grid of circuit cards. `panel` renders the breakers as modules on
+   * a DIN rail with an expandable detail below, and moves the schedule/costs
+   * block underneath it.
+   */
+  view?: 'classic' | 'panel';
+  /** Options for `view: panel` — ignored in classic view. */
+  panel?: PanelConfig;
   main_meter?: MainMeter;
   hdo?: HdoConfig;
   /** Ordered list of circuits — 3-phase circuits are rendered in their own row */

@@ -37,6 +37,7 @@ Configured entirely through a built-in GUI editor. No YAML editing required.
 - **"Wait for NT" hint** (opt-in) — during VT, running circuits show the next NT start and the percentage saving
 - **Sparkline power graphs** — time-aligned history graphs on main meter and circuit phase cells
 - **Theming** — built-in dark design, or `follow_theme: true` to adapt to the active HA theme
+- **Panel view** (opt-in) — `view: panel` draws the breakers as modules on a DIN rail, the way the physical board looks: lever, load level, phase stripe, position number. Tap a module for its detail, tap several to line their graphs up on one axis
 - **GUI config editor** — full visual editor with entity searchboxes; no manual YAML required
 
 ---
@@ -92,6 +93,8 @@ All configuration is done through the built-in card editor — click **Edit** on
 
 The editor sections:
 
+**Layout** — `classic` (default) or `panel`. See [Panel view](#panel-view) below.
+
 **Appearance & behaviour** — follow HA theme colours, debug logging.
 
 **Graph settings** — history window (1–24 h), sparkline colour/labels/reference lines, per-area visibility toggles, last-updated age badge.
@@ -106,8 +109,69 @@ The editor sections:
 - Critical flag (replaces toggle with lock icon)
 - Confirmation flag (ask before toggling)
 - Rated current in A (used for the load bar)
+- Position in the board and Phase — only used by panel view
 - Entity pickers for switch, power (W), current (A), energy (kWh today), voltage (V) — plus per-phase entities for 3φ circuits
 - **Devices** — sub-list of devices behind the breaker. Each device can optionally have a switch and measurement entities. Multi-channel devices (Shelly 4PM etc.) support individual channels.
+
+### Panel view
+
+`view: panel` swaps the meter card and circuit grid for a DIN rail: one module
+per breaker, three module widths for a 3-phase breaker, with the lever, the
+load level rising in the module body, the phase stripe and the position number.
+The schedule and costs block moves below the rail, and the day's tariff
+timeline moves up next to the tariff bar — "is it cheap now" and "what is
+drawing" are the glance-level questions, the schedule table is not.
+
+Tap a module to expand its detail below the rail: full numbers, a large graph
+and the devices wired behind that breaker. Tap several modules and their graphs
+line up side by side on one time axis, with a **shared Y axis** toggle (on by
+default) so the curves are actually comparable — that is the difference between
+"both look busy" and "the boiler draws thirty times what the fridge does".
+A 3-phase module shows L1/L2/L3 side by side, also on one shared scale.
+
+It needs two extra fields per circuit. Without them nothing breaks: circuits
+keep their config order and simply have no phase stripe.
+
+```yaml
+type: custom:electricity-panel-card
+view: panel                  # classic is the default
+title: Distribution board
+
+panel:
+  rail_size: 12              # module positions per rail row (default 12)
+  main_breaker: 25           # main breaker rating in A (default 25)
+  module_spark: true         # micro graph inside each module (default true)
+  show_main: true            # show the main-breaker module (default true)
+
+circuits:
+  - id: kitchen_left
+    name: Kitchen worktop left
+    position: "08"           # printed on the module; also sorts the rail
+    phase: L1                # colours the stripe at the bottom
+    max_current: 16          # drives how high the load level rises
+    power: sensor.shelly_kitchen_power
+    current: sensor.shelly_kitchen_current
+    energy: sensor.shelly_kitchen_energy
+    switch: switch.shelly_kitchen
+
+  - id: hob
+    name: Hob
+    position: "V1"
+    phases: 3                # a 3-phase breaker is 3 modules wide
+    max_current: 25
+    power_l1: sensor.hob_l1_power
+    power_l2: sensor.hob_l2_power
+    power_l3: sensor.hob_l3_power
+```
+
+Positions sort naturally, so `01` comes before `08` before `10`, and lettered
+positions like `V1` or `K1` come after the numbered ones. A 3-phase module never
+straddles two rails — if it would overflow it moves to the next rail whole, like
+the physical thing.
+
+Note on the lever colour: red means ON. That is the European MCB convention (the
+red field means "live") and it is a deliberate exception to the card's rule that
+red means high tariff.
 
 ---
 

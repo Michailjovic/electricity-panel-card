@@ -1,14 +1,9 @@
-import { LitElement, html, css, nothing, type TemplateResult } from 'lit';
+import { LitElement, html, svg, css, nothing, type TemplateResult } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import './electricity-panel-editor.js';
 import { PRE_TARIFFS } from './tariff-presets.js';
 import { EP_VERSION } from './types.js';
 
-/** Balíček A: výchozí barva sparklinu. Byla `#ef4444`, tedy stejná červená jako
- *  vysoký tarif a chybové stavy — průběh spotřeby přitom není signál, ale
- *  kontext. Musí zůstat konkrétní hex: hodnota jde do SVG prezentačních
- *  atributů (`stroke`, `stop-color`), kde se `var()` nevyhodnotí. */
-const EP_SPARK_DEFAULT = '#7c8ba1';
 import { localize } from './localize.js';
 import type {
   HomeAssistant,
@@ -36,13 +31,69 @@ import {
   accumulateTariffWhFromStats,
   estimateMonthCost,
   accumulateTariffWhFromEnergyBuckets,
+  comparePosition,
+  buildRails,
+  loadPercent,
   type DaySlot,
+  type DayType,
   type Window,
   type HdoStatus,
   type StatBucket,
   type HistPoint,
   type EnergyBucket,
 } from './utils.js';
+
+/** Balíček A: výchozí barva sparklinu. Byla `#ef4444`, tedy stejná červená jako
+ *  vysoký tarif a chybové stavy — průběh spotřeby přitom není signál, ale
+ *  kontext. Musí zůstat konkrétní hex: hodnota jde do SVG prezentačních
+ *  atributů (`stroke`, `stop-color`), kde se `var()` nevyhodnotí. */
+const EP_SPARK_DEFAULT = '#7c8ba1';
+
+/** Synthetic id for the main-breaker module in `view: panel` — it has no
+ *  Circuit of its own, it summarises `main_meter`. Prefixed so it can never
+ *  collide with a user's circuit id. */
+const EP_MAIN_ID = '__ep_main__';
+
+/** One module on the rail in `view: panel`, with everything the render needs
+ *  already resolved from hass — so the template stays declarative and the
+ *  entity lookups happen once per module, not once per use. */
+interface PanelModule {
+  id: string;
+  /** Module positions occupied: 1 for single-phase, 3 for a 3-phase breaker */
+  width: number;
+  /** Label printed at the bottom of the module ("08", "V1"); may be empty */
+  position: string;
+  name: string;
+  phaseCls: 'l1' | 'l2' | 'l3' | 'l3f' | 'none';
+  watts: number;
+  amps: number;
+  maxA: number;
+  pct: number;
+  isOn: boolean;
+  hasSwitch: boolean;
+  critical: boolean;
+  /** Entity whose history backs the micro graph and the detail graph */
+  sparkId?: string;
+  /** Set when `sparkId` is one phase of a 3-phase module rather than its total
+   *  — the label is shown next to the graph so a single phase is never read
+   *  as the whole breaker. */
+  sparkPhase?: string;
+  /** Absent for the synthetic main-breaker module */
+  circuit?: Circuit;
+}
+
+/** One entity's cached sparkline geometry — see `_sparkCache` for why each
+ *  field is part of the cache key. */
+interface SparkCache {
+  data: Array<{t: number; v: number}>;
+  windowEnd: number;
+  hours: number;
+  line: string;
+  area: string;
+  vMin: number;
+  vMax: number;
+  hoverPts: Array<{x: number; y: number; t: number; v: number}>;
+}
 
 @customElement('electricity-panel-card')
 export class ElectricityPanelCard extends LitElement {
@@ -84,6 +135,14 @@ export class ElectricityPanelCard extends LitElement {
    *  "use config default". Not persisted: this is a viewing convenience, not
    *  a card setting. */
   @state() private _sparkWindowHours?: number;
+  /** view: panel — which modules are selected. Empty = hint, one = detail,
+   *  more = comparison. Deliberately not persisted: it is a way of looking at
+   *  the board right now, not a card setting. */
+  @state() private _panelPick: string[] = [];
+  /** view: panel — force one Y scale across compared graphs. On by default:
+   *  comparing curves on independent axes is the failure mode this view is
+   *  meant to remove. */
+  @state() private _panelSharedY = true;
 
   private _timer?: number;
   private _historyTimer?: number;
@@ -131,16 +190,7 @@ export class ElectricityPanelCard extends LitElement {
    *  cache-busting input before. `hoverPts` carries each plotted point's SVG
    *  x/y alongside its source t/v so the hover tooltip can look up "nearest
    *  point" by x without recomputing the whole path. */
-  private _sparkCache = new Map<string, {
-    data: Array<{t: number; v: number}>;
-    windowEnd: number;
-    hours: number;
-    line: string;
-    area: string;
-    vMin: number;
-    vMax: number;
-    hoverPts: Array<{x: number; y: number; t: number; v: number}>;
-  }>();
+  private _sparkCache = new Map<string, SparkCache>();
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -431,7 +481,10 @@ export class ElectricityPanelCard extends LitElement {
         // design) but turns into a dark, prominent grey on a light theme —
         // exactly backwards. --ep-text-faint keeps "quiet" quiet in both.
         : (this._config.age_ok_color ?? 'var(--ep-text-faint)');
-    return html`<span class="metric-sep">·</span><span class="age-badge" style="color:${color}">↻ ${label}</span>`;
+    // No leading separator here: the badge is one part of the metric row and
+    // the row decides the separators, otherwise a circuit with nothing but a
+    // switch renders a row that opens with a stray dot.
+    return html`<span class="age-badge" style="color:${color}">↻ ${label}</span>`;
   }
 
   // ── Full-day schedule builder ──────────────────────────────────────────────
@@ -560,20 +613,24 @@ export class ElectricityPanelCard extends LitElement {
     const spark3 = cfg.sparkline_3phase !== false;
     const sparkMm = cfg.sparkline_main_meter !== false;
     const spark1 = cfg.sparkline_1phase ?? false;
+    // view: panel draws a micro graph inside every module and a full graph in
+    // the detail, so it needs history for every circuit — not just the ones
+    // whose sparkline is switched on in classic view.
+    const panelView = cfg.view === 'panel';
     const ids: string[] = [];
     for (const circ of cfg.circuits ?? []) {
       if (circ.phases === 3) {
         // Per-phase: sparklines always; cost only when no total entity exists
-        if (spark3 || (hasPrices && !circ.power)) {
+        if (spark3 || panelView || (hasPrices && !circ.power)) {
           [circ.power_l1, circ.power_l2, circ.power_l3].forEach(id => { if (id) ids.push(id); });
         }
         if (hasPrices && circ.power) ids.push(circ.power);
-      } else if (circ.power && (spark1 || hasPrices)) {
+      } else if (circ.power && (spark1 || hasPrices || panelView)) {
         ids.push(circ.power);
       }
     }
     const mm = cfg.main_meter;
-    if (mm && (sparkMm || hasPrices)) {
+    if (mm && (sparkMm || hasPrices || panelView)) {
       [mm.power_l1, mm.power_l2, mm.power_l3].forEach(id => { if (id) ids.push(id); });
     }
     return [...new Set(ids)];
@@ -605,11 +662,11 @@ export class ElectricityPanelCard extends LitElement {
    *  already share one x-axis (`_renderSparkline`'s comment above), so one
    *  switch is enough and keeps the extra UI to a single row instead of one
    *  per circuit. Rendered once from `_renderMainMeter`. */
-  private _renderSparkWindowSwitch(): TemplateResult {
+  private _renderSparkWindowSwitch(inline = false): TemplateResult {
     const active = this._effectiveGraphHours();
     const color = this._config.sparkline_color ?? EP_SPARK_DEFAULT;
     return html`
-      <div class="spark-win-switch">
+      <div class="spark-win-switch ${inline ? 'inline' : ''}">
         ${ElectricityPanelCard.SPARK_WINDOWS.map(h => html`
           <button type="button" class="spark-win-btn ${active === h ? 'active' : ''}"
             style=${active === h ? `border-color:${color};color:${color}` : ''}
@@ -1197,14 +1254,16 @@ export class ElectricityPanelCard extends LitElement {
     return { ntWh, vtWh, ntCost, vtCost, cost: ntCost + vtCost, kWh: (ntWh + vtWh) / 1000 };
   }
 
-  private _renderSparkline(entityId: string | undefined, noLabels = false): TemplateResult | typeof nothing {
-    if (!entityId) return nothing;
+  /** Cached SVG paths for one entity's history window, or undefined when there
+   *  is nothing to draw. Split out of `_renderSparkline` so `view: panel` can
+   *  reuse the very same cached path for the micro graph inside a module —
+   *  the paths are in a 100x38 user-space, and `preserveAspectRatio="none"`
+   *  rescales them to whatever box the caller has, so no second computation
+   *  (or second cache) is needed. */
+  private _sparkPaths(entityId: string): SparkCache | undefined {
     const data = this._historyCache.get(entityId);
-    if (!data || data.length < 2) return nothing;
+    if (!data || data.length < 2) return undefined;
     const W = 100, H = 38, pad = 3;
-    const color = this._config.sparkline_color ?? EP_SPARK_DEFAULT;
-    const labelPos = this._config.sparkline_labels ?? 'left';
-    const showRef = this._config.sparkline_ref_line ?? false;
 
     // Paths are cached per entity and recomputed only after a history fetch —
     // the 30 s countdown re-render no longer recalculates every SVG path.
@@ -1224,7 +1283,7 @@ export class ElectricityPanelCard extends LitElement {
         else pts.push(p);
       }
       if (carry) pts.unshift({ t: windowStart, v: carry.v });
-      if (pts.length === 0) return nothing;
+      if (pts.length === 0) return undefined;
       pts.push({ t: windowEnd, v: pts[pts.length - 1].v });
       const tRange = windowEnd - windowStart || 1;
       let vMin = Infinity, vMax = -Infinity;
@@ -1248,6 +1307,17 @@ export class ElectricityPanelCard extends LitElement {
       cached = { data, windowEnd: this._historyWindowEnd, hours, line, area, vMin, vMax, hoverPts };
       this._sparkCache.set(entityId, cached);
     }
+    return cached;
+  }
+
+  private _renderSparkline(entityId: string | undefined, noLabels = false): TemplateResult | typeof nothing {
+    if (!entityId) return nothing;
+    const cached = this._sparkPaths(entityId);
+    if (!cached) return nothing;
+    const W = 100, H = 38, pad = 3;
+    const color = this._config.sparkline_color ?? EP_SPARK_DEFAULT;
+    const labelPos = this._config.sparkline_labels ?? 'left';
+    const showRef = this._config.sparkline_ref_line ?? false;
 
     const gid = `sg_${entityId.replace(/[^a-z0-9]/gi, '_')}`;
     const yMax = pad.toFixed(1);
@@ -1295,14 +1365,21 @@ export class ElectricityPanelCard extends LitElement {
 
   // ── Render: HDO schedule ───────────────────────────────────────────────────
 
-  private _renderHdoSchedule(): TemplateResult | typeof nothing {
+  /** Slots + totals for the day currently being shown, or null when there is
+   *  no usable schedule. Extracted from `_renderHdoSchedule` so `view: panel`
+   *  can draw the day timeline on its own at the top of the card without
+   *  recomputing merge_midnight and the day-type resolution a second time. */
+  private _scheduleData(): {
+    slots: DaySlot[]; remaining: number | null; totalNT: number;
+    dt: DayType; showing: boolean;
+  } | null {
     const hdo = this._config.hdo;
-    if (!hdo) return nothing;
+    if (!hdo) return null;
 
     const showing = this._showTomorrow;
     const dayOffset = showing ? 1 : 0;
     const resolved = this._scheduleWindows(dayOffset);
-    if (!resolved) return nothing;
+    if (!resolved) return null;
     const { windows, start: base, end: dayEnd } = resolved;
     // Day-type label is purely informational here — it no longer decides
     // which windows to show once a schedule_entity has resolved the day.
@@ -1328,6 +1405,31 @@ export class ElectricityPanelCard extends LitElement {
         }
       }
     }
+    return { slots, remaining, totalNT, dt, showing };
+  }
+
+  /** view: panel — the day's timeline on its own, directly under the tariff
+   *  bar. In panel view the schedule block sits at the bottom of the card, but
+   *  "when is it cheap again today" is a glance-level question that belongs
+   *  next to the tariff; the block below therefore drops its own copy so the
+   *  timeline appears exactly once. */
+  private _renderDayTimeline(): TemplateResult | typeof nothing {
+    const data = this._scheduleData();
+    if (!data) return nothing;
+    const left = data.remaining !== null
+      ? html`<span class="nt-remaining">${this._fmtMins(data.remaining)} ${this._t('nt_left')}</span>`
+      : nothing;
+    return html`
+      <div class="day-timeline">
+        ${this._renderTimeline(data.slots, !data.showing)}
+        ${left !== nothing ? html`<div class="day-timeline-foot">${left}</div>` : nothing}
+      </div>`;
+  }
+
+  private _renderHdoSchedule(): TemplateResult | typeof nothing {
+    const data = this._scheduleData();
+    if (!data) return nothing;
+    const { slots, remaining, totalNT, dt, showing } = data;
 
     const exp = this._scheduleExpanded;
     const currentSlot = slots.find(s => s.isCurrent);
@@ -1385,7 +1487,9 @@ export class ElectricityPanelCard extends LitElement {
               <ha-icon icon="${exp ? 'mdi:chevron-up' : 'mdi:chevron-down'}" class="schedule-chevron"></ha-icon>
             </div>
           </div>
-          ${this._renderTimeline(slots, !showing)}
+          ${this._isPanelView()
+            ? nothing
+            : this._renderTimeline(slots, !showing)}
           ${exp ? html`
             <div class="schedule-rows">
               ${slots.map(sl => html`
@@ -1557,10 +1661,13 @@ export class ElectricityPanelCard extends LitElement {
               ${(totalW / 1000).toFixed(2)} kW
             </span>
             <span class="metric-small">
-              ${m.energy_today ? html`${this._kwh(m.energy_today).toFixed(1)} ${this._t('kwh_today')}` : nothing}
-              ${(() => { const cr = this._calcDailyCost(m.energy_today, m.power_l1, m.power_l2, m.power_l3); return cr ? html`<span class="metric-sep">·</span><span class="cost-rate">${cr}</span>` : nothing; })()}
-              ${m.voltage && voltage > 0 ? html`<span class="metric-sep">·</span>${voltage.toFixed(0)} V` : nothing}
-              ${this._ageBadge(m.power_l1 ?? m.power_l2 ?? m.power_l3 ?? m.energy_today)}
+              ${this._metricRow([
+                m.energy_today ? html`${this._kwh(m.energy_today).toFixed(1)} ${this._t('kwh_today')}` : null,
+                (() => { const cr = this._calcDailyCost(m.energy_today, m.power_l1, m.power_l2, m.power_l3);
+                         return cr ? html`<span class="cost-rate">${cr}</span>` : null; })(),
+                m.voltage && voltage > 0 ? html`${voltage.toFixed(0)} V` : null,
+                this._ageBadgePart(m.power_l1 ?? m.power_l2 ?? m.power_l3 ?? m.energy_today),
+              ])}
             </span>
           </div>
         </div>
@@ -1633,11 +1740,13 @@ export class ElectricityPanelCard extends LitElement {
               ${powerUnavail ? '—' : this._fmtW(power)}
             </span>
             <span class="metric-small">
-              ${c.current ? html`${this._isAvail(c.current) ? current.toFixed(1) : '—'} A` : nothing}
-              ${c.voltage ? html`<span class="metric-sep">·</span>${this._num(c.voltage).toFixed(0)} V` : nothing}
-              ${energy > 0 ? html`<span class="metric-sep">·</span>${energy.toFixed(2)} kWh` : nothing}
-              ${costRate ? html`<span class="metric-sep">·</span><span class="cost-rate">${costRate}</span>` : nothing}
-              ${this._ageBadge(c.power ?? c.current ?? c.switch)}
+              ${this._metricRow([
+                c.current ? html`${this._isAvail(c.current) ? current.toFixed(1) : '—'} A` : null,
+                c.voltage ? html`${this._num(c.voltage).toFixed(0)} V` : null,
+                energy > 0 ? html`${energy.toFixed(2)} kWh` : null,
+                costRate ? html`<span class="cost-rate">${costRate}</span>` : null,
+                this._ageBadgePart(c.power ?? c.current ?? c.switch),
+              ])}
             </span>
           </div>
           ${hasDevices
@@ -1793,9 +1902,11 @@ export class ElectricityPanelCard extends LitElement {
           <div class="tp-total">
             <span class="metric-primary">${(totalPower / 1000).toFixed(2)} kW</span>
             <span class="metric-small">
-              ${energy > 0 ? html`${energy.toFixed(2)} kWh` : nothing}
-              ${costRate ? html`<span class="metric-sep">·</span><span class="cost-rate">${costRate}</span>` : nothing}
-              ${this._ageBadge(c.power ?? c.power_l1 ?? c.current_l1 ?? c.switch)}
+              ${this._metricRow([
+                energy > 0 ? html`${energy.toFixed(2)} kWh` : null,
+                costRate ? html`<span class="cost-rate">${costRate}</span>` : null,
+                this._ageBadgePart(c.power ?? c.power_l1 ?? c.current_l1 ?? c.switch),
+              ])}
             </span>
           </div>
         </div>
@@ -1843,43 +1954,553 @@ export class ElectricityPanelCard extends LitElement {
     `;
   }
 
+  // ── view: panel — DIN rail (ROADMAP 5.4) ───────────────────────────────────
+
+  private _isPanelView(): boolean {
+    return this._config?.view === 'panel';
+  }
+
+  /** Panel options with defaults resolved once, so render code can read them
+   *  without repeating `?? fallback` at every use. */
+  private _panelCfg(): { railSize: number; mainBreaker: number; moduleSpark: boolean; showMain: boolean } {
+    const p = this._config.panel ?? {};
+    return {
+      railSize: p.rail_size ?? 12,
+      mainBreaker: p.main_breaker ?? 25,
+      moduleSpark: p.module_spark !== false,
+      showMain: p.show_main !== false,
+    };
+  }
+
+  /**
+   * Every module on the rail, already in board order.
+   *
+   * The main breaker is synthesised from `main_meter` rather than coming from
+   * `circuits` — it is the one module a user never configures as a circuit but
+   * always has in the physical board, and it is what the rail hangs off.
+   */
+  private _panelModules(): PanelModule[] {
+    const cfg = this._panelCfg();
+    const mods: PanelModule[] = [];
+    const mm = this._config.main_meter;
+
+    if (cfg.showMain && mm) {
+      const w = this._watts(mm.power_l1) + this._watts(mm.power_l2) + this._watts(mm.power_l3);
+      // The main breaker trips on its worst phase, not on the sum — so the
+      // load level has to follow the highest phase current, not the total.
+      const maxPhaseA = Math.max(
+        this._num(mm.current_l1), this._num(mm.current_l2), this._num(mm.current_l3));
+      const mainSpark = this._dominantPhase(
+        [mm.power_l1, mm.power_l2, mm.power_l3],
+        [mm.current_l1, mm.current_l2, mm.current_l3]);
+      mods.push({
+        id: EP_MAIN_ID,
+        width: 3,
+        position: 'HL',
+        name: this._t('main_breaker'),
+        phaseCls: 'l3f',
+        watts: w,
+        amps: maxPhaseA,
+        maxA: cfg.mainBreaker,
+        pct: loadPercent(maxPhaseA, w / 3, cfg.mainBreaker, this._mainVoltage()),
+        isOn: true,
+        hasSwitch: false,
+        critical: true,
+        sparkId: mainSpark.id,
+        sparkPhase: mainSpark.label,
+      });
+    }
+
+    const circuits = (this._config.circuits ?? [])
+      .slice()
+      .sort((a, b) => comparePosition(a.position, b.position));
+
+    for (const c of circuits) {
+      const three = c.phases === 3;
+      const watts = three
+        ? (c.power ? this._watts(c.power)
+                   : this._watts(c.power_l1) + this._watts(c.power_l2) + this._watts(c.power_l3))
+        : this._watts(c.power);
+      const amps = three
+        ? (c.current ? this._num(c.current)
+                     : Math.max(this._num(c.current_l1), this._num(c.current_l2), this._num(c.current_l3)))
+        : this._num(c.current);
+      const maxA = c.max_current ?? (three ? 63 : 16);
+      const volts = this._num(c.voltage) || this._num(c.voltage_l1) || 230;
+      mods.push({
+        id: c.id,
+        width: three ? 3 : 1,
+        position: c.position ?? '',
+        name: c.name,
+        phaseCls: three ? 'l3f' : (c.phase ? c.phase.toLowerCase() as 'l1' | 'l2' | 'l3' : 'none'),
+        watts,
+        amps,
+        maxA,
+        pct: loadPercent(amps, three ? watts / 3 : watts, maxA, volts),
+        isOn: this._isOn(c.switch),
+        hasSwitch: !!c.switch,
+        critical: !!c.critical,
+        ...(three && !c.power
+          ? (() => {
+              const d = this._dominantPhase(
+                [c.power_l1, c.power_l2, c.power_l3],
+                [c.current_l1, c.current_l2, c.current_l3]);
+              return { sparkId: d.id, sparkPhase: d.label };
+            })()
+          : { sparkId: c.power }),
+        circuit: c,
+      });
+    }
+    return mods;
+  }
+
+  /**
+   * Which phase entity to plot for a 3-phase module that has no single total
+   * power sensor.
+   *
+   * Summing three separate history series would mean resampling three
+   * differently-timed caches, and picking L1 blindly would draw a flat line
+   * next to a 2.5 kW headline. The breaker trips on its worst phase, so that
+   * is the phase worth plotting — labelled, so it is never mistaken for the
+   * total.
+   */
+  private _dominantPhase(
+    powers: Array<string | undefined>, currents: Array<string | undefined>,
+  ): { id?: string; label?: string } {
+    let best = -1, bestVal = -1;
+    for (let i = 0; i < 3; i++) {
+      if (!powers[i]) continue;
+      const v = this._num(currents[i]) || this._watts(powers[i]);
+      if (v > bestVal) { bestVal = v; best = i; }
+    }
+    if (best < 0) return {};
+    return { id: powers[best], label: `L${best + 1}` };
+  }
+
+  /**
+   * Join the small metric parts with dot separators, skipping the ones that
+   * aren't configured.
+   *
+   * Each part used to carry its own leading separator, which was fine as long
+   * as the first one (current) was always present — on a circuit configured
+   * with only an energy sensor the row opened with a stray "·". Deciding the
+   * separator from the position in the surviving list instead of from the
+   * field makes sparse configs render cleanly.
+   */
+  private _metricRow(parts: Array<TemplateResult | string | null | undefined>): TemplateResult {
+    const kept = parts.filter(x => x !== null && x !== undefined && x !== '') as Array<TemplateResult | string>;
+    return html`${kept.map((part, i) => html`${i > 0
+      ? html`<span class="metric-sep">·</span>`
+      : nothing}${part}`)}`;
+  }
+
+  /** `_ageBadge` for use inside `_metricRow` — turns lit's `nothing` into null
+   *  so the row's filter drops it along with the other absent parts. */
+  private _ageBadgePart(entityId?: string): TemplateResult | null {
+    const b = this._ageBadge(entityId);
+    return b === nothing ? null : b as TemplateResult;
+  }
+
+  private _mainVoltage(): number {
+    const mm = this._config.main_meter;
+    if (!mm) return 230;
+    return this._num(mm.voltage_l1) || this._num(mm.voltage) || 230;
+  }
+
+  /** Micro graph drawn behind a module's face. Reuses the very same cached
+   *  path as the full sparkline — `preserveAspectRatio="none"` rescales the
+   *  100x38 user-space into the module's strip, so there is no second
+   *  computation and no second cache. */
+  private _renderModuleSpark(entityId?: string): TemplateResult | typeof nothing {
+    if (!entityId) return nothing;
+    const cached = this._sparkPaths(entityId);
+    if (!cached) return nothing;
+    return html`
+      <svg class="mod-spark" viewBox="0 0 100 38" preserveAspectRatio="none" aria-hidden="true">
+        <path d="${cached.line}" fill="none" stroke="currentColor" stroke-width="1.6"
+          stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      </svg>`;
+  }
+
+  private _renderPanelModule(m: PanelModule): TemplateResult {
+    const picked = this._panelPick.includes(m.id);
+    const cfg = this._panelCfg();
+    const off = m.hasSwitch && !m.isOn;
+    return html`
+      <div class="mod ${off ? 'off' : 'on'} ${m.width === 3 ? 'w3' : ''} ${picked ? 'pick' : ''}"
+        role="button" tabindex="0"
+        aria-pressed=${picked ? 'true' : 'false'}
+        aria-label="${m.position ? m.position + ' ' : ''}${m.name}"
+        style="--ep-fillc:${this._loadColor(m.pct)}"
+        @click=${() => this._panelTogglePick(m.id)}
+        @keydown=${(e: KeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this._panelTogglePick(m.id); }
+        }}>
+        <div class="mod-lever">
+          ${Array.from({ length: m.width === 3 ? 3 : 1 },
+            () => html`<span class="lv"></span>`)}
+        </div>
+        <div class="mod-face">
+          ${cfg.moduleSpark ? this._renderModuleSpark(m.sparkId) : nothing}
+          <div class="mod-fill" style="height:${m.pct.toFixed(0)}%"></div>
+          ${picked ? html`<span class="mod-pin"></span>` : nothing}
+          <div class="mod-w">${m.watts > 0 ? this._fmtW(m.watts) : '—'}</div>
+          <div class="mod-nm">${m.name}</div>
+        </div>
+        <div class="mod-foot">
+          <span class="mod-num">${m.position}</span>
+          ${m.critical ? html`<ha-icon icon="mdi:lock" class="mod-lock"></ha-icon>` : nothing}
+          <span class="mod-ph ${m.phaseCls}">${m.phaseCls === 'l3f' ? '3φ'
+            : m.phaseCls === 'none' ? '' : m.phaseCls.toUpperCase()}</span>
+        </div>
+        <div class="mod-strip ${m.phaseCls}"></div>
+      </div>`;
+  }
+
+  private _panelTogglePick(id: string): void {
+    this._panelPick = this._panelPick.includes(id)
+      ? this._panelPick.filter(x => x !== id)
+      : [...this._panelPick, id];
+  }
+
+  private _renderPanel(): TemplateResult {
+    const cfg = this._panelCfg();
+    const mods = this._panelModules();
+    const rails = buildRails(mods, cfg.railSize);
+    const mm = this._config.main_meter;
+    const totalW = mm
+      ? this._watts(mm.power_l1) + this._watts(mm.power_l2) + this._watts(mm.power_l3)
+      : mods.reduce((a, m) => a + (m.id === EP_MAIN_ID ? 0 : m.watts), 0);
+    const positions = mods.reduce((a, m) => a + m.width, 0);
+    const mainMod = mods.find(m => m.id === EP_MAIN_ID);
+    const isNT = this._config.hdo?.switch ? this._isOn(this._config.hdo.switch) : false;
+    const costRate = mm
+      ? this._calcDailyCost(mm.energy_today, mm.power_l1, mm.power_l2, mm.power_l3)
+      : '';
+
+    return html`
+      <div class="rail-wrap">
+        <div class="rail-top">
+          <div>
+            <div class="rail-lbl">${this._t('panel_board')} · ${this._t('panel_positions', { n: String(positions) })}</div>
+            <div class="rail-val">${this._fmtW(totalW)}</div>
+          </div>
+          <div class="rail-sub">
+            ${mm?.energy_today
+              ? html`${this._kwh(mm.energy_today).toFixed(1)} ${this._t('kwh_today')}${costRate ? html` · <span class="cost-rate">${costRate}</span>` : nothing}<br>`
+              : nothing}
+            ${mainMod
+              ? html`${this._t('main_breaker')} ${mainMod.amps.toFixed(1)} / ${mainMod.maxA} A`
+              : nothing}
+          </div>
+        </div>
+        <div class="busbar ${isNT ? 'nt' : 'vt'}"></div>
+        <div class="busbar-note">${this._t('busbar_note')}</div>
+        ${rails.map(r => {
+          const used = r.reduce((a, m) => a + m.width, 0);
+          const gap = Math.max(0, cfg.railSize - used);
+          return html`
+            <div class="rail">
+              <div class="rail-mods">
+                ${r.map(m => this._renderPanelModule(m))}
+                ${gap > 0 ? html`<div class="rail-gap" style="flex-basis:0;flex-grow:${gap}"></div>` : nothing}
+              </div>
+            </div>`;
+        })}
+        ${this._renderPanelDetail(mods)}
+      </div>`;
+  }
+
+  // ── panel detail ───────────────────────────────────────────────────────────
+
+  private _renderPanelTools(): TemplateResult {
+    const n = this._panelPick.length;
+    return html`
+      <div class="g-bar">
+        ${this._renderSparkWindowSwitch(true)}
+        ${n > 1 ? html`
+          <button class="g-chk ${this._panelSharedY ? 'on' : ''}" role="switch"
+            aria-checked=${this._panelSharedY ? 'true' : 'false'}
+            @click=${() => { this._panelSharedY = !this._panelSharedY; }}>
+            <span class="box"></span>${this._t('shared_axis')}
+          </button>` : nothing}
+        <span class="g-spacer"></span>
+        ${n ? html`
+          <button class="g-btn" @click=${() => { this._panelPick = []; }}>
+            ${this._t('clear_selection', { n: String(n) })}
+          </button>` : nothing}
+      </div>`;
+  }
+
+  private _renderPanelDetail(mods: PanelModule[]): TemplateResult {
+    const picked = this._panelPick
+      .map(id => mods.find(m => m.id === id))
+      .filter(Boolean) as PanelModule[];
+
+    let body: TemplateResult;
+    if (picked.length === 0) {
+      body = html`<div class="rd-hint">
+        ${this._t('panel_hint_pick')}<br>${this._t('panel_hint_compare')}
+      </div>`;
+    } else if (picked.length === 1) {
+      body = this._renderPanelSingle(picked[0]);
+    } else {
+      body = this._renderPanelCompare(picked);
+    }
+    return html`<div class="rail-detail">${this._renderPanelTools()}${body}</div>`;
+  }
+
+  private _renderPanelSingle(m: PanelModule): TemplateResult {
+    const c = m.circuit;
+    const three = m.width === 3;
+    const energy = c ? this._kwh(c.energy) : (this._config.main_meter
+      ? this._kwh(this._config.main_meter.energy_today) : 0);
+    const costRate = c
+      ? (c.phases === 3 && !c.power
+          ? this._calcDailyCost(c.energy, c.power_l1, c.power_l2, c.power_l3)
+          : this._calcDailyCost(c.energy, c.power))
+      : (this._config.main_meter
+          ? this._calcDailyCost(this._config.main_meter.energy_today,
+              this._config.main_meter.power_l1, this._config.main_meter.power_l2,
+              this._config.main_meter.power_l3)
+          : '');
+
+    return html`
+      <div class="rd-head">
+        ${m.position ? html`<span class="rd-num">${m.position}</span>` : nothing}
+        <span class="rd-name">${m.name}</span>
+        ${three ? html`<span class="badge badge-phase">3φ</span>` : nothing}
+        ${m.critical
+          ? html`<ha-icon icon="mdi:lock" class="lock-icon"></ha-icon>`
+          : m.hasSwitch && c
+            ? html`<button class="toggle ${m.isOn ? 'on' : 'off'}"
+                @click=${() => this._toggle(c.switch!, c.name, c.confirm_toggle)}
+                aria-label="${this._t(m.isOn ? 'turn_off' : 'turn_on')} ${c.name}"></button>`
+            : nothing}
+      </div>
+      <div class="rd-val">${this._fmtW(m.watts)}</div>
+      <div class="rd-meta">
+        ${m.amps > 0 ? html`${m.amps.toFixed(1)} A · ` : nothing}
+        ${energy > 0 ? html`${energy.toFixed(2)} kWh · ` : nothing}
+        ${costRate ? html`<span class="cost-rate">${costRate}</span> · ` : nothing}
+        ${this._t('load_pct', { pct: m.pct.toFixed(0) })} ${this._t('of_rating', { max: String(m.maxA) })}
+      </div>
+      ${(() => {
+        // `show_nt_hint` was only ever read by the two classic renderers, so in
+        // panel view the setting silently did nothing. The hint belongs on the
+        // detail rather than on the module: it is a sentence, and a module is
+        // 70 px wide.
+        const hint = this._ntHint(m.watts);
+        return hint
+          ? html`<div class="nt-hint"><ha-icon icon="mdi:clock-fast"></ha-icon>${hint}</div>`
+          : nothing;
+      })()}
+      ${three ? this._renderPanelPhases(m) : html`<div class="rd-graph">${this._renderSparkline(m.sparkId)}</div>`}
+      ${this._renderPanelDevices(m)}`;
+  }
+
+  /**
+   * L1/L2/L3 side by side for any 3-phase module, including the main breaker.
+   *
+   * All three graphs are forced onto one scale — without that the phase
+   * carrying 40 W and the one carrying 2.4 kW draw identical-looking curves,
+   * which is exactly the comparison the detail exists to make.
+   */
+  private _renderPanelPhases(m: PanelModule): TemplateResult {
+    const c = m.circuit;
+    const mm = this._config.main_meter;
+    const phases: Array<{ lbl: string; power?: string; current?: string; voltage?: string }> =
+      c
+        ? [
+            { lbl: 'L1', power: c.power_l1, current: c.current_l1, voltage: c.voltage_l1 },
+            { lbl: 'L2', power: c.power_l2, current: c.current_l2, voltage: c.voltage_l2 },
+            { lbl: 'L3', power: c.power_l3, current: c.current_l3, voltage: c.voltage_l3 },
+          ]
+        : [
+            { lbl: 'L1', power: mm?.power_l1, current: mm?.current_l1, voltage: mm?.voltage_l1 ?? mm?.voltage },
+            { lbl: 'L2', power: mm?.power_l2, current: mm?.current_l2, voltage: mm?.voltage_l2 ?? mm?.voltage },
+            { lbl: 'L3', power: mm?.power_l3, current: mm?.current_l3, voltage: mm?.voltage_l3 ?? mm?.voltage },
+          ];
+
+    const globalMax = Math.max(
+      ...phases.map(p => (p.power ? this._sparkPaths(p.power)?.vMax ?? 0 : 0)), 0);
+    const globalMin = Math.min(
+      ...phases.map(p => (p.power ? this._sparkPaths(p.power)?.vMin ?? 0 : 0)), 0);
+
+    return html`
+      <div class="ph3-grid">
+        ${phases.map(p => {
+          const w = this._watts(p.power);
+          const a = this._num(p.current);
+          const v = this._num(p.voltage);
+          const pct = loadPercent(a, w, m.maxA, v || 230);
+          const cls = p.lbl.toLowerCase();
+          return html`
+            <div class="ph3-cell ${cls}">
+              <div class="ph3-head">
+                <span class="ph3-lbl">${p.lbl}</span>
+                <span class="ph3-pct">${pct.toFixed(0)} %</span>
+              </div>
+              <div class="ph3-val">${this._fmtW(w)}</div>
+              <div class="ph3-sub">
+                ${a.toFixed(1)} A${v > 0 ? html` · ${v.toFixed(0)} V` : nothing}
+              </div>
+              <div class="ph3-track">
+                <i style="width:${pct.toFixed(0)}%;background:${this._loadColor(pct)}"></i>
+              </div>
+              ${this._renderScaledSpark(p.power, globalMin, globalMax, `var(--ep-${cls})`)}
+            </div>`;
+        })}
+      </div>
+      <div class="ph3-note">${this._t('phases_shared_scale')}</div>`;
+  }
+
+  /**
+   * A cached sparkline path re-projected onto a shared value axis.
+   *
+   * The cached path normalises each entity onto its own [vMin, vMax], which is
+   * what makes a 40 W phase and a 2.4 kW phase look identical. Mapping one
+   * linear scale onto another is itself linear, so instead of recomputing the
+   * path we wrap it in the affine transform that turns the entity's own axis
+   * into the shared one — same path object, same cache, correct comparison.
+   */
+  // Pozor: barva musí jít přes `style=`, ne přes prezentační atribut `stroke=`.
+  // V prezentačních atributech se `var(--…)` nevyhodnotí a křivka se prostě
+  // nevykreslí — tichá chyba, kterou nic nenahlásí.
+  private _renderScaledSpark(
+    entityId: string | undefined, gMin: number, gMax: number, color: string,
+  ): TemplateResult | typeof nothing {
+    if (!entityId) return nothing;
+    const s = this._sparkPaths(entityId);
+    if (!s) return nothing;
+    const H = 38, pad = 3, inner = H - pad * 2;
+    const gRange = gMax - gMin;
+    const lRange = s.vMax - s.vMin;
+    // Nested fragments inside an <svg> must be built with lit's `svg` tag, not
+    // `html` — a nested `html` template is prepared in the HTML namespace, so
+    // its <path> comes out as an unknown HTML element and silently draws
+    // nothing. Colours go through `style=`, since `var(--…)` does not resolve
+    // in an SVG presentation attribute either.
+    let g;
+    if (!(gRange > 0) || !(lRange > 0)) {
+      // Nothing varies (a phase sitting at a constant, usually zero) — draw it
+      // flat at its place on the shared axis rather than mid-box.
+      const y = gRange > 0 ? (H - pad) - ((s.vMin - gMin) / gRange) * inner : H - pad;
+      g = svg`<path d="M 0,${y.toFixed(1)} L 100,${y.toFixed(1)}" fill="none"
+        style="stroke:${color}" stroke-width="1.4" vector-effect="non-scaling-stroke"/>`;
+    } else {
+      const k = lRange / gRange;
+      const ty = (H - pad) * (1 - k) - (inner / gRange) * (s.vMin - gMin);
+      g = svg`
+        <g transform="translate(0 ${ty.toFixed(2)}) scale(1 ${k.toFixed(4)})">
+          <path d="${s.line}" fill="none" style="stroke:${color}" stroke-width="1.4"
+            stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+        </g>`;
+    }
+    return html`
+      <svg class="ph3-spark" viewBox="0 0 100 ${H}" preserveAspectRatio="none">${g}</svg>`;
+  }
+
+  private _renderPanelCompare(picked: PanelModule[]): TemplateResult {
+    const paths = picked.map(m => (m.sparkId ? this._sparkPaths(m.sparkId) : undefined));
+    const gMax = Math.max(...paths.map(p => p?.vMax ?? 0), 0);
+    const gMin = Math.min(...paths.map(p => p?.vMin ?? 0), 0);
+    const shared = this._panelSharedY;
+    return html`
+      <div class="cmp-grid">
+        ${picked.map((m, i) => {
+          const p = paths[i];
+          const localMax = p?.vMax ?? 0;
+          return html`
+            <div class="cmp-cell">
+              <div class="cmp-head">
+                ${m.position ? html`<span class="cmp-num">${m.position}</span>` : nothing}
+                <span class="cmp-name">${m.name}</span>
+                <span class="cmp-val">${this._fmtW(m.watts)}</span>
+              </div>
+              <div class="cmp-scale">
+                ${m.sparkPhase ? html`<span class="cmp-ph">${m.sparkPhase}</span> · ` : nothing}max
+                ${this._fmtW(shared ? gMax : localMax)}${shared ? html` · ${this._t('shared_axis')}` : nothing}
+              </div>
+              ${shared
+                ? this._renderScaledSpark(m.sparkId, gMin, gMax, 'var(--ep-neutral)')
+                : html`<div class="cmp-plain">${this._renderSparkline(m.sparkId, true)}</div>`}
+            </div>`;
+        })}
+      </div>`;
+  }
+
+  private _renderPanelDevices(m: PanelModule): TemplateResult {
+    const devices = m.circuit?.devices ?? [];
+    if (!devices.length) {
+      return html`<div class="dev-empty">${this._t('no_devices')}</div>`;
+    }
+    return html`
+      <div class="dev-wrap">
+        <div class="dev-title">${this._t('devices_behind')}</div>
+        <div class="devices-list" style="margin-top:0;padding-top:0;border-top:none">
+          ${devices.map(d => this._renderDevice(d))}
+        </div>
+      </div>`;
+  }
+
   // ── Main render ────────────────────────────────────────────────────────────
 
   render(): TemplateResult | typeof nothing {
     if (!this.hass || !this._config) return nothing;
-
-    const circuits = this._config.circuits ?? [];
-    const threePhase = circuits.filter(c => c.phases === 3);
-    const singlePhase = circuits.filter(c => c.phases !== 3);
-
     return html`
       <ha-card class=${this._config.follow_theme ? 'theme-auto' : ''}>
         ${this._config.title
           ? html`<div class="card-header">${this._config.title}</div>`
           : nothing}
         <div class="card-content">
-          ${this._renderHdo()}
-          ${this._renderHdoSchedule()}
-          ${this._renderMainMeter()}
-
-          ${threePhase.length > 0 ? html`
-            <div class="section-label">${this._t('three_phase_section')}</div>
-            <div class="three-phase-list">
-              ${threePhase.map(c => this._renderThreePhaseCircuit(c))}
-            </div>
-          ` : nothing}
-
-          ${singlePhase.length > 0 ? html`
-            ${threePhase.length > 0
-              ? html`<div class="section-label">${this._t('single_phase_section')}</div>`
-              : nothing}
-            <div class="circuit-grid">
-              ${singlePhase.map(c => this._renderCircuit(c))}
-            </div>
-          ` : nothing}
+          ${this._isPanelView() ? this._renderPanelBody() : this._renderClassicBody()}
         </div>
       </ha-card>
     `;
+  }
+
+  private _renderClassicBody(): TemplateResult {
+    const circuits = this._config.circuits ?? [];
+    const threePhase = circuits.filter(c => c.phases === 3);
+    const singlePhase = circuits.filter(c => c.phases !== 3);
+    return html`
+      ${this._renderHdo()}
+      ${this._renderHdoSchedule()}
+      ${this._renderMainMeter()}
+
+      ${threePhase.length > 0 ? html`
+        <div class="section-label">${this._t('three_phase_section')}</div>
+        <div class="three-phase-list">
+          ${threePhase.map(c => this._renderThreePhaseCircuit(c))}
+        </div>
+      ` : nothing}
+
+      ${singlePhase.length > 0 ? html`
+        ${threePhase.length > 0
+          ? html`<div class="section-label">${this._t('single_phase_section')}</div>`
+          : nothing}
+        <div class="circuit-grid">
+          ${singlePhase.map(c => this._renderCircuit(c))}
+        </div>
+      ` : nothing}`;
+  }
+
+  /**
+   * Order in panel view: tariff → day timeline → board → detail → schedule.
+   *
+   * "Is it cheap right now" and "what is drawing" are the two glance-level
+   * questions, so they sit at the top; the schedule table and the costs tab
+   * are planning and review, and move below the board. The timeline stays up
+   * top on its own because it answers "when is it cheap again" at a glance —
+   * and it appears exactly once, `_renderHdoSchedule` drops its own copy.
+   */
+  private _renderPanelBody(): TemplateResult {
+    return html`
+      ${this._renderHdo()}
+      ${this._renderDayTimeline()}
+      ${this._renderPanel()}
+      ${this._renderHdoSchedule()}`;
   }
 
   // ── Styles ─────────────────────────────────────────────────────────────────
@@ -1913,6 +2534,22 @@ export class ElectricityPanelCard extends LitElement {
       /* Elevace odlišuje úrovně periferním viděním: hlavní měřič má stín a
          žádný okraj, okruhy povrch + okraj, jističe jen okraj. */
       --ep-shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
+
+      /* view: panel — fázové barvy. Vybrané tak, aby nekolidovaly s vyhrazenou
+         zelenou/červenou (tarif) ani amber (varování). Reálné hnědá/černá/šedá
+         podle CEE jsou na tmavé kartě nepoužitelné. */
+      --ep-l1: #8b7ee8;
+      --ep-l2: #45b8ac;
+      --ep-l3: #5b8def;
+      /* Kovový profil DIN lišty a plast modulu. */
+      --ep-metal-a: #2b313d;
+      --ep-metal-b: #1a1e26;
+      --ep-metal-edge: #3c4454;
+      --ep-mod-a: #2b303b;
+      --ep-mod-b: #20242d;
+      --ep-mod-chrome: #14171d;
+      --ep-mod-text: #e6eaf2;
+      --ep-mod-dim: #98a3b5;
 
       /* Balíček B: typografická škála. Bylo devět velikostí v pásmu 8-14 px —
          rozdíl 10 vs. 11 px se nečte jako hierarchie, jen jako nekonzistence.
@@ -1950,6 +2587,17 @@ export class ElectricityPanelCard extends LitElement {
       --ep-badge-bg: rgba(33, 150, 243, 0.12);
       --ep-badge-fg: var(--primary-color, #03a9f4);
       --ep-shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.07);
+      --ep-l1: #6d5fd6;
+      --ep-l2: #1d8f85;
+      --ep-l3: #2f6fd0;
+      --ep-metal-a: #dfe3ea;
+      --ep-metal-b: #c6ccd7;
+      --ep-metal-edge: #aeb6c4;
+      --ep-mod-a: #fdfdfe;
+      --ep-mod-b: #dee3eb;
+      --ep-mod-chrome: #b9c0cc;
+      --ep-mod-text: #1c2230;
+      --ep-mod-dim: #55606f;
     }
     ha-card.theme-auto .hdo-bar.nt { background: rgba(34,197,94,.08); border-color: rgba(34,197,94,.3); }
     ha-card.theme-auto .hdo-bar.vt { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.3); }
@@ -2217,6 +2865,200 @@ export class ElectricityPanelCard extends LitElement {
 
     .clickable { cursor: pointer; }
     .clickable:hover { opacity: .8; }
+
+    /* ══ view: panel — DIN rail (ROADMAP 5.4) ══════════════════════════════ */
+
+    /* Shadow DOM nedědí box-sizing ze stránky a classic layout je postavený
+       na content-boxu, takže se to nedá zapnout globálně bez přepočítání
+       všech dosavadních výšek. Panel view si ho zapíná jen pro svůj podstrom,
+       kde na něm stojí pevná výška modulu. */
+    .rail-wrap, .rail-wrap *, .rail-wrap *::before, .rail-wrap *::after,
+    .day-timeline, .day-timeline * { box-sizing: border-box; }
+
+    .day-timeline { background: var(--ep-surface); border: 1px solid var(--ep-border);
+      border-radius: var(--ep-r-md); padding: 12px; margin-bottom: 12px; box-shadow: var(--ep-shadow); }
+    .day-timeline .timeline-bar { margin-bottom: 0; }
+    .day-timeline-foot { font-size: var(--ep-fs-micro); color: var(--ep-text-dim);
+      text-align: right; margin-top: 8px; font-variant-numeric: tabular-nums; }
+
+    .rail-wrap { background: var(--ep-surface); border-radius: var(--ep-r-md);
+      padding: 16px; margin-bottom: 12px; box-shadow: var(--ep-shadow); }
+    .rail-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .rail-lbl { font-size: var(--ep-fs-micro); text-transform: uppercase; letter-spacing: .9px;
+      font-weight: 600; color: var(--ep-text-dim); }
+    .rail-val { font-size: var(--ep-fs-hero); font-weight: 600; letter-spacing: -0.6px;
+      color: var(--ep-text); font-variant-numeric: tabular-nums; }
+    .rail-sub { font-size: var(--ep-fs-meta); color: var(--ep-text-dim); text-align: right;
+      font-variant-numeric: tabular-nums; line-height: 1.5; }
+
+    /* Přípojnice — proud teče shora do lišty. Tarifní barva, protože to je
+       jediné místo v panel view, kde se dá říct "tohle teď teče levně". */
+    .busbar { height: 6px; border-radius: var(--ep-r-pill); position: relative; overflow: hidden; }
+    .busbar.nt { background: rgba(34,197,94,.18); }
+    .busbar.vt { background: rgba(239,68,68,.16); }
+    .busbar::after { content: ''; position: absolute; inset: 0;
+      background: repeating-linear-gradient(90deg, transparent 0 14px,
+        currentColor 20px 30px, transparent 36px 50px);
+      animation: ep-bus 2.1s linear infinite; }
+    .busbar.nt::after { color: rgba(34,197,94,.55); }
+    .busbar.vt::after { color: rgba(239,68,68,.5); }
+    @keyframes ep-bus { to { transform: translateX(50px); } }
+    @media (prefers-reduced-motion: reduce) { .busbar::after { animation: none; } }
+    .busbar-note { font-size: var(--ep-fs-micro); color: var(--ep-text-dim);
+      text-align: right; margin: 6px 0 10px; }
+
+    /* Lišta: kovový profil s hranami nahoře a dole. */
+    .rail { position: relative; padding: 13px 8px 9px; margin-bottom: 9px; border-radius: 5px;
+      background: linear-gradient(180deg,
+        var(--ep-metal-edge) 0 3px, var(--ep-metal-a) 3px 9px,
+        var(--ep-metal-b) 9px calc(100% - 9px),
+        var(--ep-metal-a) calc(100% - 9px) calc(100% - 3px),
+        var(--ep-metal-edge) calc(100% - 3px) 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.3); }
+    .rail:last-of-type { margin-bottom: 0; }
+    .rail-mods { display: flex; gap: 3px; }
+    /* Neobsazené pozice na poslední liště. Bez nich by flex roztáhl poslední
+       modul přes celou šířku a moduly by na každé liště měly jinou velikost —
+       reálný rozvaděč má naopak modul vždy stejně široký a lištu dojetou. */
+    .rail-gap { flex-grow: 0; flex-shrink: 1; }
+
+    /* Modul jističe. V tmavém tématu antracitový (takové jističe reálně
+       existují), ve světlém klasicky bílý — identitu nese tvar, páčka
+       a číslování, ne barva plastu. */
+    .mod { flex: 1 1 0; min-width: 34px; cursor: pointer; border-radius: 3px; overflow: hidden;
+      background: linear-gradient(180deg, var(--ep-mod-a), var(--ep-mod-b)); position: relative;
+      box-shadow: 0 1px 3px rgba(0,0,0,.45); transition: transform .12s, box-shadow .12s; }
+    .mod.w3 { flex: 3 3 0; }
+    .mod:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,.5); }
+    .mod:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 2px; }
+    .mod.pick { outline: 2px solid var(--ep-accent); outline-offset: 1px; }
+    .mod-lever { height: 24px; display: flex; align-items: center; justify-content: center; gap: 4px;
+      background: var(--ep-mod-chrome); border-bottom: 1px solid rgba(0,0,0,.3); }
+    /* Červená páčka = zapnuto je konvence evropských jističů (červené pole
+       znamená "pod napětím") a je to vědomá výjimka z pravidla balíčku A
+       "červená = vysoký tarif". Nepřebarvovat. */
+    .lv { width: 12px; height: 16px; border-radius: 2px; transition: all .18s; }
+    .mod.on  .lv { background: #d4423c; box-shadow: inset 0 6px 0 rgba(0,0,0,.2); }
+    .mod.off .lv { background: #5b6473; box-shadow: inset 0 -6px 0 rgba(0,0,0,.28); }
+    .mod-face { position: relative; height: 66px; padding: 6px 4px 4px; overflow: hidden; }
+    .mod-spark { position: absolute; left: 0; right: 0; bottom: 0; height: 22px; width: 100%;
+      color: var(--ep-mod-dim); opacity: .4; pointer-events: none; }
+    .mod.off .mod-spark { opacity: .18; }
+    /* Hladina zatížení — barevná náplň s výraznou hladinou nahoře. */
+    .mod-fill { position: absolute; left: 0; right: 0; bottom: 0; transition: height .4s;
+      background: linear-gradient(180deg, transparent, var(--ep-fillc));
+      opacity: .35; border-top: 1.5px solid var(--ep-fillc); }
+    .mod.off .mod-fill { display: none; }
+    .mod-pin { position: absolute; top: 2px; left: 3px; width: 5px; height: 5px; border-radius: 50%;
+      background: var(--ep-accent); box-shadow: 0 0 0 2px var(--ep-mod-chrome); }
+    .mod-w { position: relative; font-size: 10px; font-weight: 700; color: var(--ep-mod-text);
+      text-align: center; font-variant-numeric: tabular-nums; letter-spacing: -0.2px; }
+    .mod-nm { position: relative; font-size: 8.5px; line-height: 1.25; color: var(--ep-mod-dim);
+      overflow: hidden; text-align: center; margin-top: 3px; max-height: 22px; word-break: break-word;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .mod.off .mod-w, .mod.off .mod-nm { opacity: .45; }
+    .mod-lock { --mdc-icon-size: 12px; color: var(--warning-color, #f59e0b); display: flex; }
+    .mod-foot { display: flex; align-items: center; justify-content: space-between; gap: 3px;
+      padding: 3px 5px 4px; background: var(--ep-mod-chrome); }
+    .mod-num { font-size: 9px; font-weight: 700; color: var(--ep-mod-dim); font-variant-numeric: tabular-nums; }
+    .mod-ph { font-size: 8px; font-weight: 700; letter-spacing: .3px; }
+    .mod-ph.l1 { color: var(--ep-l1); }
+    .mod-ph.l2 { color: var(--ep-l2); }
+    .mod-ph.l3 { color: var(--ep-l3); }
+    .mod-ph.l3f { color: var(--ep-mod-dim); }
+    .mod-strip { height: 3px; }
+    .mod-strip.l1 { background: var(--ep-l1); }
+    .mod-strip.l2 { background: var(--ep-l2); }
+    .mod-strip.l3 { background: var(--ep-l3); }
+    .mod-strip.l3f { background: linear-gradient(90deg,
+      var(--ep-l1) 33%, var(--ep-l2) 33% 66%, var(--ep-l3) 66%); }
+    .mod-strip.none { background: var(--ep-mod-chrome); }
+    .mod.off .mod-strip { opacity: .3; }
+
+    /* ── detail pod lištou ── */
+    .rail-detail { margin-top: 12px; border-radius: var(--ep-r-md); border: 1px solid var(--ep-border);
+      background: var(--ep-surface-2); padding: 12px 14px; }
+    .rd-hint { font-size: var(--ep-fs-micro); color: var(--ep-text-dim); text-align: center;
+      padding: 8px 0; line-height: 1.7; }
+    .rd-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .rd-num { font-size: var(--ep-fs-micro); font-weight: 700; padding: 2px 6px;
+      border-radius: var(--ep-r-sm); background: var(--ep-accent-bg); color: var(--ep-accent);
+      font-variant-numeric: tabular-nums; }
+    .rd-name { font-size: var(--ep-fs-body); font-weight: 500; flex: 1; color: var(--ep-text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rd-val { font-size: var(--ep-fs-hero); font-weight: 600; letter-spacing: -0.6px;
+      color: var(--ep-text); line-height: 1; font-variant-numeric: tabular-nums; }
+    .rd-meta { font-size: var(--ep-fs-meta); color: var(--ep-text-dim); margin-top: 4px;
+      font-variant-numeric: tabular-nums; }
+    .rd-graph { margin-top: 8px; }
+    .rd-graph .sparkline-wrap { height: 74px; }
+
+    .g-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .g-spacer { flex: 1; }
+    .g-btn { font: inherit; font-size: var(--ep-fs-micro); font-weight: 500; padding: 4px 10px;
+      border: 1px solid var(--ep-border2); border-radius: var(--ep-r-sm); background: transparent;
+      color: var(--ep-text-dim); cursor: pointer; }
+    .g-btn:hover { background: var(--ep-accent-bg); color: var(--ep-accent); }
+    .g-chk { display: flex; align-items: center; gap: 6px; font: inherit;
+      font-size: var(--ep-fs-micro); color: var(--ep-text-dim); cursor: pointer;
+      background: none; border: none; padding: 0; }
+    .g-chk .box { width: 26px; height: 15px; border-radius: var(--ep-r-pill);
+      background: var(--ep-text-faint); position: relative; transition: background .18s; }
+    .g-chk .box::after { content: ''; position: absolute; top: 2.5px; left: 2.5px;
+      width: 10px; height: 10px; border-radius: 50%; background: #fff; transition: left .18s; }
+    .g-chk.on { color: var(--ep-accent); }
+    .g-chk.on .box { background: var(--ep-accent); }
+    .g-chk.on .box::after { left: 13.5px; }
+    .spark-win-switch.inline { margin: 0; flex: 0 0 auto; width: auto; gap: 3px; }
+    .spark-win-switch.inline .spark-win-btn { flex: 0 0 auto; padding: 4px 10px; }
+
+    /* ── 3f detail: L1/L2/L3 vedle sebe na společném měřítku ── */
+    .ph3-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 8px; }
+    @container (max-width: 520px) { .ph3-grid { grid-template-columns: 1fr; } }
+    .ph3-cell { background: var(--ep-bg); border: 1px solid var(--ep-border);
+      border-radius: var(--ep-r-md); padding: 9px 10px; position: relative; overflow: hidden; }
+    .ph3-cell::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+    .ph3-cell.l1::before { background: var(--ep-l1); }
+    .ph3-cell.l2::before { background: var(--ep-l2); }
+    .ph3-cell.l3::before { background: var(--ep-l3); }
+    .ph3-head { display: flex; align-items: baseline; justify-content: space-between; }
+    .ph3-lbl { font-size: var(--ep-fs-micro); font-weight: 700; letter-spacing: .9px; }
+    .ph3-cell.l1 .ph3-lbl { color: var(--ep-l1); }
+    .ph3-cell.l2 .ph3-lbl { color: var(--ep-l2); }
+    .ph3-cell.l3 .ph3-lbl { color: var(--ep-l3); }
+    .ph3-pct { font-size: var(--ep-fs-micro); color: var(--ep-text-dim); font-variant-numeric: tabular-nums; }
+    .ph3-val { font-size: var(--ep-fs-sub); font-weight: 600; letter-spacing: -0.3px;
+      margin-top: 1px; color: var(--ep-text); font-variant-numeric: tabular-nums; }
+    .ph3-sub { font-size: var(--ep-fs-micro); color: var(--ep-text-dim); margin-top: 1px;
+      font-variant-numeric: tabular-nums; }
+    .ph3-track { height: 3px; background: var(--ep-border); border-radius: var(--ep-r-pill);
+      overflow: hidden; margin: 7px 0 3px; }
+    .ph3-track i { display: block; height: 100%; border-radius: var(--ep-r-pill); }
+    .ph3-spark { width: 100%; height: 44px; display: block; overflow: hidden; }
+    .ph3-note { font-size: var(--ep-fs-micro); color: var(--ep-text-dim); margin-top: 8px; text-align: center; }
+
+    /* ── porovnání víc modulů ── */
+    .cmp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+    .cmp-cell { background: var(--ep-bg); border: 1px solid var(--ep-border);
+      border-radius: var(--ep-r-md); padding: 9px 10px; }
+    .cmp-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+    .cmp-num { font-size: 9px; font-weight: 700; color: var(--ep-accent); font-variant-numeric: tabular-nums; }
+    .cmp-name { font-size: var(--ep-fs-meta); color: var(--ep-text-mid); flex: 1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cmp-val { font-size: var(--ep-fs-meta); font-weight: 600; color: var(--ep-text);
+      font-variant-numeric: tabular-nums; }
+    .cmp-scale { font-size: 9px; color: var(--ep-text-dim); margin-bottom: 2px;
+      font-variant-numeric: tabular-nums; }
+    .cmp-ph { font-weight: 700; color: var(--ep-text-mid); }
+    .cmp-cell .ph3-spark { height: 48px; }
+    .cmp-plain .sparkline-wrap { height: 48px; margin-top: 0; }
+
+    /* ── zařízení za jističem ── */
+    .dev-wrap { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ep-border); }
+    .dev-title { font-size: var(--ep-fs-micro); text-transform: uppercase; letter-spacing: .9px;
+      font-weight: 600; color: var(--ep-text-dim); margin-bottom: 6px; }
+    .dev-empty { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ep-border);
+      font-size: var(--ep-fs-micro); color: var(--ep-text-dim); text-align: center; }
   `;
 }
 
