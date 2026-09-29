@@ -813,6 +813,13 @@ export class ElectricityPanelEditor extends LitElement {
                   <option value="L3" ?selected=${c.phase === 'L3'}>L3</option>
                 </select>
               </div>`}
+            <div class="field">
+              <label>Module type (panel view)</label>
+              <select @change=${(e: Event) => this._setCircuitField(idx, 'module', (e.target as HTMLSelectElement).value)}>
+                <option value="" ?selected=${c.module !== 'meter'}>Breaker — drawn with a lever</option>
+                <option value="meter" ?selected=${c.module === 'meter'}>Meter — DIN energy meter with a display</option>
+              </select>
+            </div>
             <div class="group-label" style="margin-top:10px;">Breaker entities</div>
             ${this._entityField('Switch', c.switch, sf('switch'))}
             ${this._entityField('Total power (W)', c.power, sf('power'))}

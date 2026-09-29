@@ -702,3 +702,62 @@ export function phaseShares(l1: number, l2: number, l3: number): [number, number
   if (!(total > 0)) return [0, 0, 0];
   return [(l1 / total) * 100, (l2 / total) * 100, (l3 / total) * 100];
 }
+
+// ── view: panel — drawn modules (ROADMAP 5.6, v5.7.0) ──────────────────────
+
+/** Gap between modules on the rail, in px. The layout maths and the CSS
+ *  (`.cut-row { gap }`) must agree, so it lives here once. */
+export const RAIL_GAP = 3;
+
+/** Below this a module face stops being legible; the rail scrolls instead. */
+export const MIN_POSITION_WIDTH = 34;
+
+/**
+ * Pixel width of one rail position, so that `railSize` positions fill the
+ * measured rail exactly.
+ *
+ * The module is drawn as SVG in pixel coordinates (screws, lever slots and
+ * rounded corners must not stretch the way `preserveAspectRatio="none"`
+ * would stretch them), so the card needs a concrete number, not a flex
+ * ratio. Floored to 0.1 px so rounding can never push the last module past
+ * the edge and summon a scrollbar. Before the first measurement (`inner`
+ * is 0) it returns a middle-of-the-road 50 px.
+ */
+export function positionWidth(
+  inner: number,
+  railSize: number,
+  gap = RAIL_GAP,
+  min = MIN_POSITION_WIDTH,
+): number {
+  if (!(inner > 0)) return 50;
+  const n = Math.max(1, Math.floor(railSize));
+  const w = (inner - (n - 1) * gap) / n;
+  return Math.max(min, Math.floor(w * 10) / 10);
+}
+
+/** Level of detail of a module face: small (<44 px), medium, large (≥60 px). */
+export type ModuleLod = 's' | 'm' | 'l';
+
+export function moduleLod(positionPx: number): ModuleLod {
+  if (positionPx < 44) return 's';
+  if (positionPx < 60) return 'm';
+  return 'l';
+}
+
+/**
+ * Power as printed on a module's display, compacted to what fits its width:
+ * `2.1k` / `420` at small, `2.1 kW` / `420 W` at medium, `2.10 kW` at large.
+ *
+ * At 34 px "2.10 kW" in 10 px bold is ~42 px wide and gets clipped; losing
+ * the unit is the cheaper sacrifice, since every module on the rail is in
+ * watts anyway. Zero or missing reads as an em dash, like the rest of the card.
+ */
+export function fmtModuleW(watts: number, lod: ModuleLod): string {
+  if (!(watts > 0)) return '—';
+  const r = Math.round(watts);
+  if (r < 1000) return lod === 's' ? `${r}` : `${r} W`;
+  const kw = watts / 1000;
+  if (lod === 's') return `${kw.toFixed(1)}k`;
+  if (lod === 'm') return `${kw.toFixed(1)} kW`;
+  return `${kw.toFixed(2)} kW`;
+}

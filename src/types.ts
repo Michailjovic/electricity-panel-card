@@ -1,4 +1,4 @@
-export const EP_VERSION = '5.6.0';
+export const EP_VERSION = '5.7.0';
 
 // ── Home Assistant types ────────────────────────────────────────────────────
 
@@ -70,6 +70,15 @@ export interface Circuit {
    * module simply has no stripe.
    */
   phase?: 'L1' | 'L2' | 'L3';
+  /**
+   * What sits at this position in the board — only used by `view: panel`.
+   * `breaker` (default) is drawn with a lever; `meter` is a DIN-rail energy
+   * meter with a display and no lever, and shows plain current instead of a
+   * load level, since a meter has no rating to be loaded against.
+   * Deliberately explicit: "3-phase without a switch" would misread a 3-phase
+   * breaker that simply has no smart relay.
+   */
+  module?: 'breaker' | 'meter';
   // ── Tuya / smart breaker entities ──
   switch?: string;   // entity_id of the breaker switch
   power?: string;    // entity_id — W (total)

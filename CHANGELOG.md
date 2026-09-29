@@ -5,6 +5,61 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.7.0] — 2026-09-30
+*ROADMAP 5.6 — rozvaděč v `view: panel` je nakreslený (varianta B z
+`docs/mockup-grafika-modulu.html`). Nahrazuje dosavadní vzhled panel view;
+classic view je beze změny.*
+
+### 🎨 Changed
+
+- **Modul je kreslený objekt, ne HTML boxy.** Čelo jističe pod krytem
+  rozvaděče: páčka v drážce nahoře/dole (červená = zapnuto zůstává, stav teď
+  nese i poloha), displej s výkonem, hladinou zatížení jako podsvícením a
+  mikrografem, popisové pole s názvem okruhu, nahoře potisk pozice a
+  jmenovitého proudu, dole fázový proužek. 3f jistič má páčky spojené
+  můstkem, jako skutečný. Vypnutí páčku překlopí (0,18 s, respektuje
+  `prefers-reduced-motion`).
+- **Elektroměr + HDO přijímač místo tarifního pruhu a hlavičky lišty.**
+  Elektroměr nese celkový výkon, dnešní kWh, náklady, proud hlavního jističe a
+  aktivní registr **T1 · VT / T2 · NT**; přijímač stav tarifu, cenu,
+  odpočet, průběh slotu, poznámku o nesouladu se rozvrhem a fallback „from
+  schedule". Tarif je na zařízeních, která ho fyzicky určují. Zelená/červená
+  zůstává výhradně tarifní. Bez `main_meter` ukáže elektroměr součet okruhů,
+  bez `hdo` se přijímač vynechá.
+- **Volné pozice kryjí záslepky** místo prázdné mezery na liště.
+- **Úrovně detailu podle skutečné šířky pozice** (ResizeObserver): pod 44 px
+  ustoupí potisk a popisky fází a výkon se zkrátí na `2.1k`, od 60 px přibudou
+  značky `I`/`O` u páčky. Pod 34 px se výřez dál roluje do strany.
+- **Potisk jmenovitého proudu jen z konfigurace** (`max_current`,
+  `panel.main_breaker`) — karta už netiskne výchozích 16/63 A, které
+  v rozvaděči být nemusí.
+- Detail okruhu skládá řádek metrik přes `_metricRow` — u měřiče tak
+  nezůstane viset oddělovač.
+
+### ➕ Added
+
+- **`module: breaker | meter`** u okruhu (a v editoru „Module type"). `meter`
+  vykreslí DIN elektroměr s LCD (výkon, po fázích v kW) a proudem — bez páčky
+  a bez hladiny zatížení, protože měřič nemá jmenovitou hodnotu. V detailu
+  měřiče chybí „x % load" i fázové pruhy zatížení. Výchozí `breaker`.
+- Čisté funkce `positionWidth`, `moduleLod`, `fmtModuleW` (+10 testů,
+  celkem 111).
+
+### 🧹 Removed
+
+- Přípojnice nad lištou a její animace toku, hlavička lišty („Distribution
+  board · N positions"), kovový profil lišty, špendlík výběru v modulu.
+  Tokeny `--ep-metal-*`, `--ep-mod-a/-b/-chrome` nahrazeny sadou
+  `--ep-cover*`, `--ep-m*`, `--ep-lcd*`.
+- Nepoužívané řetězce `panel_board`, `panel_positions`, `busbar_note`.
+
+### 🔧 Internal
+
+- `_renderHdo` rozdělen na `_hdoView()` (stav) a vykreslení — classic pruh
+  i panelový přijímač čtou stejný model, takže se nemůžou rozejít.
+
+---
+
 ## [5.6.0] — 2026-08-19
 *Doladění panel view podle zpětné vazby z živého rozvaděče.*
 

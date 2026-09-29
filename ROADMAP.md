@@ -169,7 +169,7 @@ přesnou `change` hodnotu (bez aproximace mean × doba).
 
 ---
 
-## Fáze 5 — Vizuální redesign → v5.2.2 … v5.5.0
+## Fáze 5 — Vizuální redesign → v5.2.2 … v5.7.0
 
 Vychází z `docs/DESIGN-REVIEW.md` (rozbor z 2026-08-19). Jádro zjištění: karta
 nepůsobí přeplácaně počtem prvků, ale tím, že spolu příliš prvků soupeří o
@@ -226,7 +226,8 @@ Nový **volitelný** režim; `view: classic` zůstává výchozí.
 - [x] 3f detail ukazuje L1/L2/L3 vedle sebe na společném měřítku
 - [x] Zařízení za jističem v detailu (skupiny, kanály, „hloupá" jako poznámky)
 - [x] Pořadí v tomto režimu: tarif + timeline dne → rozvaděč → detail →
-      rozvrh a náklady (timeline je jen jednou, nahoře)
+      rozvrh a náklady (timeline je jen jednou, nahoře); od v5.7.0 je
+      „tarif" skříň elektroměru s HDO přijímačem
 - [x] Čisté funkce + testy: `comparePosition`, `buildRails`, `loadPercent`,
       `phaseShares` (+18 testů, celkem 101)
 - [x] Porovnání rozpadá 3f modul na jeho tři fáze (v5.6.0) — porovnat hlavní
@@ -235,7 +236,8 @@ Nový **volitelný** režim; `view: classic` zůstává výchozí.
 - [ ] **Fázová bilance u hlavního jističe** — průměr/špička za 24 h / 7 dní /
       30 dní + největší odběry na fázi. Vyžaduje dlouhé okno ze statistik
       (`_rangeStatsCache` už podobná data tahá pro Náklady), proto vyčleněno
-      do samostatného kroku → v5.7.0. **Záměrně bez automatického návrhu
+      do samostatného kroku → v5.8.0 (posunuto za grafiku modulu 5.6, aby se
+      kreslila rovnou do nového vzhledu). **Záměrně bez automatického návrhu
       přerovnání** — topná sezóna a léto mají jiný profil, jednorázová rada
       by lhala; karta ukáže čísla za zvolené okno a rozhodnutí nechá na
       člověku.
@@ -245,6 +247,33 @@ Nový **volitelný** režim; `view: classic` zůstává výchozí.
 - [ ] `density: compact | normal` — balíček B sám zvedá výšku karty o ~14 %;
       compact (jistič = jeden řádek) je zamýšlená odpověď, ne návrat k dnešnímu
       rozestupu
+
+### 5.6 Grafika modulu (design-first) → v5.7.0
+
+Modul jističe jako skutečně nakreslený objekt místo HTML boxů — jen pro
+`view: panel`, classic se nemění.
+
+- [x] Mockup tří úrovní realismu: `docs/mockup-grafika-modulu.html`
+      (A dnešní · B stylizovaná ilustrace pod krytem · C poloreálná otevřená
+      rozvodnice), obě témata, šířky 34/50/70 px, elektroměr + HDO přijímač
+- [x] Rozhodnutí (2026-09-30):
+      - **Varianta B** a **nahrazuje** dosavadní vzhled `view: panel` —
+        žádný přepínač starý/nový
+      - páčka zůstává **červená = zapnuto**, stav nese i její poloha
+      - tarif přebírá **elektroměr (T1/T2) + HDO přijímač**; tarifní pruh,
+        hlavička lišty i přípojnice v panel view mizí, denní timeline zůstává
+      - nové pole `module: breaker | meter` (výchozí `breaker`), žádná
+        automatika podle `switch`
+      - barvy fází zůstávají naše (fialová/tyrkysová/modrá)
+      - potisk jmenovitého proudu jen z `max_current` / `panel.main_breaker`,
+        bez charakteristiky B/C
+      - měřič: jen proud, bez zlomku a bez hladiny zatížení
+      - bez `main_meter` ukáže elektroměr součet okruhů; bez `hdo` přijímač chybí
+      - fázová bilance se posouvá na v5.8.0
+- [x] Implementace (v5.7.0): SVG tělo v px souřadnicích přes ResizeObserver,
+      barvy CSS třídami, text HTML překryvem, bez SVG filtrů; úrovně detailu
+      34–43 / 44–59 / 60+ px; záslepky na volných pozicích; čisté funkce
+      `positionWidth`, `moduleLod`, `fmtModuleW` (+10 testů, celkem 111)
 
 ---
 
@@ -272,7 +301,8 @@ Nový **volitelný** režim; `view: classic` zůstává výchozí.
 | 5.3 — balíček B (hierarchie) | 5.4.0 | minor |
 | 5.4 — view: panel | 5.5.0 | minor |
 | 5.4 — doladění panelu | 5.5.1, 5.6.0 | patch + minor |
-| 5.4 — fázová bilance | 5.7.0 | minor |
+| 5.6 — grafika modulu (varianta B) | 5.7.0 | minor |
+| 5.4 — fázová bilance | 5.8.0 | minor |
 | 4 — publikace | 6.0.0 | major (public release) |
 
 > Pozn.: řádky Fází 1–3 jsou původní plán, ne to, co se skutečně vydalo —

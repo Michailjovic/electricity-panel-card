@@ -43,10 +43,14 @@ const STRINGS: Record<string, string> = {
   cost_avg_day: 'Average {price}/day',
   no_cost_data: 'No data yet',
   // view: panel (ROADMAP 5.4)
-  panel_board: 'Distribution board',
-  panel_positions: '{n} positions',
   main_breaker: 'Main breaker',
-  busbar_note: 'busbar — flow speed follows consumption',
+  // view: panel — drawn board (ROADMAP 5.6)
+  em_meter: 'Electricity meter',
+  em_sum_circuits: 'sum of circuits',
+  hdo_receiver: 'HDO receiver',
+  relay_closed: 'relay closed',
+  relay_open: 'relay open',
+  main_short: 'main',
   panel_hint_pick: 'Tap a module for its detail and graph.',
   panel_hint_compare: 'Tap more modules to line their graphs up on one time axis.',
   shared_axis: 'shared Y axis',

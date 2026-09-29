@@ -4,6 +4,11 @@ import {
   buildRails,
   loadPercent,
   phaseShares,
+  positionWidth,
+  moduleLod,
+  fmtModuleW,
+  RAIL_GAP,
+  MIN_POSITION_WIDTH,
   slotTimeMs,
   dayEndMs,
   fmtMins,
@@ -822,5 +827,63 @@ describe('phaseShares', () => {
 
   it('handles a single loaded phase', () => {
     expect(phaseShares(0, 500, 0)).toEqual([0, 100, 0]);
+  });
+});
+
+describe('positionWidth', () => {
+  it('fills the rail exactly: n positions plus n-1 gaps equal the inner width', () => {
+    const w = positionWidth(17 * 50 + 16 * RAIL_GAP, 17);
+    expect(w).toBe(50);
+  });
+
+  it('floors to 0.1 px so rounding never overflows the rail', () => {
+    const inner = 1000;
+    const w = positionWidth(inner, 17);
+    expect(17 * w + 16 * RAIL_GAP).toBeLessThanOrEqual(inner);
+    expect(inner - (17 * w + 16 * RAIL_GAP)).toBeLessThan(17 * 0.1 + 1e-9);
+  });
+
+  it('never goes below the legibility floor — the rail scrolls instead', () => {
+    expect(positionWidth(300, 17)).toBe(MIN_POSITION_WIDTH);
+  });
+
+  it('returns a sane default before the first measurement', () => {
+    expect(positionWidth(0, 12)).toBe(50);
+  });
+
+  it('treats a nonsensical rail size as one position', () => {
+    expect(positionWidth(100, 0)).toBe(100);
+  });
+});
+
+describe('moduleLod', () => {
+  it('switches detail at 44 and 60 px', () => {
+    expect(moduleLod(34)).toBe('s');
+    expect(moduleLod(43.9)).toBe('s');
+    expect(moduleLod(44)).toBe('m');
+    expect(moduleLod(59.9)).toBe('m');
+    expect(moduleLod(60)).toBe('l');
+  });
+});
+
+describe('fmtModuleW', () => {
+  it('drops the unit at small widths', () => {
+    expect(fmtModuleW(2100, 's')).toBe('2.1k');
+    expect(fmtModuleW(420, 's')).toBe('420');
+  });
+
+  it('uses one decimal at medium and two at large', () => {
+    expect(fmtModuleW(2100, 'm')).toBe('2.1 kW');
+    expect(fmtModuleW(2100, 'l')).toBe('2.10 kW');
+    expect(fmtModuleW(420, 'm')).toBe('420 W');
+  });
+
+  it('switches to kW when rounding reaches 1000, not "1000 W"', () => {
+    expect(fmtModuleW(999.6, 'l')).toBe('1.00 kW');
+  });
+
+  it('shows an em dash for zero or missing power', () => {
+    expect(fmtModuleW(0, 'l')).toBe('—');
+    expect(fmtModuleW(NaN, 'm')).toBe('—');
   });
 });

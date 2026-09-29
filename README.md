@@ -37,7 +37,7 @@ Configured entirely through a built-in GUI editor. No YAML editing required.
 - **"Wait for NT" hint** (opt-in) — during VT, running circuits show the next NT start and the percentage saving
 - **Sparkline power graphs** — time-aligned history graphs on main meter and circuit phase cells
 - **Theming** — built-in dark design, or `follow_theme: true` to adapt to the active HA theme
-- **Panel view** (opt-in) — `view: panel` draws the breakers as modules on a DIN rail, the way the physical board looks: lever, load level, phase stripe, position number. Tap a module for its detail, tap several to line their graphs up on one axis
+- **Panel view** (opt-in) — `view: panel` draws your board: breakers with levers under the cover, DIN energy meters with a display, blanks on unused positions, and an electricity meter with an HDO receiver on top carrying the totals and the tariff. Tap a module for its detail, tap several to line their graphs up on one axis
 - **GUI config editor** — full visual editor with entity searchboxes; no manual YAML required
 
 ---
@@ -109,18 +109,34 @@ The editor sections:
 - Critical flag (replaces toggle with lock icon)
 - Confirmation flag (ask before toggling)
 - Rated current in A (used for the load bar)
-- Position in the board and Phase — only used by panel view
+- Position in the board, Phase and Module type (breaker / meter) — only used by panel view
 - Entity pickers for switch, power (W), current (A), energy (kWh today), voltage (V) — plus per-phase entities for 3φ circuits
 - **Devices** — sub-list of devices behind the breaker. Each device can optionally have a switch and measurement entities. Multi-channel devices (Shelly 4PM etc.) support individual channels.
 
 ### Panel view
 
-`view: panel` swaps the meter card and circuit grid for a DIN rail: one module
-per breaker, three module widths for a 3-phase breaker, with the lever, the
-load level rising in the module body, the phase stripe and the position number.
-The schedule and costs block moves below the rail, and the day's tariff
-timeline moves up next to the tariff bar — "is it cheap now" and "what is
-drawing" are the glance-level questions, the schedule table is not.
+`view: panel` swaps the meter card and circuit grid for a drawing of the board
+itself, under its cover: one module per breaker, three module widths for a
+3-phase breaker (its levers tied together, as on the real thing). Each module
+has its lever up or down, a small display with the power, the load level as a
+backlight and a micro graph, a label strip with the circuit name, the rating
+and position printed on top, and the phase stripe at the bottom. Unused
+positions on a rail are closed with blanks.
+
+Above the board sits the meter cabinet: an **electricity meter** with the total
+power, today's energy and cost, the main breaker's current and the active tariff
+register (T1 · VT / T2 · NT), and an **HDO receiver** with the tariff state,
+price, countdown to the next switch and the switch-vs-schedule note. Together
+they replace the tariff bar — the tariff sits on the devices that decide it.
+Without `main_meter` the meter shows the sum of the circuits; without `hdo`
+the receiver is left out. The day's tariff timeline follows, then the board;
+the schedule and costs block moves below it.
+
+Modules are drawn at the real pixel width of the rail, and their detail follows
+it: below 44 px per position the rating print and phase labels step aside and
+power is shown as `2.1k`, from 60 px up the lever marks `I`/`O` appear. A whole
+board on one rail (`rail_size` = all positions) scrolls sideways on a narrow
+dashboard rather than squeezing modules below 34 px.
 
 Tap a module to expand its detail below the rail: full numbers, a large graph
 and the devices wired behind that breaker. Tap several modules and their graphs
@@ -129,8 +145,8 @@ default) so the curves are actually comparable — that is the difference betwee
 "both look busy" and "the boiler draws thirty times what the fridge does".
 A 3-phase module shows L1/L2/L3 side by side, also on one shared scale.
 
-It needs two extra fields per circuit. Without them nothing breaks: circuits
-keep their config order and simply have no phase stripe.
+It uses a few extra fields per circuit. Without them nothing breaks: circuits
+keep their config order, have no phase stripe and are drawn as breakers.
 
 ```yaml
 type: custom:electricity-panel-card
@@ -148,7 +164,7 @@ circuits:
     name: Kitchen worktop left
     position: "08"           # printed on the module; also sorts the rail
     phase: L1                # colours the stripe at the bottom
-    max_current: 16          # drives how high the load level rises
+    max_current: 16          # load level; printed as "16 A" on the module
     power: sensor.shelly_kitchen_power
     current: sensor.shelly_kitchen_current
     energy: sensor.shelly_kitchen_energy
@@ -162,7 +178,26 @@ circuits:
     power_l1: sensor.hob_l1_power
     power_l2: sensor.hob_l2_power
     power_l3: sensor.hob_l3_power
+
+  - id: heat_pump_meter
+    name: Heat pump
+    position: "05"
+    phases: 3
+    module: meter            # DIN energy meter: display instead of a lever
+    power_l1: sensor.hp_meter_l1_power
+    power_l2: sensor.hp_meter_l2_power
+    power_l3: sensor.hp_meter_l3_power
 ```
+
+`module: meter` draws a DIN-rail energy meter — an LCD with the power (and the
+per-phase values when per-phase entities are set) and the current, no lever and
+no load level, since a meter has no rating to be loaded against. The default is
+`breaker`. It is an explicit field on purpose: "3-phase without a switch" would
+misread a 3-phase breaker that simply has no smart relay.
+
+The rating printed on a module comes only from `max_current` (and
+`panel.main_breaker` for the main breaker). Without it the module prints no
+rating, rather than a default the board may not have.
 
 Positions sort naturally, so `01` comes before `08` before `10`, and lettered
 positions like `V1` or `K1` come after the numbered ones. A 3-phase module never

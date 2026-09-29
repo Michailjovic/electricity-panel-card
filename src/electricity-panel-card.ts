@@ -1,4 +1,4 @@
-import { LitElement, html, svg, css, nothing, type TemplateResult } from 'lit';
+import { LitElement, html, svg, css, nothing, type TemplateResult, type SVGTemplateResult } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import './electricity-panel-editor.js';
 import { PRE_TARIFFS } from './tariff-presets.js';
@@ -34,6 +34,11 @@ import {
   comparePosition,
   buildRails,
   loadPercent,
+  positionWidth,
+  moduleLod,
+  fmtModuleW,
+  RAIL_GAP,
+  type ModuleLod,
   type DaySlot,
   type DayType,
   type Window,
@@ -72,11 +77,43 @@ interface PanelModule {
   isOn: boolean;
   hasSwitch: boolean;
   critical: boolean;
+  /** `breaker` has a lever; `meter` is a DIN energy meter with a display */
+  kind: 'breaker' | 'meter';
+  /** Rating printed on the module — only when the user configured one, so
+   *  the card never prints a 16 A breaker the board doesn't have */
+  ratingA?: number;
+  /** Per-phase power of a 3-position module, for a meter's LCD */
+  phaseW?: [number, number, number];
   /** Entity whose history backs the micro graph and the detail graph */
   sparkId?: string;
   /** Absent for the synthetic main-breaker module */
   circuit?: Circuit;
 }
+
+/** Resolved state of the tariff indicator — see `_hdoView`. */
+interface HdoView {
+  state: 'nt' | 'vt' | 'unk';
+  /** HDO switch unavailable, state taken from the schedule instead */
+  fromSchedule: boolean;
+  price?: number | string;
+  currency: string;
+  /** "1 h 20 min" until the next switch, or '' when unknown */
+  countdown: string;
+  /** Progress through the current tariff slot, 0–100, or -1 when unknown */
+  slotPct: number;
+  /** Switch × schedule mismatch note (Fáze 1.3), or '' */
+  note: string;
+}
+
+/** Vertical layout of a drawn module (px). Fixed height, width follows the
+ *  rail — see `positionWidth`. Everything that is text sits in an HTML
+ *  overlay at these same offsets, so it stays sharp and can wrap. */
+const MOD = {
+  H: 128,
+  slotY: 17, slotH: 38, leverH: 20,
+  dispY: 60, dispH: 31,
+  labY: 94, labH: 21,
+} as const;
 
 /** One entity's cached sparkline geometry — see `_sparkCache` for why each
  *  field is part of the cache key. */
@@ -139,6 +176,12 @@ export class ElectricityPanelCard extends LitElement {
    *  comparing curves on independent axes is the failure mode this view is
    *  meant to remove. */
   @state() private _panelSharedY = true;
+  /** view: panel — measured content width of the first rail cutout, px.
+   *  The module is SVG in pixel coordinates, so its position width has to be
+   *  a number, not a flex ratio; a ResizeObserver keeps this current. */
+  @state() private _boardInner = 0;
+  private _ro?: ResizeObserver;
+  private _roEl?: Element;
 
   private _timer?: number;
   private _historyTimer?: number;
@@ -193,6 +236,9 @@ export class ElectricityPanelCard extends LitElement {
     this._timer = window.setInterval(() => this.requestUpdate(), 30_000);
     this._historyTimer = window.setInterval(() => { void this._fetchHistory(); }, 300_000);
     void this._fetchHistory();
+    // Re-attach the rail ResizeObserver after the card was moved in the DOM
+    // (dashboard edit mode does this) — updated() only runs on a render.
+    this.requestUpdate();
   }
 
   override disconnectedCallback(): void {
@@ -200,6 +246,24 @@ export class ElectricityPanelCard extends LitElement {
     clearInterval(this._timer);
     clearInterval(this._historyTimer);
     clearTimeout(this._refetchDebounce);
+    this._ro?.disconnect();
+    this._roEl = undefined;
+  }
+
+  /** view: panel — follow the rail's width. Watches the first cutout's
+   *  content box; every rail row has the same width, so one is enough. The
+   *  1 px dead band keeps a sub-pixel jitter from re-rendering in a loop. */
+  protected override updated(): void {
+    const el = this._isPanelView() ? this.renderRoot.querySelector('.cutout') : null;
+    if (el === (this._roEl ?? null)) return;
+    this._ro?.disconnect();
+    this._roEl = el ?? undefined;
+    if (!el) return;
+    this._ro ??= new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (Math.abs(w - this._boardInner) >= 1) this._boardInner = w;
+    });
+    this._ro.observe(el);
   }
 
   // ── HA card API ────────────────────────────────────────────────────────────
@@ -1563,9 +1627,15 @@ export class ElectricityPanelCard extends LitElement {
 
   // ── Render: HDO bar ────────────────────────────────────────────────────────
 
-  private _renderHdo(): TemplateResult | typeof nothing {
+  /**
+   * What the tariff indicator shows, resolved once — shared by the classic
+   * HDO bar and the panel view's HDO receiver so the two can never disagree
+   * about the state, the fallback or the mismatch note.
+   */
+  private _hdoView(): HdoView | undefined {
     const hdo = this._config.hdo;
-    if (!hdo?.switch) return nothing;
+    if (!hdo?.switch) return undefined;
+    const currency = hdo.currency ?? 'Kč';
     // Unavailable HDO switch: fall back to the schedule when one is
     // configured, explicitly labelled "from schedule" (Fáze 1.3) — a grey
     // neutral state remains only when there's no schedule to fall back on.
@@ -1574,20 +1644,33 @@ export class ElectricityPanelCard extends LitElement {
       if (wd) {
         const now = Date.now();
         const isNT = wd.windows.some(w => now >= w.start && now < w.end);
-        const price = isNT ? hdo.nt_price : hdo.vt_price;
-        const cur = hdo.currency ?? 'Kč';
-        return html`
-          <div class="hdo-bar ${isNT ? 'nt' : 'vt'}">
-            <div class="hdo-dot ${isNT ? 'nt' : 'vt'}"></div>
-            <div class="hdo-info">
-              <div class="hdo-label">${isNT ? this._t('nt_low') : this._t('vt_high')}
-                <span class="hdo-src-badge">${this._t('from_schedule')}</span>
-              </div>
-              ${price ? html`<div class="hdo-sub">${this._fmtPrice(price)} ${cur}/kWh</div>` : nothing}
-            </div>
-          </div>
-        `;
+        return { state: isNT ? 'nt' : 'vt', fromSchedule: true,
+          price: isNT ? hdo.nt_price : hdo.vt_price, currency, countdown: '', slotPct: -1, note: '' };
       }
+      return { state: 'unk', fromSchedule: false, currency, countdown: '', slotPct: -1, note: '' };
+    }
+    // Switch is always the source of truth for what the bar shows (Fáze 1.3) —
+    // the schedule only feeds the mismatch note and the progress bar's end anchor.
+    const isNT = this._isOn(hdo.switch);
+    const status = this._hdoStatus();
+    const slotPct = status && status.slotEnd > status.slotStart
+      ? Math.min(100, Math.max(0, ((Date.now() - status.slotStart) / (status.slotEnd - status.slotStart)) * 100))
+      : -1;
+    return {
+      state: isNT ? 'nt' : 'vt',
+      fromSchedule: false,
+      price: isNT ? hdo.nt_price : hdo.vt_price,
+      currency,
+      countdown: this._hdoCountdown(),
+      slotPct,
+      note: status && status.kind !== 'ok' ? this._hdoMismatchNote(status) : '',
+    };
+  }
+
+  private _renderHdo(): TemplateResult | typeof nothing {
+    const v = this._hdoView();
+    if (!v) return nothing;
+    if (v.state === 'unk') {
       return html`
         <div class="hdo-bar unk">
           <div class="hdo-dot unk"></div>
@@ -1597,32 +1680,25 @@ export class ElectricityPanelCard extends LitElement {
         </div>
       `;
     }
-    // Switch is always the source of truth for what the bar shows (Fáze 1.3) —
-    // the schedule only feeds the mismatch note and the progress bar's end anchor.
-    const isNT = this._isOn(hdo.switch);
-    const cd = this._hdoCountdown();
-    const price = isNT ? hdo.nt_price : hdo.vt_price;
-    const cur = hdo.currency ?? 'Kč';
-    const status = this._hdoStatus();
-    const slotPct = status && status.slotEnd > status.slotStart
-      ? Math.min(100, Math.max(0, ((Date.now() - status.slotStart) / (status.slotEnd - status.slotStart)) * 100))
-      : -1;
-    const note = status && status.kind !== 'ok' ? this._hdoMismatchNote(status) : '';
+    const isNT = v.state === 'nt';
     return html`
-      <div class="hdo-bar ${isNT ? 'nt' : 'vt'}">
-        <div class="hdo-dot ${isNT ? 'nt' : 'vt'}"></div>
+      <div class="hdo-bar ${v.state}">
+        <div class="hdo-dot ${v.state}"></div>
         <div class="hdo-info">
-          <div class="hdo-label">${isNT ? this._t('nt_low') : this._t('vt_high')}</div>
-          ${price ? html`<div class="hdo-sub">${this._fmtPrice(price)} ${cur}/kWh</div>` : nothing}
-          ${slotPct >= 0 ? html`
-            <div class="hdo-prog"><div class="hdo-prog-fill" style="width:${slotPct.toFixed(1)}%"></div></div>
+          <div class="hdo-label">${isNT ? this._t('nt_low') : this._t('vt_high')}${v.fromSchedule
+            ? html`
+                <span class="hdo-src-badge">${this._t('from_schedule')}</span>
+              ` : nothing}</div>
+          ${v.price ? html`<div class="hdo-sub">${this._fmtPrice(v.price)} ${v.currency}/kWh</div>` : nothing}
+          ${v.slotPct >= 0 ? html`
+            <div class="hdo-prog"><div class="hdo-prog-fill" style="width:${v.slotPct.toFixed(1)}%"></div></div>
           ` : nothing}
-          ${note ? html`<div class="hdo-mismatch">${note}</div>` : nothing}
+          ${v.note ? html`<div class="hdo-mismatch">${v.note}</div>` : nothing}
         </div>
-        ${cd ? html`
+        ${v.countdown ? html`
           <div class="hdo-cd">
             <div class="hdo-cd-lbl">${this._t('ends_in')}</div>
-            <div class="hdo-cd-val">${cd}</div>
+            <div class="hdo-cd-val">${v.countdown}</div>
           </div>
         ` : nothing}
       </div>
@@ -2002,6 +2078,8 @@ export class ElectricityPanelCard extends LitElement {
         isOn: true,
         hasSwitch: false,
         critical: true,
+        kind: 'breaker',
+        ...(this._config.panel?.main_breaker ? { ratingA: this._config.panel.main_breaker } : {}),
         sparkId: mainSpark.id,
       });
     }
@@ -2035,6 +2113,11 @@ export class ElectricityPanelCard extends LitElement {
         isOn: this._isOn(c.switch),
         hasSwitch: !!c.switch,
         critical: !!c.critical,
+        kind: c.module === 'meter' ? 'meter' : 'breaker',
+        ...(c.max_current ? { ratingA: c.max_current } : {}),
+        ...(three && (c.power_l1 || c.power_l2 || c.power_l3)
+          ? { phaseW: [this._watts(c.power_l1), this._watts(c.power_l2), this._watts(c.power_l3)] as [number, number, number] }
+          : {}),
         ...(three && !c.power
           ? (() => {
               return {
@@ -2103,53 +2186,118 @@ export class ElectricityPanelCard extends LitElement {
     return this._num(mm.voltage_l1) || this._num(mm.voltage) || 230;
   }
 
-  /** Micro graph drawn behind a module's face. Reuses the very same cached
-   *  path as the full sparkline — `preserveAspectRatio="none"` rescales the
-   *  100x38 user-space into the module's strip, so there is no second
-   *  computation and no second cache. */
-  private _renderModuleSpark(entityId?: string): TemplateResult | typeof nothing {
-    if (!entityId) return nothing;
-    const cached = this._sparkPaths(entityId);
-    if (!cached) return nothing;
-    return html`
-      <svg class="mod-spark" viewBox="0 0 100 38" preserveAspectRatio="none" aria-hidden="true">
-        <path d="${cached.line}" fill="none" stroke="currentColor" stroke-width="1.6"
-          stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
-      </svg>`;
-  }
-
-  private _renderPanelModule(m: PanelModule): TemplateResult {
-    const picked = this._panelPick.includes(m.id);
+  /**
+   * One module, drawn (ROADMAP 5.6 — variant B, "technical illustration").
+   *
+   * The body is SVG in pixel coordinates of the actual position width, so
+   * lever slots and corners never stretch; colours come from CSS classes
+   * because `var()` does not resolve in SVG presentation attributes. Text is
+   * an HTML overlay at fixed offsets — it stays sharp, can wrap and clamp,
+   * and uses the card's type scale. Nested fragments use lit's `svg` tag;
+   * an `html` fragment inside `<svg>` would land in the HTML namespace and
+   * silently draw nothing.
+   */
+  private _renderPanelModule(m: PanelModule, posW: number, lod: ModuleLod): TemplateResult {
     const cfg = this._panelCfg();
+    const n = m.width;
+    const W = n * posW + (n - 1) * RAIL_GAP;
+    const poles = Array.from({ length: n }, (_, i) => i * (posW + RAIL_GAP) + posW / 2);
+    const phases: Array<'l1' | 'l2' | 'l3' | 'none'> = n === 3
+      ? ['l1', 'l2', 'l3']
+      : [m.phaseCls === 'l3f' ? 'none' : m.phaseCls];
+    const picked = this._panelPick.includes(m.id);
     const off = m.hasSwitch && !m.isOn;
+    const meter = m.kind === 'meter';
+
+    // ── body and the control zone: levers on a breaker, an LCD on a meter
+    let ctrl: SVGTemplateResult;
+    let dy = 0;
+    if (meter) {
+      ctrl = svg`
+        <rect x="4" y=${MOD.slotY + 1} width=${W - 8} height=${MOD.slotH - 2} rx="2" class="xm-lcd"/>
+        <circle cx=${W - 8} cy="7.5" r="2" class="xm-led"/>`;
+    } else {
+      const slotW = Math.round(Math.min(16, Math.max(10, posW * 0.36)));
+      const lw = slotW - 4;
+      const ly = MOD.slotY + 2;
+      dy = MOD.slotH - 4 - MOD.leverH;
+      const slots = poles.map(cx => svg`
+        <rect x=${cx - slotW / 2} y=${MOD.slotY} width=${slotW} height=${MOD.slotH} rx="3" class="xm-slot"/>
+        ${lod === 'l' ? svg`
+          <text class="xm-print" x=${cx - slotW / 2 - 7} y=${MOD.slotY + 9}>I</text>
+          <text class="xm-print" x=${cx - slotW / 2 - 8} y=${MOD.slotY + MOD.slotH - 3}>O</text>` : nothing}`);
+      const levers = poles.map(cx => svg`
+        <rect x=${cx - lw / 2} y=${ly} width=${lw} height=${MOD.leverH} rx="2" class="xm-lever"/>
+        <rect x=${cx - lw / 2 + 2} y=${ly + MOD.leverH - 8} width=${lw - 4} height="1.2" class="xm-grip"/>
+        <rect x=${cx - lw / 2 + 2} y=${ly + MOD.leverH - 5} width=${lw - 4} height="1.2" class="xm-grip"/>`);
+      // A 3-pole breaker's levers are tied together — one handle, one state.
+      const tie = n === 3
+        ? svg`<rect x=${poles[0]} y=${ly + MOD.leverH / 2 - 1.5} width=${poles[2] - poles[0]} height="3" rx="1.5" class="xm-tie"/>`
+        : nothing;
+      ctrl = svg`${slots}<g class="xm-lv">${levers}${tie}</g>`;
+    }
+
+    // ── display: load level as a backlight, micro graph, value on top.
+    // A meter has no rating to be loaded against, so no level on it.
+    const dw = W - 6;
+    const fh = meter || off ? 0 : (MOD.dispH - 2) * m.pct / 100;
+    const spark = cfg.moduleSpark && m.sparkId ? this._sparkPaths(m.sparkId) : undefined;
+    const disp = svg`
+      <rect x="3" y=${MOD.dispY} width=${dw} height=${MOD.dispH} rx="2" class="xm-disp"/>
+      ${fh > 0 ? svg`<rect x="4" y=${MOD.dispY + MOD.dispH - 1 - fh} width=${dw - 2} height=${fh} rx="1" class="xm-fill"/>` : nothing}
+      ${fh > 1 && fh < MOD.dispH - 16
+        // The level's top edge is drawn only below the value line —
+        // across the digits it reads as a strike-through.
+        ? svg`<rect x="4" y=${MOD.dispY + MOD.dispH - 1 - fh} width=${dw - 2} height="1.5" class="xm-fill-top"/>`
+        : nothing}
+      ${spark ? svg`
+        <svg x="4" y=${MOD.dispY + MOD.dispH - 14} width=${dw - 2} height="13" viewBox="0 0 100 38" preserveAspectRatio="none">
+          <path d=${spark.line} class="xm-spark" vector-effect="non-scaling-stroke"/>
+        </svg>` : nothing}`;
+
+    const strips = phases.map((ph, i) => svg`
+      <rect x=${i * (posW + RAIL_GAP) + 1} y=${MOD.H - 4} width=${posW - 2} height="3" rx="1" class="xm-ph ${ph}"/>`);
+
+    // ── overlay text
+    const amps = m.amps > 0 ? m.amps : 0;
+    const ampsTxt = m.ratingA ? `${amps.toFixed(1)} / ${m.ratingA} A` : `${amps.toFixed(1)} A`;
+    const rate = meter ? 'kWh' : (m.ratingA ? `${m.ratingA} A` : '');
+    const value = meter
+      ? html`
+          <div class="xt xt-lcd">
+            <div class="big">${m.watts > 0 ? this._fmtW(m.watts) : '—'}</div>
+            ${m.phaseW ? html`<div class="sm">${m.phaseW.map((w, i) => html`<span class="lbl">L${i + 1} </span>${(w / 1000).toFixed(2)} `)}</div>` : nothing}
+          </div>
+          ${amps > 0 ? html`<div class="xt xt-w2">${amps.toFixed(1)} A</div>` : nothing}`
+      : html`<div class="xt xt-w">${fmtModuleW(m.watts, lod)}${n === 3 && lod !== 's'
+          ? html` <span class="a3">· ${ampsTxt}</span>` : nothing}</div>`;
+
     return html`
-      <div class="mod ${off ? 'off' : 'on'} ${m.width === 3 ? 'w3' : ''} ${picked ? 'pick' : ''}"
+      <div class="xm ${off ? 'off' : 'on'} ${picked ? 'pick' : ''} lod-${lod}"
         role="button" tabindex="0"
         aria-pressed=${picked ? 'true' : 'false'}
         aria-label="${m.position ? m.position + ' ' : ''}${m.name}"
-        style="--ep-fillc:${this._loadColor(m.pct)}"
+        style="width:${W}px;--ep-fillc:${this._loadColor(m.pct)};--xm-dy:${dy}px"
         @click=${() => this._panelTogglePick(m.id)}
         @keydown=${(e: KeyboardEvent) => {
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this._panelTogglePick(m.id); }
         }}>
-        <div class="mod-lever">
-          ${Array.from({ length: m.width === 3 ? 3 : 1 },
-            () => html`<span class="lv"></span>`)}
-        </div>
-        <div class="mod-face">
-          ${cfg.moduleSpark ? this._renderModuleSpark(m.sparkId) : nothing}
-          <div class="mod-fill" style="height:${m.pct.toFixed(0)}%"></div>
-          ${picked ? html`<span class="mod-pin"></span>` : nothing}
-          <div class="mod-w">${m.watts > 0 ? this._fmtW(m.watts) : '—'}</div>
-          <div class="mod-nm">${m.name}</div>
-        </div>
-        <div class="mod-foot">
-          <span class="mod-num">${m.position}</span>
-          ${m.critical ? html`<ha-icon icon="mdi:lock" class="mod-lock"></ha-icon>` : nothing}
-          <span class="mod-ph ${m.phaseCls}">${m.phaseCls === 'l3f' ? '3φ'
-            : m.phaseCls === 'none' ? '' : m.phaseCls.toUpperCase()}</span>
-        </div>
-        <div class="mod-strip ${m.phaseCls}"></div>
+        <svg class="xm-svg" width=${W} height=${MOD.H} viewBox="0 0 ${W} ${MOD.H}" aria-hidden="true">
+          <rect x="0.5" y="0.5" width=${W - 1} height=${MOD.H - 1} rx="3" class="xm-body"/>
+          <rect x="1" y="1" width=${W - 2} height="13" rx="2" class="xm-shoulder"/>
+          ${ctrl}
+          ${disp}
+          <rect x="3" y=${MOD.labY} width=${W - 6} height=${MOD.labH} rx="1.5" class="xm-label"/>
+          ${strips}
+        </svg>
+        <span class="xt xt-pos">${m.position}</span>
+        <span class="xt xt-rate ${meter ? 'meter' : ''} ${m.circuit?.critical ? 'crit' : ''}">${m.circuit?.critical
+          ? html`<ha-icon icon="mdi:lock" class="xm-lock"></ha-icon>` : nothing}${rate
+          ? html`<span class="r">${rate}</span>` : nothing}</span>
+        ${value}
+        <div class="xt xt-nm"><span>${m.name}</span></div>
+        ${lod !== 's' ? phases.map((ph, i) => ph === 'none' ? nothing
+          : html`<span class="xt xt-ph ${ph}" style="left:${poles[i]}px">${ph.toUpperCase()}</span>`) : nothing}
       </div>`;
   }
 
@@ -2159,51 +2307,101 @@ export class ElectricityPanelCard extends LitElement {
       : [...this._panelPick, id];
   }
 
-  private _renderPanel(): TemplateResult {
+  /**
+   * The board under its cover: one cutout per rail row, modules in the
+   * cutout, unused positions closed with blanks — a real board is never
+   * shown with holes, and a blank keeps every module the same width.
+   */
+  private _renderBoard(mods: PanelModule[]): TemplateResult {
     const cfg = this._panelCfg();
-    const mods = this._panelModules();
     const rails = buildRails(mods, cfg.railSize);
-    const mm = this._config.main_meter;
-    const totalW = mm
-      ? this._watts(mm.power_l1) + this._watts(mm.power_l2) + this._watts(mm.power_l3)
-      : mods.reduce((a, m) => a + (m.id === EP_MAIN_ID ? 0 : m.watts), 0);
-    const positions = mods.reduce((a, m) => a + m.width, 0);
-    const mainMod = mods.find(m => m.id === EP_MAIN_ID);
-    const isNT = this._config.hdo?.switch ? this._isOn(this._config.hdo.switch) : false;
-    const costRate = mm
-      ? this._calcDailyCost(mm.energy_today, mm.power_l1, mm.power_l2, mm.power_l3)
-      : '';
-
+    const posW = positionWidth(this._boardInner, cfg.railSize);
+    const lod = moduleLod(posW);
     return html`
-      <div class="rail-wrap">
-        <div class="rail-top">
-          <div>
-            <div class="rail-lbl">${this._t('panel_board')} · ${this._t('panel_positions', { n: String(positions) })}</div>
-            <div class="rail-val">${this._fmtW(totalW)}</div>
-          </div>
-          <div class="rail-sub">
-            ${mm?.energy_today
-              ? html`${this._kwh(mm.energy_today).toFixed(1)} ${this._t('kwh_today')}${costRate ? html` · <span class="cost-rate">${costRate}</span>` : nothing}<br>`
-              : nothing}
-            ${mainMod
-              ? html`${this._t('main_breaker')} ${mainMod.amps.toFixed(1)} / ${mainMod.maxA} A`
-              : nothing}
-          </div>
-        </div>
-        <div class="busbar ${isNT ? 'nt' : 'vt'}"></div>
-        <div class="busbar-note">${this._t('busbar_note')}</div>
+      <div class="board">
+        <span class="scr tl"></span><span class="scr tr"></span>
+        <span class="scr bl"></span><span class="scr br"></span>
         ${rails.map(r => {
           const used = r.reduce((a, m) => a + m.width, 0);
           const gap = Math.max(0, cfg.railSize - used);
           return html`
-            <div class="rail">
-              <div class="rail-mods">
-                ${r.map(m => this._renderPanelModule(m))}
-                ${gap > 0 ? html`<div class="rail-gap" style="flex-basis:0;flex-grow:${gap}"></div>` : nothing}
+            <div class="cutout">
+              <div class="cut-row">
+                ${r.map(m => this._renderPanelModule(m, posW, lod))}
+                ${Array.from({ length: gap }, () => html`<div class="xm-blank" style="width:${posW}px"></div>`)}
               </div>
             </div>`;
         })}
-        ${this._renderPanelDetail(mods)}
+      </div>`;
+  }
+
+  /**
+   * The meter cabinet above the board: the electricity meter carries the
+   * totals and the active tariff register (T1/T2), the HDO receiver carries
+   * the tariff state, price, countdown and the schedule-mismatch note. It
+   * replaces both the tariff bar and the rail header of v5.5–5.6 — the
+   * tariff now sits on the devices that physically decide it.
+   */
+  private _renderMeterRow(mods: PanelModule[]): TemplateResult {
+    const mm = this._config.main_meter;
+    const hv = this._hdoView();
+    const mainMod = mods.find(m => m.id === EP_MAIN_ID);
+    const totalW = mm
+      ? this._watts(mm.power_l1) + this._watts(mm.power_l2) + this._watts(mm.power_l3)
+      : mods.reduce((a, m) => a + (m.id === EP_MAIN_ID ? 0 : m.watts), 0);
+    const costRate = mm
+      ? this._calcDailyCost(mm.energy_today, mm.power_l1, mm.power_l2, mm.power_l3)
+      : '';
+    const tariff = hv && hv.state !== 'unk' ? hv.state : undefined;
+    const sub = this._metricRow([
+      mm?.energy_today ? `${this._kwh(mm.energy_today).toFixed(1)} ${this._t('kwh_today')}` : null,
+      costRate ? html`<span class="cost-rate">${costRate}</span>` : null,
+      mainMod ? `${this._t('main_short')} ${mainMod.amps.toFixed(1)}${mainMod.ratingA ? ` / ${mainMod.ratingA}` : ''} A` : null,
+    ]);
+    return html`
+      <div class="em-row">
+        <div class="em">
+          <div class="em-top">
+            <span class="em-print">${this._t('em_meter')}</span><span class="em-led"></span>
+            ${mm ? nothing : html`<span class="em-print r">${this._t('em_sum_circuits')}</span>`}
+          </div>
+          <div class="em-lcd">
+            <div class="em-big">${this._fmtW(totalW)}</div>
+            <div class="em-sub">${sub}</div>
+          </div>
+          ${tariff ? html`
+            <div class="em-tar">
+              <span class=${tariff === 'vt' ? 'vt' : ''}>T1 · VT</span>
+              <span class=${tariff === 'nt' ? 'nt' : ''}>T2 · NT</span>
+            </div>` : nothing}
+        </div>
+        ${hv ? this._renderHdoReceiver(hv) : nothing}
+      </div>`;
+  }
+
+  private _renderHdoReceiver(v: HdoView): TemplateResult {
+    return html`
+      <div class="rx ${v.state}">
+        <div class="em-top">
+          <span class="em-print">${this._t('hdo_receiver')}</span>
+          ${v.fromSchedule ? html`<span class="rx-badge">${this._t('from_schedule')}</span>` : nothing}
+        </div>
+        <div class="rx-main">
+          <div class="rx-state"><span class="rx-led"></span>${v.state === 'unk'
+            ? this._t('hdo_unavailable') : v.state.toUpperCase()}</div>
+          ${v.countdown ? html`
+            <div class="rx-cd">
+              <div class="rx-cd-lbl">${this._t('ends_in')}</div>
+              <div class="rx-cd-val">${v.countdown}</div>
+            </div>` : nothing}
+        </div>
+        ${v.state !== 'unk' ? html`
+          <div class="rx-sub">${this._metricRow([
+            v.price ? `${this._fmtPrice(v.price)} ${v.currency}/kWh` : null,
+            v.fromSchedule ? null : this._t(v.state === 'nt' ? 'relay_closed' : 'relay_open'),
+          ])}</div>` : nothing}
+        ${v.slotPct >= 0 ? html`<div class="rx-prog"><i style="width:${v.slotPct.toFixed(1)}%"></i></div>` : nothing}
+        ${v.note ? html`<div class="rx-note">${v.note}</div>` : nothing}
       </div>`;
   }
 
@@ -2275,12 +2473,14 @@ export class ElectricityPanelCard extends LitElement {
             : nothing}
       </div>
       <div class="rd-val">${this._fmtW(m.watts)}</div>
-      <div class="rd-meta">
-        ${m.amps > 0 ? html`${m.amps.toFixed(1)} A · ` : nothing}
-        ${energy > 0 ? html`${energy.toFixed(2)} kWh · ` : nothing}
-        ${costRate ? html`<span class="cost-rate">${costRate}</span> · ` : nothing}
-        ${this._t('load_pct', { pct: m.pct.toFixed(0) })} ${this._t('of_rating', { max: String(m.maxA) })}
-      </div>
+      <div class="rd-meta">${this._metricRow([
+        m.amps > 0 ? `${m.amps.toFixed(1)} A` : null,
+        energy > 0 ? `${energy.toFixed(2)} kWh` : null,
+        costRate ? html`<span class="cost-rate">${costRate}</span>` : null,
+        // A meter has no rating, so "x % load of 63 A" would be invented.
+        m.kind === 'meter' ? null
+          : `${this._t('load_pct', { pct: m.pct.toFixed(0) })} ${this._t('of_rating', { max: String(m.maxA) })}`,
+      ])}</div>
       ${(() => {
         // `show_nt_hint` was only ever read by the two classic renderers, so in
         // panel view the setting silently did nothing. The hint belongs on the
@@ -2335,15 +2535,16 @@ export class ElectricityPanelCard extends LitElement {
             <div class="ph3-cell ${cls}">
               <div class="ph3-head">
                 <span class="ph3-lbl">${p.lbl}</span>
-                <span class="ph3-pct">${pct.toFixed(0)} %</span>
+                ${m.kind === 'meter' ? nothing : html`<span class="ph3-pct">${pct.toFixed(0)} %</span>`}
               </div>
               <div class="ph3-val">${this._fmtW(w)}</div>
               <div class="ph3-sub">
                 ${a.toFixed(1)} A${v > 0 ? html` · ${v.toFixed(0)} V` : nothing}
               </div>
-              <div class="ph3-track">
-                <i style="width:${pct.toFixed(0)}%;background:${this._loadColor(pct)}"></i>
-              </div>
+              ${m.kind === 'meter' ? nothing : html`
+                <div class="ph3-track">
+                  <i style="width:${pct.toFixed(0)}%;background:${this._loadColor(pct)}"></i>
+                </div>`}
               ${this._renderScaledSpark(p.power, globalMin, globalMax, `var(--ep-${cls})`)}
             </div>`;
         })}
@@ -2520,7 +2721,8 @@ export class ElectricityPanelCard extends LitElement {
   }
 
   /**
-   * Order in panel view: tariff → day timeline → board → detail → schedule.
+   * Order in panel view: meter cabinet (totals + tariff) → day timeline →
+   * board → detail → schedule.
    *
    * "Is it cheap right now" and "what is drawing" are the two glance-level
    * questions, so they sit at the top; the schedule table and the costs tab
@@ -2529,10 +2731,12 @@ export class ElectricityPanelCard extends LitElement {
    * and it appears exactly once, `_renderHdoSchedule` drops its own copy.
    */
   private _renderPanelBody(): TemplateResult {
+    const mods = this._panelModules();
     return html`
-      ${this._renderHdo()}
+      ${this._renderMeterRow(mods)}
       ${this._renderDayTimeline()}
-      ${this._renderPanel()}
+      ${this._renderBoard(mods)}
+      ${this._renderPanelDetail(mods)}
       ${this._renderHdoSchedule()}`;
   }
 
@@ -2574,13 +2778,24 @@ export class ElectricityPanelCard extends LitElement {
       --ep-l1: #8b7ee8;
       --ep-l2: #45b8ac;
       --ep-l3: #5b8def;
-      /* Kovový profil DIN lišty a plast modulu. */
-      --ep-metal-a: #2b313d;
-      --ep-metal-b: #1a1e26;
-      --ep-metal-edge: #3c4454;
-      --ep-mod-a: #2b303b;
-      --ep-mod-b: #20242d;
-      --ep-mod-chrome: #14171d;
+      /* ROADMAP 5.6 — nakreslený rozvaděč (varianta B). Kryt s výřezem,
+         čelo modulu, páčka, displej, popisové pole, LCD elektroměru.
+         V tmavém tématu antracitové moduly (reálně existují), ve světlém
+         klasicky bílé — identitu nese tvar, ne barva plastu. */
+      --ep-cover: #262b35;
+      --ep-cover-edge: #323846;
+      --ep-cutout: #0b0d11;
+      --ep-mbody: #2b303b;
+      --ep-mshoulder: #242832;
+      --ep-mslot: #0e1015;
+      --ep-mlever-off: #5b6473;
+      --ep-mtie: #aab2bf;
+      --ep-mdisp: #14171d;
+      --ep-mlabel: #363d4a;
+      --ep-mprint: #7d8799;
+      --ep-mlow: #1d2129;
+      --ep-lcd: #0f1a1f;
+      --ep-lcd-text: #b9d4df;
       --ep-mod-text: #e6eaf2;
       --ep-mod-dim: #98a3b5;
 
@@ -2623,12 +2838,20 @@ export class ElectricityPanelCard extends LitElement {
       --ep-l1: #6d5fd6;
       --ep-l2: #1d8f85;
       --ep-l3: #2f6fd0;
-      --ep-metal-a: #dfe3ea;
-      --ep-metal-b: #c6ccd7;
-      --ep-metal-edge: #aeb6c4;
-      --ep-mod-a: #fdfdfe;
-      --ep-mod-b: #dee3eb;
-      --ep-mod-chrome: #b9c0cc;
+      --ep-cover: #eceff3;
+      --ep-cover-edge: #d3d8e0;
+      --ep-cutout: #8f99a8;
+      --ep-mbody: #fbfbfc;
+      --ep-mshoulder: #eef1f5;
+      --ep-mslot: #2a2f38;
+      --ep-mlever-off: #8a93a3;
+      --ep-mtie: #5d6574;
+      --ep-mdisp: #eef1f5;
+      --ep-mlabel: #ffffff;
+      --ep-mprint: #8a93a1;
+      --ep-mlow: #dce1e8;
+      --ep-lcd: #c7d1d7;
+      --ep-lcd-text: #1b2830;
       --ep-mod-text: #1c2230;
       --ep-mod-dim: #55606f;
     }
@@ -2905,7 +3128,8 @@ export class ElectricityPanelCard extends LitElement {
        na content-boxu, takže se to nedá zapnout globálně bez přepočítání
        všech dosavadních výšek. Panel view si ho zapíná jen pro svůj podstrom,
        kde na něm stojí pevná výška modulu. */
-    .rail-wrap, .rail-wrap *, .rail-wrap *::before, .rail-wrap *::after,
+    .em-row, .em-row *, .board, .board *, .board *::before, .board *::after,
+    .rail-detail, .rail-detail *,
     .day-timeline, .day-timeline * { box-sizing: border-box; }
 
     .day-timeline { background: var(--ep-surface); border: 1px solid var(--ep-border);
@@ -2914,106 +3138,141 @@ export class ElectricityPanelCard extends LitElement {
     .day-timeline-foot { font-size: var(--ep-fs-micro); color: var(--ep-text-dim);
       text-align: right; margin-top: 8px; font-variant-numeric: tabular-nums; }
 
-    .rail-wrap { background: var(--ep-surface); border-radius: var(--ep-r-md);
-      padding: 16px; margin-bottom: 12px; box-shadow: var(--ep-shadow); }
-    .rail-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-    .rail-lbl { font-size: var(--ep-fs-micro); text-transform: uppercase; letter-spacing: .9px;
-      font-weight: 600; color: var(--ep-text-dim); }
-    .rail-val { font-size: var(--ep-fs-hero); font-weight: 600; letter-spacing: -0.6px;
-      color: var(--ep-text); font-variant-numeric: tabular-nums; }
-    .rail-sub { font-size: var(--ep-fs-meta); color: var(--ep-text-dim); text-align: right;
-      font-variant-numeric: tabular-nums; line-height: 1.5; }
+    /* ── skříň elektroměru: elektroměr + HDO přijímač ──
+       Nahrazuje tarifní pruh i hlavičku lišty z v5.5–5.6: tarif je na
+       zařízeních, která ho fyzicky určují. Zelená/červená zůstává výhradně
+       tarifní (balíček A) — nese ji registr T1/T2 a stav přijímače. */
+    .em-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+    .em, .rx { border-radius: var(--ep-r-md); padding: 10px 12px; min-width: 0;
+      background: var(--ep-cover); border: 1px solid var(--ep-cover-edge); box-shadow: var(--ep-shadow); }
+    .em { flex: 3 1 260px; }
+    .rx { flex: 2 1 200px; display: flex; flex-direction: column; gap: 6px; }
+    .em-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .rx .em-top { margin-bottom: 0; }
+    .em-print { font-size: 9px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+      color: var(--ep-mprint); }
+    .em-print.r { margin-left: auto; text-transform: none; letter-spacing: .2px; font-weight: 500; }
+    .em-led { width: 6px; height: 6px; border-radius: 50%; background: #d4423c; flex-shrink: 0; }
+    .em-lcd { background: var(--ep-lcd); color: var(--ep-lcd-text); border-radius: var(--ep-r-sm);
+      padding: 7px 10px 8px; font-variant-numeric: tabular-nums; box-shadow: inset 0 1px 3px rgba(0,0,0,.35); }
+    .em-big { font-size: var(--ep-fs-hero); font-weight: 600; letter-spacing: -0.6px; line-height: 1.1; }
+    .em-sub { font-size: var(--ep-fs-meta); margin-top: 3px; opacity: .85; }
+    .em-sub .metric-sep, .rx-sub .metric-sep { color: inherit; opacity: .6; margin: 0 5px; }
+    .em-tar { display: flex; gap: 6px; margin-top: 8px; }
+    .em-tar span { font-size: var(--ep-fs-micro); font-weight: 700; letter-spacing: .4px; padding: 2px 8px;
+      border-radius: var(--ep-r-pill); border: 1px solid var(--ep-cover-edge); color: var(--ep-mprint); }
+    .em-tar span.nt { background: rgba(34,197,94,.16); border-color: #22c55e; color: #22c55e; }
+    .em-tar span.vt { background: rgba(239,68,68,.14); border-color: #ef4444; color: #ef4444; }
+    .rx-badge { margin-left: auto; font-size: 9px; font-weight: 600; padding: 1px 6px;
+      border-radius: var(--ep-r-pill); background: var(--ep-badge-bg); color: var(--ep-badge-fg); }
+    .rx-main { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: auto; }
+    .rx-state { display: flex; align-items: center; gap: 7px; font-size: var(--ep-fs-sub); font-weight: 600; }
+    .rx.nt .rx-state { color: #22c55e; }
+    .rx.vt .rx-state { color: #ef4444; }
+    .rx.unk .rx-state { color: var(--ep-text-dim); font-size: var(--ep-fs-meta); }
+    .rx-led { width: 9px; height: 9px; border-radius: 50%; background: var(--ep-mlever-off); flex-shrink: 0; }
+    .rx.nt .rx-led { background: #22c55e; }
+    .rx-cd { text-align: right; }
+    .rx-cd-lbl { font-size: var(--ep-fs-micro); color: var(--ep-text-dim); }
+    .rx-cd-val { font-size: var(--ep-fs-sub); font-weight: 600; color: var(--ep-text); font-variant-numeric: tabular-nums; }
+    .rx-sub { font-size: var(--ep-fs-meta); color: var(--ep-text-dim); font-variant-numeric: tabular-nums; }
+    .rx-prog { height: 3px; border-radius: var(--ep-r-pill); background: rgba(127,127,127,.2); overflow: hidden; }
+    .rx-prog i { display: block; height: 100%; border-radius: var(--ep-r-pill); }
+    .rx.nt .rx-prog i { background: #22c55e; }
+    .rx.vt .rx-prog i { background: #ef4444; }
+    .rx-note { font-size: var(--ep-fs-micro); color: var(--warning-color, #f59e0b); line-height: 1.4; }
 
-    /* Přípojnice — proud teče shora do lišty. Tarifní barva, protože to je
-       jediné místo v panel view, kde se dá říct "tohle teď teče levně". */
-    .busbar { height: 6px; border-radius: var(--ep-r-pill); position: relative; overflow: hidden; }
-    .busbar.nt { background: rgba(34,197,94,.18); }
-    .busbar.vt { background: rgba(239,68,68,.16); }
-    .busbar::after { content: ''; position: absolute; inset: 0;
-      background: repeating-linear-gradient(90deg, transparent 0 14px,
-        currentColor 20px 30px, transparent 36px 50px);
-      animation: ep-bus 2.1s linear infinite; }
-    .busbar.nt::after { color: rgba(34,197,94,.55); }
-    .busbar.vt::after { color: rgba(239,68,68,.5); }
-    @keyframes ep-bus { to { transform: translateX(50px); } }
-    @media (prefers-reduced-motion: reduce) { .busbar::after { animation: none; } }
-    .busbar-note { font-size: var(--ep-fs-micro); color: var(--ep-text-dim);
-      text-align: right; margin: 6px 0 10px; }
+    /* ── rozvaděč pod krytem: kryt, výřez na každou řadu, záslepky ── */
+    .board { position: relative; background: var(--ep-cover); border: 1px solid var(--ep-cover-edge);
+      border-radius: var(--ep-r-md); padding: 16px 12px; margin-bottom: 12px; box-shadow: var(--ep-shadow); }
+    .board .scr { position: absolute; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--ep-cover-edge); box-shadow: inset 0 0 0 1.5px rgba(0,0,0,.12); }
+    .scr.tl { top: 5px; left: 5px; } .scr.tr { top: 5px; right: 5px; }
+    .scr.bl { bottom: 5px; left: 5px; } .scr.br { bottom: 5px; right: 5px; }
+    /* Celý rozvaděč v jedné řadě se na úzkém dashboardu nesmí zmáčknout pod
+       čitelnou šířku — výřez se radši odroluje, jako když se po liště díváš. */
+    .cutout { background: var(--ep-cutout); border-radius: var(--ep-r-sm); padding: 5px 6px;
+      overflow-x: auto; scrollbar-width: thin; box-shadow: inset 0 2px 4px rgba(0,0,0,.45); }
+    .cutout + .cutout { margin-top: 12px; }
+    .cut-row { display: flex; gap: 3px; min-width: min-content; }
+    .xm-blank { flex: none; height: 128px; border-radius: 2px; background: var(--ep-cover);
+      box-shadow: inset 0 0 0 1px var(--ep-cover-edge); position: relative; }
+    .xm-blank::after { content: ''; position: absolute; left: 30%; right: 30%; top: 50%; height: 14px;
+      margin-top: -7px; background: repeating-linear-gradient(180deg, var(--ep-cover-edge) 0 1px, transparent 1px 4px); }
 
-    /* Lišta: kovový profil s hranami nahoře a dole. */
-    .rail { position: relative; padding: 13px 8px 9px; margin-bottom: 9px; border-radius: 5px;
-      background: linear-gradient(180deg,
-        var(--ep-metal-edge) 0 3px, var(--ep-metal-a) 3px 9px,
-        var(--ep-metal-b) 9px calc(100% - 9px),
-        var(--ep-metal-a) calc(100% - 9px) calc(100% - 3px),
-        var(--ep-metal-edge) calc(100% - 3px) 100%);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.3); }
-    .rail:last-of-type { margin-bottom: 0; }
-    /* Jedna dlouhá lišta se na úzkém dashboardu nesmí zmáčknout pod čitelnou
-       šířku modulu — radši ať se dá odrolovat, stejně jako se v reálu díváš
-       po liště zleva doprava. */
-    .rail { overflow-x: auto; scrollbar-width: thin; }
-    .rail-mods { display: flex; gap: 3px; min-width: min-content; }
-    /* Neobsazené pozice na poslední liště. Bez nich by flex roztáhl poslední
-       modul přes celou šířku a moduly by na každé liště měly jinou velikost —
-       reálný rozvaděč má naopak modul vždy stejně široký a lištu dojetou. */
-    .rail-gap { flex-grow: 0; flex-shrink: 1; }
-
-    /* Modul jističe. V tmavém tématu antracitový (takové jističe reálně
-       existují), ve světlém klasicky bílý — identitu nese tvar, páčka
-       a číslování, ne barva plastu. */
-    .mod { flex: 1 1 0; min-width: 34px; cursor: pointer; border-radius: 3px; overflow: hidden;
-      background: linear-gradient(180deg, var(--ep-mod-a), var(--ep-mod-b)); position: relative;
-      box-shadow: 0 1px 3px rgba(0,0,0,.45); transition: transform .12s, box-shadow .12s; }
-    .mod.w3 { flex: 3 3 0; }
-    .mod:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,.5); }
-    .mod:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 2px; }
-    .mod.pick { outline: 2px solid var(--ep-accent); outline-offset: 1px; }
-    .mod-lever { height: 24px; display: flex; align-items: center; justify-content: center; gap: 4px;
-      background: var(--ep-mod-chrome); border-bottom: 1px solid rgba(0,0,0,.3); }
+    /* ── modul: SVG tělo + HTML překryv ──
+       Barvy jen přes třídy: var() v SVG atributu fill="…" se nevyhodnotí. */
+    .xm { flex: none; position: relative; height: 128px; border-radius: 3px; cursor: pointer;
+      box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+    ha-card.theme-auto .xm { box-shadow: 0 1px 2px rgba(0,0,0,.18); }
+    .xm:hover { outline: 1px solid var(--ep-accent); outline-offset: 1px; }
+    .xm:focus-visible, .xm.pick { outline: 2px solid var(--ep-accent); outline-offset: 1px; }
+    .xm-svg { position: absolute; left: 0; top: 0; overflow: visible; }
+    .xm-body { fill: var(--ep-mbody); }
+    .xm-shoulder { fill: var(--ep-mshoulder); }
+    .xm-slot { fill: var(--ep-mslot); }
     /* Červená páčka = zapnuto je konvence evropských jističů (červené pole
        znamená "pod napětím") a je to vědomá výjimka z pravidla balíčku A
-       "červená = vysoký tarif". Nepřebarvovat. */
-    .lv { width: 12px; height: 16px; border-radius: 2px; transition: all .18s; }
-    .mod.on  .lv { background: #d4423c; box-shadow: inset 0 6px 0 rgba(0,0,0,.2); }
-    .mod.off .lv { background: #5b6473; box-shadow: inset 0 -6px 0 rgba(0,0,0,.28); }
-    .mod-face { position: relative; height: 66px; padding: 6px 4px 4px; overflow: hidden; }
-    .mod-spark { position: absolute; left: 0; right: 0; bottom: 0; height: 22px; width: 100%;
-      color: var(--ep-mod-dim); opacity: .4; pointer-events: none; }
-    .mod.off .mod-spark { opacity: .18; }
-    /* Hladina zatížení — barevná náplň s výraznou hladinou nahoře. */
-    .mod-fill { position: absolute; left: 0; right: 0; bottom: 0; transition: height .4s;
-      background: linear-gradient(180deg, transparent, var(--ep-fillc));
-      opacity: .35; border-top: 1.5px solid var(--ep-fillc); }
-    .mod.off .mod-fill { display: none; }
-    .mod-pin { position: absolute; top: 2px; left: 3px; width: 5px; height: 5px; border-radius: 50%;
-      background: var(--ep-accent); box-shadow: 0 0 0 2px var(--ep-mod-chrome); }
-    .mod-w { position: relative; font-size: 10px; font-weight: 700; color: var(--ep-mod-text);
-      text-align: center; font-variant-numeric: tabular-nums; letter-spacing: -0.2px; }
-    .mod-nm { position: relative; font-size: 8.5px; line-height: 1.25; color: var(--ep-mod-dim);
-      overflow: hidden; text-align: center; margin-top: 3px; max-height: 22px; word-break: break-word;
+       "červená = vysoký tarif". Nepřebarvovat. Stav nese i poloha páčky. */
+    .xm-lever { fill: #d4423c; transition: fill .18s; }
+    .xm.off .xm-lever { fill: var(--ep-mlever-off); }
+    .xm-grip { fill: rgba(0,0,0,.28); }
+    .xm-tie { fill: var(--ep-mtie); }
+    .xm-lv { transition: transform .18s ease-in-out; }
+    .xm.off .xm-lv { transform: translateY(var(--xm-dy)); }
+    @media (prefers-reduced-motion: reduce) { .xm-lv, .xm-lever { transition: none; } }
+    .xm-print { fill: var(--ep-mprint); font: 700 7px Roboto, system-ui, sans-serif; }
+    .xm-disp { fill: var(--ep-mdisp); }
+    .xm-fill { fill: var(--ep-fillc); opacity: .28; }
+    .xm-fill-top { fill: var(--ep-fillc); }
+    .xm-spark { fill: none; stroke: var(--ep-mod-dim); stroke-width: 1.1; opacity: .45; }
+    .xm.off .xm-spark { opacity: .18; }
+    .xm-label { fill: var(--ep-mlabel); }
+    ha-card.theme-auto .xm-label { stroke: var(--ep-mlow); stroke-width: 1; }
+    .xm-ph.l1 { fill: var(--ep-l1); }
+    .xm-ph.l2 { fill: var(--ep-l2); }
+    .xm-ph.l3 { fill: var(--ep-l3); }
+    .xm-ph.none { fill: var(--ep-mlow); }
+    .xm.off .xm-ph { opacity: .35; }
+    .xm-lcd { fill: var(--ep-lcd); }
+    .xm-led { fill: #d4423c; }
+
+    .xt { position: absolute; pointer-events: none; font-variant-numeric: tabular-nums; }
+    .xt-pos { left: 4px; top: 2px; font-size: 8.5px; font-weight: 700; color: var(--ep-mod-dim); }
+    .xt-rate { right: 4px; top: 2px; font-size: 8px; font-weight: 700; color: var(--ep-mprint);
+      display: flex; align-items: center; gap: 2px; }
+    .xt-rate.meter { right: 14px; }
+    .xm-lock { --mdc-icon-size: 10px; color: var(--warning-color, #f59e0b); display: flex; }
+    .xt-w { left: 0; right: 0; top: 63px; text-align: center; font-size: 10.5px; font-weight: 700;
+      color: var(--ep-mod-text); letter-spacing: -0.2px; white-space: nowrap; }
+    .xt-w .a3 { font-weight: 500; font-size: 9.5px; color: var(--ep-mod-dim); }
+    .xt-w2 { left: 0; right: 0; top: 64px; text-align: center; font-size: 8.5px; color: var(--ep-mod-dim); }
+    .xt-lcd { left: 8px; right: 8px; top: 22px; color: var(--ep-lcd-text); overflow: hidden; }
+    .xt-lcd .big { font-size: 12px; font-weight: 600; letter-spacing: -0.3px; white-space: nowrap; }
+    .xt-lcd .sm { font-size: 7.5px; opacity: .8; white-space: nowrap; margin-top: 1px; }
+    .xt-nm { left: 4px; right: 4px; top: 94px; height: 21px; display: flex; align-items: center;
+      justify-content: center; text-align: center; font-size: 8.5px; line-height: 1.2; color: var(--ep-mod-text); }
+    /* Slovo se láme jen tehdy, když se samo nevejde — jinak "Koupeln/a". */
+    .xt-nm span { overflow: hidden; overflow-wrap: break-word; word-break: normal; hyphens: manual;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-    .mod.off .mod-w, .mod.off .mod-nm { opacity: .45; }
-    .mod-lock { --mdc-icon-size: 12px; color: var(--warning-color, #f59e0b); display: flex; }
-    .mod-foot { display: flex; align-items: center; justify-content: space-between; gap: 3px;
-      padding: 3px 5px 4px; background: var(--ep-mod-chrome); }
-    .mod-num { font-size: 9px; font-weight: 700; color: var(--ep-mod-dim); font-variant-numeric: tabular-nums; }
-    .mod-ph { font-size: 8px; font-weight: 700; letter-spacing: .3px; }
-    .mod-ph.l1 { color: var(--ep-l1); }
-    .mod-ph.l2 { color: var(--ep-l2); }
-    .mod-ph.l3 { color: var(--ep-l3); }
-    .mod-ph.l3f { color: var(--ep-mod-dim); }
-    .mod-strip { height: 3px; }
-    .mod-strip.l1 { background: var(--ep-l1); }
-    .mod-strip.l2 { background: var(--ep-l2); }
-    .mod-strip.l3 { background: var(--ep-l3); }
-    .mod-strip.l3f { background: linear-gradient(90deg,
-      var(--ep-l1) 33%, var(--ep-l2) 33% 66%, var(--ep-l3) 66%); }
-    .mod-strip.none { background: var(--ep-mod-chrome); }
-    .mod.off .mod-strip { opacity: .3; }
+    .xt-ph { top: 115px; transform: translateX(-50%); font-size: 7.5px; font-weight: 700; letter-spacing: .3px; }
+    .xt-ph.l1 { color: var(--ep-l1); }
+    .xt-ph.l2 { color: var(--ep-l2); }
+    .xt-ph.l3 { color: var(--ep-l3); }
+    .xm.off .xt-w, .xm.off .xt-nm { opacity: .45; }
+    /* úroveň detailu: pod 44 px pozice potisk a vedlejší údaje ustoupí */
+    .lod-s .xt-rate .r { display: none; }
+    /* Kritický okruh na střední šířce: zámek má přednost před potiskem,
+       oba se vedle čísla pozice nevejdou. */
+    .lod-m .xt-rate.crit .r { display: none; }
+    .lod-s .xt-w { font-size: 9.5px; }
+    .lod-s .xt-nm { font-size: 8px; left: 3px; right: 3px; }
+    .lod-m .xt-nm { font-size: 8px; }
+    .lod-s .xt-lcd { left: 6px; right: 6px; }
+    .lod-s .xt-lcd .lbl { display: none; }
 
     /* ── detail pod lištou ── */
-    .rail-detail { margin-top: 12px; border-radius: var(--ep-r-md); border: 1px solid var(--ep-border);
+    .rail-detail { margin-bottom: 12px; border-radius: var(--ep-r-md); border: 1px solid var(--ep-border);
       background: var(--ep-surface-2); padding: 12px 14px; }
     .rd-hint { font-size: var(--ep-fs-micro); color: var(--ep-text-dim); text-align: center;
       padding: 8px 0; line-height: 1.7; }
