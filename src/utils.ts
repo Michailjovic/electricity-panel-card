@@ -753,11 +753,58 @@ export function moduleLod(positionPx: number): ModuleLod {
  * watts anyway. Zero or missing reads as an em dash, like the rest of the card.
  */
 export function fmtModuleW(watts: number, lod: ModuleLod): string {
-  if (!(watts > 0)) return '—';
+  if (Number.isNaN(watts)) return '—';
+  if (!(watts > 0)) return lod === 's' ? '0' : '0 W';
   const r = Math.round(watts);
   if (r < 1000) return lod === 's' ? `${r}` : `${r} W`;
   const kw = watts / 1000;
   if (lod === 's') return `${kw.toFixed(1)}k`;
   if (lod === 'm') return `${kw.toFixed(1)} kW`;
   return `${kw.toFixed(2)} kW`;
+}
+
+/**
+ * What a module's display says, and in which tone.
+ *
+ * Until 5.7.0 a single "—" covered three different situations: a live circuit
+ * drawing nothing, a breaker switched off, and a power sensor that stopped
+ * reporting (`_watts` turns `unavailable` into 0). The last one is the one
+ * worth noticing, so the three are now told apart:
+ *
+ * - `off`    — the switch reports `off`: "—". Takes precedence: a breaker that
+ *              is off is expected to read nothing, whatever its sensor says.
+ * - `nodata` — the switch or a power sensor is unavailable/unknown: "?".
+ * - `idle`   — on and reporting, but ≤ 0 W: "0 W", drawn dimmed.
+ * - `value`  — everything else.
+ */
+export type ModuleTone = 'value' | 'idle' | 'off' | 'nodata';
+
+export function moduleReadout(
+  watts: number,
+  lod: ModuleLod,
+  state: { switchOff: boolean; noData: boolean },
+): { text: string; tone: ModuleTone } {
+  if (state.switchOff) return { text: '—', tone: 'off' };
+  if (state.noData) return { text: '?', tone: 'nodata' };
+  if (!(watts > 0)) return { text: fmtModuleW(0, lod), tone: 'idle' };
+  return { text: fmtModuleW(watts, lod), tone: 'value' };
+}
+
+/**
+ * Load band of a breaker, by percent of its rating.
+ *
+ * A breaker carries its rated current indefinitely, so a half-loaded circuit
+ * is not a warning. Until 5.7.0 amber started at 55 % — a 2 kW boiler on a
+ * 16 A breaker sits at ~54 % and flickered across that line with the mains
+ * voltage every time it heated. Amber is reserved for warnings (package A),
+ * so it now starts at 80 %; red at 95 %, the same point where the classic
+ * load bar starts its `ep-overload` pulse.
+ */
+export type LoadBand = 'low' | 'mid' | 'high' | 'over';
+
+export function loadBand(pct: number): LoadBand {
+  if (pct >= 95) return 'over';
+  if (pct >= 80) return 'high';
+  if (pct >= 50) return 'mid';
+  return 'low';
 }

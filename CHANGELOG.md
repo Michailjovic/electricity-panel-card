@@ -5,6 +5,56 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.7.1] — 2026-11-22
+*Skupina E z `docs/UX-REVIEW-5.7.md` — opravy bez změny rozložení a
+konfigurace. Čísla v závorkách odkazují na nálezy v rozboru.*
+
+### 🐞 Fixed
+
+- **Graf v detailu měl deformovanou čáru (1).** `_renderSparkline` kreslí do
+  `viewBox 100×38` s `preserveAspectRatio="none"`, ale čára neměla
+  `vector-effect="non-scaling-stroke"`. V detailu (~900 × 74 px) se tah 1,5
+  roztáhl na 13,5 px ve svislých hranách a 2,9 px ve vodorovných — každé
+  sepnutí vypadalo jako sloup. Čára, referenční i hover linka mají teď
+  stejnou tloušťku v obou směrech; hover tečka je HTML prvek, takže už není
+  elipsa. Tooltip a tečka se nově umisťují v procentech grafu, ne grafu
+  i sloupce popisků (u `sparkline_labels: left` byly posunuté o 44 px).
+- **„—" na displeji modulu znamenalo tři různé věci (4).** Nově
+  `0 W` (tlumeně) = okruh zapnutý bez odběru, `—` = jistič vypnutý,
+  **`?` amber s čárkovaným displejem = spínač nebo senzor výkonu je
+  nedostupný**. Dřív `_watts` udělal z `unavailable` tiše nulu. Platí i pro
+  LCD měřiče; nedostupný modul nekreslí hladinu zatížení.
+- **Amber začínal na 55 % zatížení (5).** 2kW bojler na 16A jističi (~54 %)
+  při topení blikal na hraně varování. Pásma jsou teď neutrál < 50 %,
+  akcent 50–80 %, amber 80–95 %, červená ≥ 95 % — tam, kde classic pruh
+  začíná pulzovat. Platí pro oba režimy.
+- **Názvy se lámaly uprostřed slova (13).** Za `/` a `,` prohlížeč zlom
+  nenabízí, takže „Kuchyň/bedroom2" skončilo jako „Kuchyň/be|droom2".
+  Na čele modulu je teď za těmito znaky `<wbr>`.
+- **Na úzké kartě nebylo poznat, že lišta pokračuje (3).** Okraj výřezu na
+  straně, kde je další obsah, vybledne; vybraný modul se odroluje do záběru
+  (jen výřez, ne stránka; respektuje `prefers-reduced-motion`).
+
+### 🎨 Changed
+
+- **Kontrast vestavěné tmavé palety (20):** `--ep-text-dim` `#6b7688` →
+  `#8a95a8` (3,1–3,8 : 1 → 4,7–5,8 : 1), `--ep-mprint` `#7d8799` →
+  `#8f99ab` (~4 → ~5 : 1), minulé úseky denní osy opacity .32 → .5.
+  `follow_theme` se netýká — bere barvy z HA tématu.
+- **Kontrolky elektroměru jsou neutrální (14).** Statická červená LED se
+  četla jako chyba a byla další výjimkou z pravidla červená = VT.
+- **Větší zásahová plocha ovládacích prvků (21)** při stejném vzhledu:
+  přepínač okruhu 34 × 20 → ~44 × 36 px, přepínač zařízení 28 × 16 →
+  ~36 × 32 px, tlačítka okna grafu, „clear selection", čipy rozvrhu
+  a nákladů i hlavička rozvrhu o 12 px vyšší.
+
+### ➕ Added
+
+- Čisté funkce `moduleReadout` a `loadBand` (+7 testů, celkem 118).
+  `fmtModuleW` vrací pro 0 W `0 W` / `0` místo `—`.
+
+---
+
 ## [5.7.0] — 2026-09-30
 *ROADMAP 5.6 — rozvaděč v `view: panel` je nakreslený (varianta B z
 `docs/mockup-grafika-modulu.html`). Nahrazuje dosavadní vzhled panel view;

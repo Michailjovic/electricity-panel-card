@@ -277,6 +277,27 @@ Modul jističe jako skutečně nakreslený objekt místo HTML boxů — jen pro
 
 ---
 
+### 5.7 Rozbor UX po v5.7.0 → v5.7.1 …
+
+Podklad: `docs/UX-REVIEW-5.7.md` (24 nálezů, render s reálnou konfigurací).
+
+- [x] **E — opravy bez změny rozložení** (v5.7.1): non-scaling stroke
+      v grafech, `0 W` / `—` / `?` na modulu, pásma zatížení 50/80/95 %,
+      kontrast `--ep-text-dim`/`--ep-mprint`, neutrální LED, `<wbr>` v názvech,
+      zásahové plochy, vyblednutí okraje lišty + odrolování k výběru
+- [ ] **F1 — interakce:** klik nahradí výběr, porovnání přes přepínač
+      (čeká na rozhodnutí); zalamování lišty na úzké kartě (čeká);
+      potvrzení vypnutí v kartě místo `window.confirm`
+- [ ] **F2 — horní část (mockup):** časová osa do HDO přijímače, registr
+      T1/T2 do LCD, jednotné odpočty, fázové pruhy hlavního jističe v LCD
+- [ ] **G — grafy:** osa Y od nuly, časová osa + sdílený kurzor, tarifní
+      pásma za grafem
+- [ ] **H — detail a modul:** výchozí detail = fáze hlavního jističe
+      (příprava na fázovou bilanci), 3f zařízení po fázích, škála písma
+      modulu, metriky jako mřížka, rozvrh jen NT okna, akcent jen interakce
+
+---
+
 ## Odloženo / zamítnuto
 
 | Položka | Stav | Poznámka |

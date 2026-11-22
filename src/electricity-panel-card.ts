@@ -36,7 +36,8 @@ import {
   loadPercent,
   positionWidth,
   moduleLod,
-  fmtModuleW,
+  moduleReadout,
+  loadBand,
   RAIL_GAP,
   type ModuleLod,
   type DaySlot,
@@ -76,6 +77,11 @@ interface PanelModule {
   pct: number;
   isOn: boolean;
   hasSwitch: boolean;
+  /** Switch reports exactly `off` — not merely "not on" (unavailable is not off) */
+  switchOff: boolean;
+  /** A configured switch or power sensor is unavailable/unknown — the
+   *  displayed watts would be a silent 0, so the display says "?" instead */
+  noData: boolean;
   critical: boolean;
   /** `breaker` has a lever; `meter` is a DIN energy meter with a display */
   kind: 'breaker' | 'meter';
@@ -254,6 +260,7 @@ export class ElectricityPanelCard extends LitElement {
    *  content box; every rail row has the same width, so one is enough. The
    *  1 px dead band keeps a sub-pixel jitter from re-rendering in a loop. */
   protected override updated(): void {
+    this.renderRoot.querySelectorAll<HTMLElement>('.cutout').forEach(c => this._syncCutFades(c));
     const el = this._isPanelView() ? this.renderRoot.querySelector('.cutout') : null;
     if (el === (this._roEl ?? null)) return;
     this._ro?.disconnect();
@@ -353,6 +360,19 @@ export class ElectricityPanelCard extends LitElement {
     return this._state(id) === 'on';
   }
 
+  /** Name with break opportunities after "/" and "," — the browser offers
+   *  none there, so "Kuchyň/bedroom2" fell through to overflow-wrap and broke
+   *  mid-word ("Kuchyň/be|droom2"). */
+  private _breakable(name: string): Array<string | TemplateResult> {
+    return name.split(/(?<=[/,])/).map((part, i) => (i ? html`<wbr>${part}` : part));
+  }
+
+  /** At least one of the configured (non-empty) ids is missing or
+   *  unavailable/unknown. Ids that are not configured are ignored. */
+  private _anyUnavail(ids: Array<string | undefined>): boolean {
+    return ids.some(id => !!id && !this._isAvail(id));
+  }
+
   /** Entity exists and is not unavailable/unknown */
   private _isAvail(id?: string): boolean {
     if (!id) return false;
@@ -394,13 +414,14 @@ export class ElectricityPanelCard extends LitElement {
   }
 
   private _loadColor(pct: number): string {
-    // Balíček A: zelená pod 55 % dělala z každého klidného okruhu stejný
-    // signál jako "nízký tarif". Zátěž pod polovinou jističe není dobrá
-    // zpráva, je to nulová informace — patří jí neutrál.
-    if (pct > 80) return 'var(--error-color, #ef4444)';
-    if (pct > 55) return 'var(--warning-color, #f59e0b)';
-    if (pct > 15) return 'var(--ep-accent)';
-    return 'var(--ep-neutral)';
+    // Balíček A: zátěž pod polovinou jističe není dobrá zpráva, je to nulová
+    // informace — patří jí neutrál. Amber až od 80 % (viz loadBand).
+    switch (loadBand(pct)) {
+      case 'over': return 'var(--error-color, #ef4444)';
+      case 'high': return 'var(--warning-color, #f59e0b)';
+      case 'mid':  return 'var(--ep-accent)';
+      default:     return 'var(--ep-neutral)';
+    }
   }
 
   private _watts(entityId?: string): number {
@@ -764,10 +785,14 @@ export class ElectricityPanelCard extends LitElement {
     const wrap = svg.parentElement;
     if (!wrap) return;
     const line = wrap.querySelector<SVGLineElement>('.spark-hover-line');
-    const dot = wrap.querySelector<SVGCircleElement>('.spark-hover-dot');
+    const dot = wrap.querySelector<HTMLDivElement>('.spark-hover-dot');
     const tooltip = wrap.querySelector<HTMLDivElement>('.spark-tooltip');
     if (line) { line.setAttribute('x1', `${nearest.x}`); line.setAttribute('x2', `${nearest.x}`); line.setAttribute('visibility', 'visible'); }
-    if (dot) { dot.setAttribute('cx', `${nearest.x}`); dot.setAttribute('cy', `${nearest.y}`); dot.setAttribute('visibility', 'visible'); }
+    if (dot) {
+      dot.style.left = `${nearest.x}%`;
+      dot.style.top = `${(nearest.y / 38) * 100}%`;
+      dot.style.visibility = 'visible';
+    }
     if (tooltip) {
       tooltip.textContent = `${this._fmtW(nearest.v)} · ${this._fmtTime(nearest.t)}`;
       tooltip.style.left = `${nearest.x}%`;
@@ -779,7 +804,8 @@ export class ElectricityPanelCard extends LitElement {
     const wrap = (e.currentTarget as SVGSVGElement).parentElement;
     if (!wrap) return;
     wrap.querySelector('.spark-hover-line')?.setAttribute('visibility', 'hidden');
-    wrap.querySelector('.spark-hover-dot')?.setAttribute('visibility', 'hidden');
+    const dot = wrap.querySelector<HTMLDivElement>('.spark-hover-dot');
+    if (dot) dot.style.visibility = 'hidden';
     const tooltip = wrap.querySelector<HTMLDivElement>('.spark-tooltip');
     if (tooltip) tooltip.style.visibility = 'hidden';
   }
@@ -1398,6 +1424,7 @@ export class ElectricityPanelCard extends LitElement {
     return html`
       <div class="sparkline-wrap">
         ${labelPos === 'left' ? lblEl : nothing}
+        <div class="spark-plot">
         <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="sparkline"
           @pointermove=${(e: PointerEvent) => this._onSparkMove(e, entityId)}
           @pointerleave=${(e: PointerEvent) => this._onSparkLeave(e)}>
@@ -1410,15 +1437,19 @@ export class ElectricityPanelCard extends LitElement {
           </defs>
           <path d="${cached.area}" fill="url(#${gid})"/>
           <path d="${cached.line}" fill="none" stroke="${color}" stroke-width="1.5"
-            stroke-linejoin="round" stroke-linecap="round"/>
+            stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
           <line x1="0" y1="${yMax}" x2="${W}" y2="${yMax}"
-            class="spark-ref${showRef ? '' : ' spark-hidden'}" style="stroke:${refColor}"/>
+            class="spark-ref${showRef ? '' : ' spark-hidden'}" style="stroke:${refColor}"
+            vector-effect="non-scaling-stroke"/>
           <line x1="0" y1="${yMin}" x2="${W}" y2="${yMin}"
-            class="spark-ref${showRef ? '' : ' spark-hidden'}" style="stroke:${refColor}"/>
-          <line class="spark-hover-line" x1="0" y1="0" x2="0" y2="${H}" visibility="hidden"/>
-          <circle class="spark-hover-dot" r="2.2" style="fill:${color}" visibility="hidden"/>
+            class="spark-ref${showRef ? '' : ' spark-hidden'}" style="stroke:${refColor}"
+            vector-effect="non-scaling-stroke"/>
+          <line class="spark-hover-line" x1="0" y1="0" x2="0" y2="${H}" visibility="hidden"
+            vector-effect="non-scaling-stroke"/>
         </svg>
+        <div class="spark-hover-dot" style="background:${color}"></div>
         <div class="spark-tooltip"></div>
+        </div>
         ${labelPos === 'right' ? lblEl : nothing}
       </div>`;
   }
@@ -2077,6 +2108,8 @@ export class ElectricityPanelCard extends LitElement {
         pct: loadPercent(maxPhaseA, w / 3, cfg.mainBreaker, this._mainVoltage()),
         isOn: true,
         hasSwitch: false,
+        switchOff: false,
+        noData: this._anyUnavail([mm.power_l1, mm.power_l2, mm.power_l3]),
         critical: true,
         kind: 'breaker',
         ...(this._config.panel?.main_breaker ? { ratingA: this._config.panel.main_breaker } : {}),
@@ -2112,6 +2145,11 @@ export class ElectricityPanelCard extends LitElement {
         pct: loadPercent(amps, three ? watts / 3 : watts, maxA, volts),
         isOn: this._isOn(c.switch),
         hasSwitch: !!c.switch,
+        switchOff: !!c.switch && this._state(c.switch) === 'off',
+        noData: this._anyUnavail([
+          c.switch,
+          ...(three && !c.power ? [c.power_l1, c.power_l2, c.power_l3] : [c.power]),
+        ]),
         critical: !!c.critical,
         kind: c.module === 'meter' ? 'meter' : 'breaker',
         ...(c.max_current ? { ratingA: c.max_current } : {}),
@@ -2240,7 +2278,7 @@ export class ElectricityPanelCard extends LitElement {
     // ── display: load level as a backlight, micro graph, value on top.
     // A meter has no rating to be loaded against, so no level on it.
     const dw = W - 6;
-    const fh = meter || off ? 0 : (MOD.dispH - 2) * m.pct / 100;
+    const fh = meter || off || m.noData ? 0 : (MOD.dispH - 2) * m.pct / 100;
     const spark = cfg.moduleSpark && m.sparkId ? this._sparkPaths(m.sparkId) : undefined;
     const disp = svg`
       <rect x="3" y=${MOD.dispY} width=${dw} height=${MOD.dispH} rx="2" class="xm-disp"/>
@@ -2262,18 +2300,20 @@ export class ElectricityPanelCard extends LitElement {
     const amps = m.amps > 0 ? m.amps : 0;
     const ampsTxt = m.ratingA ? `${amps.toFixed(1)} / ${m.ratingA} A` : `${amps.toFixed(1)} A`;
     const rate = meter ? 'kWh' : (m.ratingA ? `${m.ratingA} A` : '');
+    const ro = moduleReadout(m.watts, lod, { switchOff: m.switchOff, noData: m.noData });
     const value = meter
       ? html`
-          <div class="xt xt-lcd">
-            <div class="big">${m.watts > 0 ? this._fmtW(m.watts) : '—'}</div>
+          <div class="xt xt-lcd ${ro.tone}">
+            <div class="big">${ro.tone === 'value' ? this._fmtW(m.watts) : ro.text}</div>
             ${m.phaseW ? html`<div class="sm">${m.phaseW.map((w, i) => html`<span class="lbl">L${i + 1} </span>${(w / 1000).toFixed(2)} `)}</div>` : nothing}
           </div>
           ${amps > 0 ? html`<div class="xt xt-w2">${amps.toFixed(1)} A</div>` : nothing}`
-      : html`<div class="xt xt-w">${fmtModuleW(m.watts, lod)}${n === 3 && lod !== 's'
+      : html`<div class="xt xt-w ${ro.tone}">${ro.text}${n === 3 && lod !== 's' && ro.tone !== 'nodata'
           ? html` <span class="a3">· ${ampsTxt}</span>` : nothing}</div>`;
 
     return html`
-      <div class="xm ${off ? 'off' : 'on'} ${picked ? 'pick' : ''} lod-${lod}"
+      <div class="xm ${off ? 'off' : 'on'} ${picked ? 'pick' : ''} ${m.noData ? 'nodata' : ''} lod-${lod}"
+        data-id=${m.id}
         role="button" tabindex="0"
         aria-pressed=${picked ? 'true' : 'false'}
         aria-label="${m.position ? m.position + ' ' : ''}${m.name}"
@@ -2295,16 +2335,46 @@ export class ElectricityPanelCard extends LitElement {
           ? html`<ha-icon icon="mdi:lock" class="xm-lock"></ha-icon>` : nothing}${rate
           ? html`<span class="r">${rate}</span>` : nothing}</span>
         ${value}
-        <div class="xt xt-nm"><span>${m.name}</span></div>
+        <div class="xt xt-nm"><span>${this._breakable(m.name)}</span></div>
         ${lod !== 's' ? phases.map((ph, i) => ph === 'none' ? nothing
           : html`<span class="xt xt-ph ${ph}" style="left:${poles[i]}px">${ph.toUpperCase()}</span>`) : nothing}
       </div>`;
   }
 
   private _panelTogglePick(id: string): void {
-    this._panelPick = this._panelPick.includes(id)
-      ? this._panelPick.filter(x => x !== id)
-      : [...this._panelPick, id];
+    const adding = !this._panelPick.includes(id);
+    this._panelPick = adding
+      ? [...this._panelPick, id]
+      : this._panelPick.filter(x => x !== id);
+    if (adding) void this.updateComplete.then(() => this._revealModule(id));
+  }
+
+  /** Scroll a rail cutout so the module is fully in view. On a narrow card
+   *  the detail could open for a module that sat outside the visible part of
+   *  the rail — the user saw the graph but not what it belonged to. Scrolls
+   *  only the cutout, never the page. */
+  private _revealModule(id: string): void {
+    const mod = Array.from(this.renderRoot.querySelectorAll<HTMLElement>('.xm'))
+      .find(el => el.dataset.id === id);
+    const cut = mod?.closest<HTMLElement>('.cutout');
+    if (!mod || !cut || cut.scrollWidth <= cut.clientWidth) return;
+    const m = mod.getBoundingClientRect();
+    const c = cut.getBoundingClientRect();
+    const pad = 28; // the edge fade is 28 px wide — clear it, not just the edge
+    let dx = 0;
+    if (m.left < c.left + pad) dx = m.left - c.left - pad;
+    else if (m.right > c.right - pad) dx = m.right - c.right + pad;
+    if (!dx) return;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    cut.scrollBy({ left: dx, behavior: reduce ? 'auto' : 'smooth' });
+  }
+
+  /** Fade the cutout edge on the side where the rail continues. Direct class
+   *  toggles, no re-render — this runs on every scroll event. */
+  private _syncCutFades(cut: HTMLElement): void {
+    const max = cut.scrollWidth - cut.clientWidth;
+    cut.classList.toggle('fade-l', max > 1 && cut.scrollLeft > 1);
+    cut.classList.toggle('fade-r', max > 1 && cut.scrollLeft < max - 1);
   }
 
   /**
@@ -2325,7 +2395,7 @@ export class ElectricityPanelCard extends LitElement {
           const used = r.reduce((a, m) => a + m.width, 0);
           const gap = Math.max(0, cfg.railSize - used);
           return html`
-            <div class="cutout">
+            <div class="cutout" @scroll=${(e: Event) => this._syncCutFades(e.currentTarget as HTMLElement)}>
               <div class="cut-row">
                 ${r.map(m => this._renderPanelModule(m, posW, lod))}
                 ${Array.from({ length: gap }, () => html`<div class="xm-blank" style="width:${posW}px"></div>`)}
@@ -2758,7 +2828,7 @@ export class ElectricityPanelCard extends LitElement {
       --ep-border2: #333a48;
       --ep-text: #e6eaf2;
       --ep-text-mid: #9aa5b8;
-      --ep-text-dim: #6b7688;
+      --ep-text-dim: #8a95a8;  /* v5.7.1: #6b7688 → 3,1–3,8 : 1, teď 4,7–5,8 : 1 */
       --ep-text-faint: #374151;
       --ep-accent: #7aa2e3;
       --ep-accent-bg: rgba(122,162,227,.14);
@@ -2792,7 +2862,7 @@ export class ElectricityPanelCard extends LitElement {
       --ep-mtie: #aab2bf;
       --ep-mdisp: #14171d;
       --ep-mlabel: #363d4a;
-      --ep-mprint: #7d8799;
+      --ep-mprint: #8f99ab;   /* v5.7.1: #7d8799 → ~4 : 1, teď ~5 : 1 */
       --ep-mlow: #1d2129;
       --ep-lcd: #0f1a1f;
       --ep-lcd-text: #b9d4df;
@@ -2964,7 +3034,7 @@ export class ElectricityPanelCard extends LitElement {
     .tl-seg { border-radius: 1px; transition: opacity .3s; }
     .tl-seg.nt { background: #22c55e; }
     .tl-seg.vt { background: rgba(239,68,68,.35); }
-    .tl-seg.past { opacity: .32; }
+    .tl-seg.past { opacity: .5; }  /* .32 dávalo minulým úsekům 1,1–1,7 : 1 proti pozadí */
     .tl-seg.active.nt { box-shadow: 0 0 4px rgba(34,197,94,.5); }
     .tl-seg.active.vt { background: #ef4444; }
     /* follow_theme fix: was #fff with black side-borders, i.e. inverted and
@@ -3056,6 +3126,16 @@ export class ElectricityPanelCard extends LitElement {
     .toggle.sm::after { width: 11px; height: 11px; top: 2.5px; }
     .toggle.sm.on::after  { left: 14px; }
     .toggle.sm.off::after { left: 3px; }
+    /* v5.7.1: zásahová plocha. Přepínač, který vypíná okruh, byl nejmenší cíl
+       na kartě (34 × 20, zařízení 28 × 16). Vzhled zůstává, ::before rozšíří
+       plochu na ~44 × 36 / 36 × 32 px. ::after je kolečko přepínače. */
+    .toggle::before { content: ''; position: absolute; inset: -8px -5px; }
+    .toggle.sm::before { inset: -8px -4px; }
+    .spark-win-btn, .g-btn, .g-chk, .sday-btn, .cost-pill, .expand-btn, .schedule-title { position: relative; }
+    .spark-win-btn::before, .g-btn::before, .g-chk::before, .sday-btn::before,
+    .cost-pill::before, .expand-btn::before, .schedule-title::before {
+      content: ''; position: absolute; inset: -6px 0;
+    }
 
     .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; transition: box-shadow .3s; }
     .status-dot.on  { background: var(--ep-accent); box-shadow: 0 0 0 2.5px var(--ep-accent-bg); }
@@ -3086,6 +3166,9 @@ export class ElectricityPanelCard extends LitElement {
     .note-row .device-name { font-style: italic; }
 
     .sparkline-wrap { position: relative; display: flex; align-items: stretch; width: 100%; height: 38px; margin-top: 8px; }
+    /* The plot is its own positioned box so the hover dot and tooltip are
+       placed in percent of the graph, not of graph + label column. */
+    .spark-plot { position: relative; flex: 1; min-width: 0; display: flex; }
     .sparkline { flex: 1; min-width: 0; display: block; overflow: visible; cursor: crosshair; }
     .spark-lbls { width: 44px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 1px 2px; pointer-events: none; }
     .spark-lbls-left { align-items: flex-start; }
@@ -3097,8 +3180,12 @@ export class ElectricityPanelCard extends LitElement {
     .spark-lbl-min { font-size: var(--ep-fs-micro); color: var(--ep-text-dim); text-shadow: 0 0 3px var(--ep-bg), 0 0 3px var(--ep-bg); white-space: nowrap; font-family: inherit; font-variant-numeric: tabular-nums; }
     .spark-ref { stroke-width: 1px; stroke-dasharray: 3 3; }
     .spark-hidden { display: none; }
-    .spark-hover-line { stroke: var(--ep-text-dim); stroke-width: .5; pointer-events: none; }
-    .spark-hover-dot { pointer-events: none; }
+    .spark-hover-line { stroke: var(--ep-text-dim); stroke-width: 1px; pointer-events: none; }
+    .spark-hover-dot {
+      position: absolute; width: 6px; height: 6px; border-radius: 50%;
+      transform: translate(-50%, -50%); pointer-events: none; visibility: hidden;
+      box-shadow: 0 0 0 2px var(--ep-surface);
+    }
     .spark-tooltip {
       position: absolute; top: -2px; transform: translate(-50%, -100%);
       background: var(--ep-surface); border: 1px solid var(--ep-border);
@@ -3152,7 +3239,9 @@ export class ElectricityPanelCard extends LitElement {
     .em-print { font-size: 9px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
       color: var(--ep-mprint); }
     .em-print.r { margin-left: auto; text-transform: none; letter-spacing: .2px; font-weight: 500; }
-    .em-led { width: 6px; height: 6px; border-radius: 50%; background: #d4423c; flex-shrink: 0; }
+    /* Statická červená LED se četla jako chyba/nahrávání a byla další výjimkou
+       z pravidla červená = VT. Kontrolka zůstává jako detail ilustrace, neutrální. */
+    .em-led { width: 6px; height: 6px; border-radius: 50%; background: var(--ep-mprint); opacity: .6; flex-shrink: 0; }
     .em-lcd { background: var(--ep-lcd); color: var(--ep-lcd-text); border-radius: var(--ep-r-sm);
       padding: 7px 10px 8px; font-variant-numeric: tabular-nums; box-shadow: inset 0 1px 3px rgba(0,0,0,.35); }
     .em-big { font-size: var(--ep-fs-hero); font-weight: 600; letter-spacing: -0.6px; line-height: 1.1; }
@@ -3194,6 +3283,14 @@ export class ElectricityPanelCard extends LitElement {
     .cutout { background: var(--ep-cutout); border-radius: var(--ep-r-sm); padding: 5px 6px;
       overflow-x: auto; scrollbar-width: thin; box-shadow: inset 0 2px 4px rgba(0,0,0,.45); }
     .cutout + .cutout { margin-top: 12px; }
+    /* v5.7.1: lišta pokračuje mimo výřez — okraj na té straně vybledne. */
+    .cutout.fade-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+      mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+    .cutout.fade-l { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px);
+      mask-image: linear-gradient(to right, transparent, #000 28px); }
+    .cutout.fade-l.fade-r {
+      -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+      mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
     .cut-row { display: flex; gap: 3px; min-width: min-content; }
     .xm-blank { flex: none; height: 128px; border-radius: 2px; background: var(--ep-cover);
       box-shadow: inset 0 0 0 1px var(--ep-cover-edge); position: relative; }
@@ -3235,7 +3332,7 @@ export class ElectricityPanelCard extends LitElement {
     .xm-ph.none { fill: var(--ep-mlow); }
     .xm.off .xm-ph { opacity: .35; }
     .xm-lcd { fill: var(--ep-lcd); }
-    .xm-led { fill: #d4423c; }
+    .xm-led { fill: var(--ep-mprint); opacity: .6; }
 
     .xt { position: absolute; pointer-events: none; font-variant-numeric: tabular-nums; }
     .xt-pos { left: 4px; top: 2px; font-size: 8.5px; font-weight: 700; color: var(--ep-mod-dim); }
@@ -3260,6 +3357,11 @@ export class ElectricityPanelCard extends LitElement {
     .xt-ph.l2 { color: var(--ep-l2); }
     .xt-ph.l3 { color: var(--ep-l3); }
     .xm.off .xt-w, .xm.off .xt-nm { opacity: .45; }
+    /* 0 W na zapnutém okruhu je platný údaj, jen tlumený; "?" = senzor
+       neodpovídá — to je varování, proto amber. */
+    .xt-w.idle, .xt-lcd.idle .big { color: var(--ep-mod-dim); font-weight: 500; }
+    .xt-w.nodata, .xt-lcd.nodata .big { color: var(--warning-color, #f59e0b); }
+    .xm.nodata .xm-disp { stroke: var(--warning-color, #f59e0b); stroke-width: 1px; stroke-dasharray: 2 2; }
     /* úroveň detailu: pod 44 px pozice potisk a vedlejší údaje ustoupí */
     .lod-s .xt-rate .r { display: none; }
     /* Kritický okruh na střední šířce: zámek má přednost před potiskem,

@@ -7,6 +7,8 @@ import {
   positionWidth,
   moduleLod,
   fmtModuleW,
+  moduleReadout,
+  loadBand,
   RAIL_GAP,
   MIN_POSITION_WIDTH,
   slotTimeMs,
@@ -883,7 +885,45 @@ describe('fmtModuleW', () => {
   });
 
   it('shows an em dash for zero or missing power', () => {
-    expect(fmtModuleW(0, 'l')).toBe('—');
+    expect(fmtModuleW(0, 'l')).toBe('0 W');
+    expect(fmtModuleW(0, 's')).toBe('0');
+    expect(fmtModuleW(-3, 'm')).toBe('0 W');
     expect(fmtModuleW(NaN, 'm')).toBe('—');
+  });
+});
+
+describe('moduleReadout', () => {
+  const on = { switchOff: false, noData: false };
+  it('shows the value of a live circuit', () => {
+    expect(moduleReadout(412, 'm', on)).toEqual({ text: '412 W', tone: 'value' });
+  });
+  it('tells a live circuit drawing nothing apart from a switched-off one', () => {
+    expect(moduleReadout(0, 'm', on)).toEqual({ text: '0 W', tone: 'idle' });
+    expect(moduleReadout(0, 'm', { switchOff: true, noData: false })).toEqual({ text: '—', tone: 'off' });
+  });
+  it('flags a sensor that stopped reporting', () => {
+    expect(moduleReadout(0, 'm', { switchOff: false, noData: true })).toEqual({ text: '?', tone: 'nodata' });
+  });
+  it('a switched-off breaker reads "—" even when its sensor is unavailable', () => {
+    expect(moduleReadout(0, 'l', { switchOff: true, noData: true }).tone).toBe('off');
+  });
+});
+
+describe('loadBand', () => {
+  it('keeps a boiler at ~54 % of a 16 A breaker out of the warning band', () => {
+    expect(loadBand(54)).toBe('mid');
+  });
+  it('band edges are inclusive at the lower bound', () => {
+    expect(loadBand(49.9)).toBe('low');
+    expect(loadBand(50)).toBe('mid');
+    expect(loadBand(79.9)).toBe('mid');
+    expect(loadBand(80)).toBe('high');
+    expect(loadBand(94.9)).toBe('high');
+    expect(loadBand(95)).toBe('over');
+    expect(loadBand(140)).toBe('over');
+  });
+  it('treats no data as low', () => {
+    expect(loadBand(NaN)).toBe('low');
+    expect(loadBand(0)).toBe('low');
   });
 });
