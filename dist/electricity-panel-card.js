@@ -656,7 +656,7 @@ const PRE_TARIFFS = {
     holiday: { starts: ["02:20", "07:00", "15:20"], offsets: [240, 80, 160] }
   }
 };
-const EP_VERSION = "5.7.1";
+const EP_VERSION = "5.8.0";
 function slotTimeMs(base, hm) {
   const [h2, m2] = hm.split(":").map(Number);
   const d2 = new Date(base);
@@ -990,6 +990,16 @@ function loadBand(pct) {
   if (pct >= 80) return "high";
   if (pct >= 50) return "mid";
   return "low";
+}
+const COMFORT_POSITION_WIDTH = 44;
+function wrappedRailSize(inner, railSize, widest = 3, gap = RAIL_GAP, comfortable = COMFORT_POSITION_WIDTH) {
+  const size = Math.max(1, Math.floor(railSize));
+  if (!(inner > 0)) return size;
+  const fit = Math.floor((inner + gap) / (comfortable + gap));
+  if (fit >= size) return size;
+  const per = Math.max(fit, widest, 1);
+  const rows = Math.ceil(size / per);
+  return Math.max(Math.ceil(size / rows), Math.min(widest, size));
 }
 var __defProp$1 = Object.defineProperty;
 var __getOwnPropDesc$1 = Object.getOwnPropertyDescriptor;
@@ -2058,6 +2068,9 @@ const STRINGS = {
   panel_hint_compare: "Tap more modules to line their graphs up on one time axis.",
   shared_axis: "shared Y axis",
   clear_selection: "clear selection ({n})",
+  compare: "compare",
+  cancel: "Cancel",
+  panel_hint_default: "Main breaker shown. Tap a module for its own detail.",
   devices_behind: "Devices behind this breaker",
   no_devices: "No devices listed for this breaker in the config.",
   of_rating: "of {max} A",
@@ -2101,6 +2114,8 @@ let ElectricityPanelCard = class extends i {
     this._costsPeriod = "today";
     this._panelPick = [];
     this._panelSharedY = true;
+    this._panelCompare = false;
+    this._pendingSwitch = null;
     this._boardInner = 0;
     this._trackedIds = [];
     this._historyCache = /* @__PURE__ */ new Map();
@@ -2145,6 +2160,7 @@ let ElectricityPanelCard = class extends i {
     clearInterval(this._timer);
     clearInterval(this._historyTimer);
     clearTimeout(this._refetchDebounce);
+    clearTimeout(this._pendingTimer);
     (_a2 = this._ro) == null ? void 0 : _a2.disconnect();
     this._roEl = void 0;
   }
@@ -3688,11 +3704,7 @@ let ElectricityPanelCard = class extends i {
           ${power > 0 ? b`${this._fmtW(power)}` : A}
           ${current > 0 ? b` · ${current.toFixed(1)} A` : A}
         </span>
-        ${d2.switch ? b`<button
-                class="toggle sm ${isOn ? "on" : "off"}"
-                @click=${() => this._toggle(d2.switch, d2.name)}
-                aria-label="${this._t(isOn ? "turn_off" : "turn_on")} ${d2.name}">
-              </button>` : A}
+        ${d2.switch ? this._switchCtl(d2.switch, d2.name, true) : A}
       </div>
     `;
   }
@@ -3709,11 +3721,7 @@ let ElectricityPanelCard = class extends i {
           ${power > 0 ? b`${this._fmtW(power)}` : A}
           ${current > 0 ? b` · ${current.toFixed(1)} A` : A}
         </span>
-        ${ch.switch ? b`<button
-                class="toggle sm ${isOn ? "on" : "off"}"
-                @click=${() => this._toggle(ch.switch, ch.name)}
-                aria-label="${this._t(isOn ? "turn_off" : "turn_on")} ${ch.name}">
-              </button>` : A}
+        ${ch.switch ? this._switchCtl(ch.switch, ch.name, true) : A}
       </div>
     `;
   }
@@ -4045,10 +4053,67 @@ let ElectricityPanelCard = class extends i {
         ${lod !== "s" ? phases.map((ph, i2) => ph === "none" ? A : b`<span class="xt xt-ph ${ph}" style="left:${poles[i2]}px">${ph.toUpperCase()}</span>`) : A}
       </div>`;
   }
+  /** A tap on a module only ever selects — it never switches the breaker. */
   _panelTogglePick(id) {
-    const adding = !this._panelPick.includes(id);
-    this._panelPick = adding ? [...this._panelPick, id] : this._panelPick.filter((x2) => x2 !== id);
-    if (adding) void this.updateComplete.then(() => this._revealModule(id));
+    const has = this._panelPick.includes(id);
+    let next;
+    if (this._panelCompare) {
+      next = has ? this._panelPick.filter((x2) => x2 !== id) : [...this._panelPick, id];
+    } else {
+      next = has && this._panelPick.length === 1 ? [] : [id];
+    }
+    this._panelPick = next;
+    this._cancelPendingSwitch();
+    if (!has) void this.updateComplete.then(() => this._revealModule(id));
+  }
+  _setPanelCompare(on) {
+    this._panelCompare = on;
+    if (!on && this._panelPick.length > 1) this._panelPick = this._panelPick.slice(-1);
+  }
+  // ── in-card switch confirmation (view: panel) ──
+  _askSwitch(entityId) {
+    this._pendingSwitch = entityId;
+    clearTimeout(this._pendingTimer);
+    this._pendingTimer = window.setTimeout(() => {
+      this._pendingSwitch = null;
+    }, 6e3);
+    void this.updateComplete.then(() => {
+      var _a2;
+      return (_a2 = this.renderRoot.querySelector(".sw-no")) == null ? void 0 : _a2.focus();
+    });
+  }
+  _cancelPendingSwitch() {
+    clearTimeout(this._pendingTimer);
+    this._pendingSwitch = null;
+  }
+  /**
+   * On/off control. In panel view every switch — breaker, device, channel —
+   * asks first: the toggle turns into "Cancel · Turn off" in place, so a stray
+   * tap cannot cut a circuit. Classic view keeps its behaviour (one tap,
+   * `window.confirm` only with `confirm_toggle`).
+   */
+  _switchCtl(entityId, name, small = false, legacyConfirm = false) {
+    const isOn = this._isOn(entityId);
+    const label = `${this._t(isOn ? "turn_off" : "turn_on")} ${name}`;
+    const panel = this._isPanelView();
+    if (panel && this._pendingSwitch === entityId) {
+      return b`<span class="sw-ask ${small ? "sm" : ""}" role="group" aria-label=${label}
+          @keydown=${(e2) => {
+        if (e2.key === "Escape") this._cancelPendingSwitch();
+      }}>
+        <button class="sw-no" @click=${() => this._cancelPendingSwitch()}>${this._t("cancel")}</button>
+        <button class="sw-yes" @click=${() => {
+        this._cancelPendingSwitch();
+        this._toggle(entityId, name);
+      }}>
+          ${this._t(isOn ? "turn_off" : "turn_on")}
+        </button>
+      </span>`;
+    }
+    return b`<button class="toggle ${small ? "sm" : ""} ${isOn ? "on" : "off"}"
+        aria-label=${label}
+        @click=${() => panel ? this._askSwitch(entityId) : this._toggle(entityId, name, legacyConfirm)}>
+      </button>`;
   }
   /** Scroll a rail cutout so the module is fully in view. On a narrow card
    *  the detail could open for a module that sat outside the visible part of
@@ -4083,8 +4148,10 @@ let ElectricityPanelCard = class extends i {
    */
   _renderBoard(mods) {
     const cfg = this._panelCfg();
-    const rails = buildRails(mods, cfg.railSize);
-    const posW = positionWidth(this._boardInner, cfg.railSize);
+    const widest = Math.max(1, ...mods.map((m2) => m2.width));
+    const rowSize = wrappedRailSize(this._boardInner, cfg.railSize, widest);
+    const rails = buildRails(mods, cfg.railSize).flatMap((r2) => buildRails(r2, rowSize));
+    const posW = positionWidth(this._boardInner, rowSize);
     const lod = moduleLod(posW);
     return b`
       <div class="board">
@@ -4092,7 +4159,7 @@ let ElectricityPanelCard = class extends i {
         <span class="scr bl"></span><span class="scr br"></span>
         ${rails.map((r2) => {
       const used = r2.reduce((a2, m2) => a2 + m2.width, 0);
-      const gap = Math.max(0, cfg.railSize - used);
+      const gap = Math.max(0, rowSize - used);
       return b`
             <div class="cutout" @scroll=${(e2) => this._syncCutFades(e2.currentTarget)}>
               <div class="cut-row">
@@ -4167,11 +4234,16 @@ let ElectricityPanelCard = class extends i {
       </div>`;
   }
   // ── panel detail ───────────────────────────────────────────────────────────
-  _renderPanelTools() {
+  _renderPanelTools(showingDefault) {
     const n3 = this._panelPick.length;
     return b`
       <div class="g-bar">
         ${this._renderSparkWindowSwitch(true)}
+        <button class="g-chk ${this._panelCompare ? "on" : ""}" role="switch"
+          aria-checked=${this._panelCompare ? "true" : "false"}
+          @click=${() => this._setPanelCompare(!this._panelCompare)}>
+          <span class="box"></span>${this._t("compare")}
+        </button>
         ${n3 > 1 ? b`
           <button class="g-chk ${this._panelSharedY ? "on" : ""}" role="switch"
             aria-checked=${this._panelSharedY ? "true" : "false"}
@@ -4181,9 +4253,11 @@ let ElectricityPanelCard = class extends i {
             <span class="box"></span>${this._t("shared_axis")}
           </button>` : A}
         <span class="g-spacer"></span>
+        ${showingDefault ? b`<span class="g-hint">${this._t("panel_hint_default")}</span>` : A}
         ${n3 ? b`
           <button class="g-btn" @click=${() => {
       this._panelPick = [];
+      this._cancelPendingSwitch();
     }}>
             ${this._t("clear_selection", { n: String(n3) })}
           </button>` : A}
@@ -4191,17 +4265,19 @@ let ElectricityPanelCard = class extends i {
   }
   _renderPanelDetail(mods) {
     const picked = this._panelPick.map((id) => mods.find((m2) => m2.id === id)).filter(Boolean);
+    const main = mods.find((m2) => m2.id === EP_MAIN_ID);
+    const showingDefault = picked.length === 0 && !!main;
     let body;
     if (picked.length === 0) {
-      body = b`<div class="rd-hint">
-        ${this._t("panel_hint_pick")}<br>${this._t("panel_hint_compare")}
-      </div>`;
+      body = main ? this._renderPanelSingle(main) : b`<div class="rd-hint">
+            ${this._t("panel_hint_pick")}<br>${this._t("panel_hint_compare")}
+          </div>`;
     } else if (picked.length === 1) {
       body = this._renderPanelSingle(picked[0]);
     } else {
       body = this._renderPanelCompare(picked);
     }
-    return b`<div class="rail-detail">${this._renderPanelTools()}${body}</div>`;
+    return b`<div class="rail-detail">${this._renderPanelTools(showingDefault)}${body}</div>`;
   }
   _renderPanelSingle(m2) {
     const c2 = m2.circuit;
@@ -4218,9 +4294,7 @@ let ElectricityPanelCard = class extends i {
         ${m2.position ? b`<span class="rd-num">${m2.position}</span>` : A}
         <span class="rd-name">${m2.name}</span>
         ${three ? b`<span class="badge badge-phase">3φ</span>` : A}
-        ${m2.critical ? b`<ha-icon icon="mdi:lock" class="lock-icon"></ha-icon>` : m2.hasSwitch && c2 ? b`<button class="toggle ${m2.isOn ? "on" : "off"}"
-                @click=${() => this._toggle(c2.switch, c2.name, c2.confirm_toggle)}
-                aria-label="${this._t(m2.isOn ? "turn_off" : "turn_on")} ${c2.name}"></button>` : A}
+        ${m2.critical ? b`<ha-icon icon="mdi:lock" class="lock-icon"></ha-icon>` : m2.hasSwitch && c2 ? this._switchCtl(c2.switch, c2.name) : A}
       </div>
       <div class="rd-val">${this._fmtW(m2.watts)}</div>
       <div class="rd-meta">${this._metricRow([
@@ -5037,6 +5111,15 @@ ElectricityPanelCard.styles = i$3`
 
     .g-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
     .g-spacer { flex: 1; }
+    .g-hint { font-size: var(--ep-fs-micro); color: var(--ep-text-dim); }
+    /* potvrzení přepnutí přímo v kartě (view: panel) */
+    .sw-ask { display: inline-flex; gap: 6px; flex-shrink: 0; }
+    .sw-ask button { font: inherit; font-size: var(--ep-fs-meta); font-weight: 500; padding: 4px 10px;
+      border-radius: var(--ep-r-sm); cursor: pointer; position: relative; white-space: nowrap; }
+    .sw-ask button::before { content: ''; position: absolute; inset: -6px 0; }
+    .sw-no { background: transparent; border: 1px solid var(--ep-border2); color: var(--ep-text-mid); }
+    .sw-yes { background: var(--ep-accent); border: 1px solid transparent; color: var(--ep-bg); font-weight: 600; }
+    .sw-ask.sm button { font-size: var(--ep-fs-micro); padding: 3px 8px; }
     .g-btn { font: inherit; font-size: var(--ep-fs-micro); font-weight: 500; padding: 4px 10px;
       border: 1px solid var(--ep-border2); border-radius: var(--ep-r-sm); background: transparent;
       color: var(--ep-text-dim); cursor: pointer; }
@@ -5135,6 +5218,12 @@ __decorateClass([
 __decorateClass([
   r()
 ], ElectricityPanelCard.prototype, "_panelSharedY", 2);
+__decorateClass([
+  r()
+], ElectricityPanelCard.prototype, "_panelCompare", 2);
+__decorateClass([
+  r()
+], ElectricityPanelCard.prototype, "_pendingSwitch", 2);
 __decorateClass([
   r()
 ], ElectricityPanelCard.prototype, "_boardInner", 2);

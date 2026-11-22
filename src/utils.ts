@@ -808,3 +808,36 @@ export function loadBand(pct: number): LoadBand {
   if (pct >= 50) return 'mid';
   return 'low';
 }
+
+/** Narrowest comfortable position — below this the module drops to its
+ *  small level of detail (see `moduleLod`), where the rating print and the
+ *  phase labels give way and the value is shortened. */
+export const COMFORT_POSITION_WIDTH = 44;
+
+/**
+ * How many positions to draw per rail row, so a board configured as one long
+ * rail stays readable on a narrow card.
+ *
+ * Until 5.7 a rail that did not fit scrolled sideways — on a 400 px card a
+ * 17-position board showed 55 % of itself and every single-phase breaker sat
+ * outside the cutout. Now, when `railSize` positions would come out narrower
+ * than `comfortable`, the rail is drawn in several shorter rows of balanced
+ * length (17 → 6 + 6 + 5 rather than 7 + 7 + 3). Never fewer than `widest`
+ * positions, so a 3-phase breaker still fits a row whole; below that the
+ * rows keep scrolling as before.
+ */
+export function wrappedRailSize(
+  inner: number,
+  railSize: number,
+  widest = 3,
+  gap = RAIL_GAP,
+  comfortable = COMFORT_POSITION_WIDTH,
+): number {
+  const size = Math.max(1, Math.floor(railSize));
+  if (!(inner > 0)) return size;
+  const fit = Math.floor((inner + gap) / (comfortable + gap));
+  if (fit >= size) return size;
+  const per = Math.max(fit, widest, 1);
+  const rows = Math.ceil(size / per);
+  return Math.max(Math.ceil(size / rows), Math.min(widest, size));
+}

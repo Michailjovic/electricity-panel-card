@@ -9,6 +9,7 @@ import {
   fmtModuleW,
   moduleReadout,
   loadBand,
+  wrappedRailSize,
   RAIL_GAP,
   MIN_POSITION_WIDTH,
   slotTimeMs,
@@ -925,5 +926,26 @@ describe('loadBand', () => {
   it('treats no data as low', () => {
     expect(loadBand(NaN)).toBe('low');
     expect(loadBand(0)).toBe('low');
+  });
+});
+
+describe('wrappedRailSize', () => {
+  it('keeps the configured rail when it fits comfortably', () => {
+    // 17 positions × 44 px + 16 gaps × 3 px = 796 px
+    expect(wrappedRailSize(924, 17)).toBe(17);
+    expect(wrappedRailSize(796, 17)).toBe(17);
+  });
+  it('splits a long rail into balanced rows on a narrow card', () => {
+    // 348 px fits 7 comfortable positions → 3 rows → 6 + 6 + 5
+    expect(wrappedRailSize(348, 17)).toBe(6);
+    // 600 px fits 12 → 2 rows → 9 + 8
+    expect(wrappedRailSize(600, 17)).toBe(9);
+  });
+  it('never goes below the widest module', () => {
+    expect(wrappedRailSize(100, 17)).toBe(3);
+    expect(wrappedRailSize(100, 2)).toBe(2);
+  });
+  it('returns the configured size before the first measurement', () => {
+    expect(wrappedRailSize(0, 12)).toBe(12);
   });
 });

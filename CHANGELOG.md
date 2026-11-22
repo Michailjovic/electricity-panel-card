@@ -5,6 +5,41 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [5.8.0] — 2026-11-22
+*Skupina F1 z `docs/UX-REVIEW-5.7.md` — interakce v `view: panel`.
+Classic view je beze změny.*
+
+### 🎨 Changed
+
+- **Klik na modul ukáže ten jeden modul (2).** Dřív každý klik přidával do
+  výběru, takže „ukaž mi jiný jistič" končilo porovnáním dvou. Teď klik
+  výběr nahradí a klik na zobrazený modul detail zavře. Porovnání má vlastní
+  přepínač **compare** v liště nástrojů; jen s ním kliky přidávají a
+  odebírají. Vypnutí přepínače ponechá poslední vybraný modul.
+- **Klik na modul nikdy nepřepíná jistič.** Zapnout/vypnout jde jen
+  přepínačem v detailu.
+- **Každé zapnutí/vypnutí v panel view se potvrzuje přímo v kartě (22).**
+  Přepínač jističe, zařízení i kanálu se po kliknutí změní na
+  **Cancel · Turn off** (resp. Turn on); teprve druhý klik přepíná. Fokus
+  skočí na Cancel, takže druhý Enter nic nepřepne; Esc, změna výběru nebo
+  6 s nečinnosti potvrzení zruší. Nahrazuje `window.confirm`, který navíc
+  platil jen s `confirm_toggle` — bez něj se v detailu vypínalo jedním
+  klikem. Kritické okruhy přepínač nemají dál.
+- **Bez výběru detail ukazuje hlavní jistič (7)** — L1/L2/L3 na společném
+  měřítku místo dvou řádků nápovědy. Nápověda je jeden řádek v liště.
+  Bez `main_meter` / `show_main: false` zůstává dosavadní nápověda.
+- **Na úzké kartě se lišta zalomí do řad (3).** Když by pozice vyšla užší
+  než 44 px, každá nakonfigurovaná lišta se vykreslí jako několik kratších
+  řad vyrovnané délky (17 pozic na 400px kartě → 6 + 6 + 5). 3f jistič se
+  nikdy nerozdělí; začátky nakonfigurovaných lišt se zachovají. Vodorovné
+  rolování zůstává jen jako záchrana pro extrémně úzkou kartu.
+
+### ➕ Added
+
+- Čistá funkce `wrappedRailSize` (+4 testy, celkem 122).
+
+---
+
 ## [5.7.1] — 2026-11-22
 *Skupina E z `docs/UX-REVIEW-5.7.md` — opravy bez změny rozložení a
 konfigurace. Čísla v závorkách odkazují na nálezy v rozboru.*

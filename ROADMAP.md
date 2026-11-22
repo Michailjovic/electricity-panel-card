@@ -236,7 +236,7 @@ Nový **volitelný** režim; `view: classic` zůstává výchozí.
 - [ ] **Fázová bilance u hlavního jističe** — průměr/špička za 24 h / 7 dní /
       30 dní + největší odběry na fázi. Vyžaduje dlouhé okno ze statistik
       (`_rangeStatsCache` už podobná data tahá pro Náklady), proto vyčleněno
-      do samostatného kroku → v5.8.0 (posunuto za grafiku modulu 5.6, aby se
+      do samostatného kroku → v5.9.0 (posunuto za grafiku modulu 5.6, aby se
       kreslila rovnou do nového vzhledu). **Záměrně bez automatického návrhu
       přerovnání** — topná sezóna a léto mají jiný profil, jednorázová rada
       by lhala; karta ukáže čísla za zvolené okno a rozhodnutí nechá na
@@ -269,7 +269,7 @@ Modul jističe jako skutečně nakreslený objekt místo HTML boxů — jen pro
         bez charakteristiky B/C
       - měřič: jen proud, bez zlomku a bez hladiny zatížení
       - bez `main_meter` ukáže elektroměr součet okruhů; bez `hdo` přijímač chybí
-      - fázová bilance se posouvá na v5.8.0
+      - fázová bilance se posouvá na v5.8.0 (po rozboru UX → v5.9.0)
 - [x] Implementace (v5.7.0): SVG tělo v px souřadnicích přes ResizeObserver,
       barvy CSS třídami, text HTML překryvem, bez SVG filtrů; úrovně detailu
       34–43 / 44–59 / 60+ px; záslepky na volných pozicích; čisté funkce
@@ -277,7 +277,7 @@ Modul jističe jako skutečně nakreslený objekt místo HTML boxů — jen pro
 
 ---
 
-### 5.7 Rozbor UX po v5.7.0 → v5.7.1 …
+### 5.7 Rozbor UX po v5.7.0 → v5.7.1, v5.8.0 …
 
 Podklad: `docs/UX-REVIEW-5.7.md` (24 nálezů, render s reálnou konfigurací).
 
@@ -285,15 +285,15 @@ Podklad: `docs/UX-REVIEW-5.7.md` (24 nálezů, render s reálnou konfigurací).
       v grafech, `0 W` / `—` / `?` na modulu, pásma zatížení 50/80/95 %,
       kontrast `--ep-text-dim`/`--ep-mprint`, neutrální LED, `<wbr>` v názvech,
       zásahové plochy, vyblednutí okraje lišty + odrolování k výběru
-- [ ] **F1 — interakce:** klik nahradí výběr, porovnání přes přepínač
-      (čeká na rozhodnutí); zalamování lišty na úzké kartě (čeká);
-      potvrzení vypnutí v kartě místo `window.confirm`
+- [x] **F1 — interakce** (v5.8.0): klik nahradí výběr, porovnání přes
+      přepínač „compare", klik na modul nikdy nepřepíná; každé on/off
+      v panel view potvrzované v kartě; výchozí detail = hlavní jistič;
+      zalamování lišty na úzké kartě
 - [ ] **F2 — horní část (mockup):** časová osa do HDO přijímače, registr
       T1/T2 do LCD, jednotné odpočty, fázové pruhy hlavního jističe v LCD
 - [ ] **G — grafy:** osa Y od nuly, časová osa + sdílený kurzor, tarifní
       pásma za grafem
-- [ ] **H — detail a modul:** výchozí detail = fáze hlavního jističe
-      (příprava na fázovou bilanci), 3f zařízení po fázích, škála písma
+- [ ] **H — detail a modul:** 3f zařízení po fázích, škála písma
       modulu, metriky jako mřížka, rozvrh jen NT okna, akcent jen interakce
 
 ---
@@ -323,7 +323,9 @@ Podklad: `docs/UX-REVIEW-5.7.md` (24 nálezů, render s reálnou konfigurací).
 | 5.4 — view: panel | 5.5.0 | minor |
 | 5.4 — doladění panelu | 5.5.1, 5.6.0 | patch + minor |
 | 5.6 — grafika modulu (varianta B) | 5.7.0 | minor |
-| 5.4 — fázová bilance | 5.8.0 | minor |
+| 5.7 — UX opravy (E) | 5.7.1 | patch |
+| 5.7 — interakce (F1) | 5.8.0 | minor |
+| 5.4 — fázová bilance | 5.9.0 | minor |
 | 4 — publikace | 6.0.0 | major (public release) |
 
 > Pozn.: řádky Fází 1–3 jsou původní plán, ne to, co se skutečně vydalo —
